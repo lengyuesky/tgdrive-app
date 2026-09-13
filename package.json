@@ -1,0 +1,33 @@
+{
+  "name": "tgdrive-app",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "官方插件仓库与开发套件，包含短视频、图书、漫画与影视插件及独立打包分发工具。",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "build": "node ./build.mjs",
+    "package": "node ./package.mjs",
+    "catalog": "node ./catalog.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@zip.js/zip.js": "2.14.0",
+    "dompurify": "3.4.15",
+    "mediabunny": "1.56.1",
+    "pdfjs-dist": "6.3.289"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.4.1",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.6"
+  }
+}

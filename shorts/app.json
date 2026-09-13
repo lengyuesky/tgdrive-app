@@ -1,0 +1,27 @@
+{
+  "id": "shorts",
+  "name": "短视频",
+  "version": "1.0.3",
+  "api_version": 2,
+  "min_host_version": "0.1.0",
+  "description": "随机播放网盘文件夹里的视频，支持滑动切换、收藏和下载。",
+  "author": "tgdrive",
+  "entry": "index.html",
+  "permissions": ["files.read", "media.read", "favorites.write"],
+  "settings": [
+    {
+      "key": "source_dir",
+      "label": "取材文件夹",
+      "description": "播放此文件夹及子目录中的视频；根目录表示整库。",
+      "type": "directory",
+      "default": "/"
+    },
+    {
+      "key": "muted",
+      "label": "静音播放",
+      "description": "静音时更容易自动播放；播放页面切换声音后会记住选择。",
+      "type": "boolean",
+      "default": true
+    }
+  ]
+}

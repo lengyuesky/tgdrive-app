@@ -1,0 +1,10 @@
+node_modules/
+.build/
+dist/
+catalog/
+*.tgapp
+.DS_Store
+*.log
+.playwright/
+test-results/
+playwright-report/

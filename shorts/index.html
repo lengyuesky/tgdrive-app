@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>短视频</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script defer src="./tgdrive-sdk.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body tabindex="-1">
+  <main class="shorts">
+    <header class="shorts-top"><button id="exit" aria-label="退出短视频">返回</button><span class="mode-label">随机播放</span><span id="source-label" class="source-label">正在读取取材目录</span></header>
+    <div id="player" class="player" hidden>
+      <video id="video" autoplay playsinline loop muted crossorigin="anonymous" aria-label="当前视频"></video>
+      <div id="buffering" class="buffering" role="status"><span class="spinner"></span><span>正在缓冲</span></div>
+      <button id="play-prompt" class="play-prompt" hidden>轻触播放</button>
+      <div id="play-error" class="play-error" hidden>
+        <p>这个视频暂时无法播放，可以下载后查看。</p><button id="skip-error">看下一个</button>
+      </div>
+    </div>
+    <div id="loading-list" class="empty-state" role="status"><span class="spinner"></span><p>正在读取视频列表…</p></div>
+    <div id="empty" class="empty-state" hidden>
+      <span class="empty-symbol" aria-hidden="true">▷</span><h1 id="empty-title">还没有可播放的视频</h1>
+      <p id="empty-description"></p><button id="open-settings" class="primary">选择取材文件夹</button>
+    </div>
+    <div id="list-error" class="empty-state" hidden><h1>视频列表读取失败</h1><p id="list-error-message"></p><button id="retry-list" class="primary">重新加载</button></div>
+    <aside id="actions" class="actions" hidden>
+      <button id="favorite" class="action" title="收藏"><span class="symbol" aria-hidden="true">☆</span><span class="label">收藏</span></button>
+      <button id="mute" class="action" title="切换声音（M）"><span class="symbol" aria-hidden="true">静</span><span class="label">静音中</span></button>
+      <button id="download" class="action" title="下载视频"><span class="symbol" aria-hidden="true">↓</span><span class="label">下载</span></button>
+      <button id="shuffle" class="action" title="重新洗牌"><span class="symbol" aria-hidden="true">⟳</span><span class="label">洗牌</span></button>
+      <div class="switchers"><button id="previous" aria-label="上一个视频">↑</button><button id="next" aria-label="下一个视频">↓</button></div>
+    </aside>
+    <footer id="video-info" class="video-info" hidden><strong id="video-name"></strong><p id="video-meta"></p><span class="keyboard-hint">↑↓ 或滑动切换 · 空格暂停 · M 静音 · Esc 退出</span></footer>
+    <div id="message" class="message" role="status" hidden></div>
+  </main>
+</body>
+</html>

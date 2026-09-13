@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "mediabunny": ["./node_modules/mediabunny/dist/mediabunny.d.ts"],
+      "pdfjs-dist": ["./node_modules/pdfjs-dist/types/src/pdf.d.ts"],
+      "pdfjs-dist/*": ["./node_modules/pdfjs-dist/*"],
+      "dompurify": ["./node_modules/dompurify"],
+      "@zip.js/zip.js/*": ["./node_modules/@zip.js/zip.js/index.d.ts"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "node"]
+  },
+  "include": [
+    "books/**/*.ts",
+    "cinema/**/*.ts",
+    "comics/**/*.ts",
+    "reader/**/*.ts",
+    "sdk/**/*.ts",
+    "tests/**/*.ts"
+  ]
+}

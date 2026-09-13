@@ -1,0 +1,173 @@
+/* 独立插件样式，不依赖主站组件；中文使用设备本地字体。 */
+:root { font-family: system-ui, -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; color-scheme: light; --bg: #f5f6f2; --surface: #fff; --text: #23312d; --muted: #687973; --line: #dce5df; --accent: #256f58; --soft: #e7f0eb; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+/* 高度只取宿主已扣除安全区的 iframe，不在子页面重新计算设备视口。 */
+html, body { height: 100%; overflow: hidden; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+body[data-theme="dark"] { color-scheme: dark; --bg:#141d1c; --surface:#1e2a27; --text:#dce8e1; --muted:#9aaea4; --line:#34463e; --accent:#85cdb0; --soft:#273f35; }
+body[data-theme="sepia"] { --bg:#f4ebd6; --surface:#faf1dc; --text:#554731; --muted:#8b7550; --line:#dfcfad; --accent:#8a6326; --soft:#eadcbd; }
+#app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+#app[data-kind="comics"] { --accent:#6562ba; --soft:#ecebf8; }
+body[data-theme="dark"] #app[data-kind="comics"] { --accent:#b4acf0; --soft:#302d47; }
+button, input, select { font: inherit; color: inherit; }
+button { border:1px solid var(--line); border-radius:9px; background:var(--surface); padding:8px 12px; cursor:pointer; line-height:1.35; }
+button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+button:disabled { opacity:.4; cursor:default; }
+button:focus-visible, input:focus-visible, select:focus-visible, [role="link"]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+input, select { background:var(--surface); border:1px solid var(--line); border-radius:7px; padding:7px 8px; min-width:0; }
+.app-header { display:flex; align-items:center; justify-content:space-between; padding:18px 28px; gap:16px; border-bottom:1px solid var(--line); flex-shrink:0; }
+.brand { display:flex; align-items:center; gap:12px; min-width:0; }
+.brand-mark { width:34px; height:42px; background:var(--accent); border-radius:4px 11px 11px 4px; border-left:5px solid color-mix(in srgb,var(--accent),white 30%); box-shadow:3px 3px 0 var(--line); }
+h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+.header-actions { display:flex; gap:8px; }
+#notice { padding:10px 18px; margin:0; color:var(--text); background:var(--soft); border-bottom:1px solid var(--line); font-size:13px; overflow-wrap:anywhere; flex-shrink:0; }
+.library { overflow:auto; padding:24px 28px; flex:1; min-height:0; }
+.library-tools { display:flex; align-items:center; gap:12px; max-width:1200px; margin:0 auto; }
+.tabs { display:flex; gap:5px; flex:1; }
+.tabs button[aria-pressed="true"] { background:var(--accent); color:var(--bg); border-color:var(--accent); }
+#search { width:260px; } .source-line { max-width:1200px; margin:18px auto; display:flex; gap:10px; align-items:center; color:var(--muted); font-size:13px; }
+#source { flex:1; overflow-wrap:anywhere; }
+#library-status { text-align:center; color:var(--muted); padding:16px 0; font-size:14px; }
+#library-status:empty { display:none; }
+.library-grid { max-width:1200px; margin:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(205px,1fr)); gap:16px; }
+.library-card { display:flex; flex-direction:column; text-align:left; min-height:165px; padding:20px; gap:10px; overflow:hidden; transition:border-color .15s; }
+.file-mark { background:var(--soft); color:var(--accent); font-size:12px; font-weight:700; padding:7px 9px; border-radius:6px; width:fit-content; }
+.library-card strong { line-height:1.6; overflow-wrap:anywhere; font-size:15px; }
+.file-meta { color:var(--muted); font-size:11px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+
+/* 漫画海报卡片专用网格与样式 */
+#app[data-kind="comics"] .library-grid { grid-template-columns:repeat(auto-fill,minmax(165px,1fr)); gap:22px 16px; }
+#app[data-kind="comics"] .library-card { min-height:0; padding:0; background:none; border:0; border-radius:12px; display:flex; flex-direction:column; text-align:left; gap:10px; cursor:pointer; outline-offset:4px; }
+#app[data-kind="comics"] .card-cover { position:relative; width:100%; border-radius:12px; overflow:hidden; box-shadow:0 4px 14px #00000014; transition:transform .22s cubic-bezier(.34,1.56,.64,1),box-shadow .22s ease; }
+#app[data-kind="comics"] .library-card:hover .card-cover,
+#app[data-kind="comics"] .library-card:focus-visible .card-cover { transform:translateY(-4px); box-shadow:0 8px 24px #00000024; }
+#app[data-kind="comics"] .cover-art { position:relative; width:100%; aspect-ratio:1/1.42; background-color:var(--soft); background-image:linear-gradient(145deg,var(--soft),color-mix(in srgb,var(--accent) 15%,var(--surface))); background-size:cover; background-position:center; background-repeat:no-repeat; border:1px solid var(--line); border-radius:12px; overflow:hidden; display:flex; align-items:center; justify-content:center; transition:background-image .25s ease-out; }
+#app[data-kind="comics"] .cover-initial { font-size:clamp(32px,5vw,48px); font-weight:700; color:var(--accent); opacity:.35; user-select:none; }
+#app[data-kind="comics"] .cover-art.has-cover .cover-initial { display:none; }
+#app[data-kind="comics"] .card-cover .file-mark { position:absolute; top:8px; left:8px; z-index:2; font-size:10px; padding:3px 6px; border-radius:5px; background:#0000008c; color:#fff; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); font-weight:600; box-shadow:0 2px 6px #0003; border:0; }
+#app[data-kind="comics"] .card-info { display:flex; flex-direction:column; gap:4px; padding:0 2px; }
+#app[data-kind="comics"] .card-title { font-size:13.5px; font-weight:600; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; color:var(--text); }
+#app[data-kind="comics"] .library-card:hover .card-title { color:var(--accent); }
+#app[data-kind="comics"] .file-meta { font-size:11px; color:var(--muted); line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; -webkit-line-clamp:unset; }
+.pagination { display:flex; justify-content:center; align-items:center; gap:18px; padding:24px 0 6px; color:var(--muted); font-size:13px; }
+.reader { flex:1; min-height:0; display:flex; flex-direction:column; }
+.reader-toolbar { display:flex; align-items:center; gap:8px; padding:10px 18px; border-bottom:1px solid var(--line); flex-shrink:0; }
+#book-title { flex:1; min-width:0; margin:0; font-size:14px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.preferences { padding:12px 18px; display:flex; gap:16px; flex-wrap:wrap; border-bottom:1px solid var(--line); background:var(--surface); max-height:32vh; overflow:auto; }
+.preferences label { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); }
+.preferences input[type="range"] { width:110px; accent-color:var(--accent); padding:0; }
+.reading-viewport { min-height:0; flex:1; overflow:auto; position:relative; overscroll-behavior:contain; padding:18px 12px; overflow-anchor:none; }
+.reading-viewport:focus { outline:none; }
+.flow-content { margin:0 auto; padding:12px 20px 70px; font-family:"Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", SimSun, serif; overflow-wrap:anywhere; }
+.flow-content p { margin:0 0 1em; } .flow-content h1,.flow-content h2,.flow-content h3 { line-height:1.5; margin:1em 0; }
+.flow-content .plain-text { white-space:pre-wrap; }
+.flow-content pre { white-space:pre-wrap; }
+.flow-content img { display:block; max-width:100%; height:auto; margin:12px auto; }
+.flow-content img[data-resource]:not([src]) { width:100%; min-height:180px; background:var(--soft); }
+.flow-content table { max-width:100%; border-collapse:collapse; font-size:.9em; }
+.flow-content td,.flow-content th { border:1px solid var(--line); padding:6px; }
+.flow-content a[data-link] { cursor:pointer; color:var(--accent); text-decoration:underline; }
+.reading-viewport[data-format="pdf"] { background:color-mix(in srgb,var(--bg),black 12%); text-align:center; }
+.reading-viewport canvas { display:block; margin:0 auto 20px; background:white; box-shadow:0 2px 12px #0002; }
+.comic-track { margin:0 auto; max-width:none; overflow-anchor:none; }
+.comic-page { margin:0; padding:0 0 12px; text-align:center; overflow-anchor:none; }
+.comic-page img { display:block; width:auto; max-width:100%; max-height:196605px; height:auto; margin:auto; object-fit:contain; }
+.comic-page img:not([src]) { width:100%; background:var(--soft); min-height:160px; }
+.comic-page figcaption { padding:8px; color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.reader-footer { display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:8px; padding:10px 14px; border-top:1px solid var(--line); background:var(--surface); font-size:12px; flex-shrink:0; }
+.reader-footer label { display:flex; align-items:center; gap:4px; }
+.reader-footer select { max-width:200px; }
+#jump { width:70px; } #sync { color:var(--muted); }
+#reading-status { text-align:center; padding:12px; font-size:14px; color:var(--muted); overflow-wrap:anywhere; } #reading-status:empty { display:none; }
+.bookmarks-panel { border-bottom:1px solid var(--line); padding:12px 18px; background:var(--surface); max-height:35vh; overflow:auto; }
+.bookmark-tools, .bookmark-row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; align-items:center; }
+.bookmark-row input, #bookmark-name { flex:1; min-width:100px; }
+.conflict { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; padding:10px 16px; background:var(--soft); font-size:13px; }
+@media (max-width:650px) {
+  .app-header { padding:12px 14px; gap:8px; } .brand-mark { width:23px; height:31px; } .brand { gap:9px; } h1 { font-size:19px; } .brand p { display:none; }
+  .header-actions { gap:5px; } button { padding:7px 9px; font-size:12px; }
+  .library { padding:16px 12px; } .library-tools { flex-wrap:wrap; gap:8px; } .tabs { width:100%; flex:auto; } #search { flex:1; width:120px; }
+  .library-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; } .library-card { min-height:150px; padding:13px; } .library-card strong { font-size:13px; }
+  #app[data-kind="comics"] .library-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 12px; }
+  #app[data-kind="comics"] .library-card { min-height:0; padding:0; }
+  #app[data-kind="comics"] .card-title { font-size:12.5px; }
+  .reader-toolbar { padding:8px; flex-wrap:wrap; gap:5px; } #book-title { order:-1; flex-basis:100%; padding:0 3px 4px; }
+  .reading-viewport { padding:10px 6px; } .flow-content { padding:5px 12px 50px; }
+  .reader-footer { gap:6px; padding:8px 5px; } .reader-footer select { max-width:120px; } #sync { min-width:72px; font-size:11px; } #jump { width:52px; }
+  .preferences { padding:10px; gap:10px; }
+}
+
+@media (max-width:767px), (pointer:coarse) {
+  button { min-width:44px; min-height:44px; }
+  input, select { min-height:44px; font-size:16px; }
+  .library-tools, .header-actions, .reader-toolbar, .reader-footer { flex-wrap:wrap; }
+  .library-tools .tabs { overflow:auto; min-width:0; }
+  .library-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .library-card { padding:12px; }
+  #app[data-kind="comics"] .library-card { padding:0; }
+  .preferences, .bookmarks-panel { max-height:60dvh; }
+  .reader-footer select { min-width:0; }
+}
+/* 正文分页只改变当前内容单元，操作浮层不参与正文尺寸计算。 */
+.mobile-only { display:none; }
+#reader-actions, #reader-desktop-actions { display:flex; align-items:center; gap:8px; }
+.reader-more, .reader-navigation, .reader-footer-line { display:contents; }
+#reader-footer-actions:empty { display:none; }
+.reading-viewport[data-format="txt"][data-mode="page"], .reading-viewport[data-format="epub"][data-mode="page"] { overflow:hidden; }
+.reading-viewport[data-swipe="true"] { touch-action:pan-y pinch-zoom; }
+.flow-pages { position:relative; overflow:hidden; margin:0 auto; direction:ltr; }
+.flow-content.is-paginated { width:100%; height:100%; margin:0; padding:0; column-fill:auto; column-gap:24px; overflow:visible; }
+.flow-content.is-paginated img { max-height:var(--page-height); max-width:100%; width:auto !important; height:auto; object-fit:contain; break-inside:avoid; margin:0 auto; }
+.flow-content.is-paginated img[data-resource]:not([src]) { min-height:min(180px,var(--page-height)); }
+/* 未知尺寸图片先保留一页，避免快速翻页越过还没解码的末尾图片。 */
+.flow-content.is-paginated img[data-resource]:not([width]) { width:100% !important; height:var(--page-height); min-height:var(--page-height); }
+.flow-content table { width:100%; table-layout:fixed; }
+.flow-block-scroll { max-width:100%; max-height:var(--page-height); overflow:auto; break-inside:avoid; touch-action:auto; }
+.focus-menu { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); z-index:20; }
+.focus-menu:focus { top:8px; left:8px; width:auto; height:auto; padding:12px; clip-path:none; }
+.reader-backdrop { position:absolute; inset:0; border:0; border-radius:0; background:#0005; z-index:4; }
+
+#app.immersive { height:100%; overflow:hidden; }
+.immersive > .app-header { display:none; }
+.immersive .reader { position:relative; width:100%; height:100%; overflow:hidden; }
+.immersive .mobile-only { display:flex; }
+.immersive button, .immersive input, .immersive select { min-height:44px; font-size:16px; }
+.immersive button { min-width:44px; }
+.immersive .reading-viewport { padding:12px; }
+.immersive .flow-content:not(.is-paginated) { padding:0; max-width:none !important; }
+/* 更多面板位于顶部工具栏的层叠上下文内，父层级也必须高于底部分页栏。 */
+.immersive .reader-toolbar { position:absolute; top:0; left:0; right:0; z-index:6; padding:8px 12px; gap:8px; flex-wrap:nowrap; background:var(--surface); box-shadow:0 3px 18px #0002; }
+.immersive #book-title { order:0; flex:1; padding:0; font-size:14px; }
+.immersive #reader-desktop-actions { display:none; }
+.immersive .reader-footer { position:absolute; bottom:0; left:0; right:0; z-index:5; display:flex; flex-direction:column; padding:8px 12px; gap:8px; box-shadow:0 -3px 18px #0002; }
+.immersive .reader-footer-line { display:grid; width:100%; grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:"previous position next" "sync sync retry"; align-items:center; gap:8px; }
+.immersive #previous { grid-area:previous; }
+.immersive #next { grid-area:next; }
+.immersive #position { grid-area:position; min-width:0; font-size:12px; text-align:center; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.immersive #sync { grid-area:sync; }
+.immersive #retry-save, .immersive #retry-reader { grid-area:retry; }
+.immersive #reader-footer-actions { width:100%; }
+.immersive #reader-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.immersive[data-controls="hidden"] .reader-toolbar, .immersive[data-controls="hidden"] .reader-footer { display:none; }
+.immersive .reader-panel { position:fixed; top:auto; bottom:0; left:0; right:0; z-index:8; width:100%; max-height:min(75dvh,var(--panel-height,75vh)); overflow:auto; overscroll-behavior:contain; background:var(--surface); padding:16px; border:1px solid var(--line); border-radius:16px 16px 0 0; box-shadow:0 -5px 30px #0003; }
+.immersive .reader-panel .panel-heading { position:sticky; top:-16px; width:100%; align-items:center; justify-content:space-between; background:var(--surface); padding:0 0 8px; margin:0 0 8px; gap:12px; z-index:1; }
+.immersive .preferences, .immersive .reader-navigation, .immersive .reader-more { display:flex; flex-direction:column; align-items:stretch; gap:12px; }
+.immersive .reader-panel label { display:flex; align-items:center; justify-content:space-between; width:100%; gap:12px; font-size:14px; }
+.immersive .reader-panel input[type="range"] { width:60%; }
+.immersive .reader-panel select { max-width:75%; min-width:100px; }
+.immersive .reader-panel .width-option { display:none; }
+.immersive .reader-navigation #toc { width:100%; max-width:100%; }
+.immersive .reader-navigation > label:first-of-type { flex-direction:column; align-items:stretch; }
+.immersive #notice { position:absolute; top:64px; left:12px; right:12px; z-index:10; border:1px solid var(--line); border-radius:10px; box-shadow:0 2px 12px #0002; }
+.immersive #reading-status:not(:empty) { position:absolute; top:50%; left:12px; right:12px; z-index:3; background:var(--surface); border-radius:10px; }
+.immersive #conflict { position:absolute; top:64px; left:12px; right:12px; z-index:9; border:1px solid var(--line); border-radius:10px; }
+
+#app[data-kind="comics"].immersive .reading-viewport { padding:0; }
+#app[data-kind="comics"].immersive .comic-page { padding:0; }
+#app[data-kind="comics"].immersive .comic-page figcaption { display:none; }
+#app[data-kind="comics"].immersive .reading-viewport[data-mode="page"] { overflow:hidden; display:flex; align-items:center; justify-content:center; }
+#app[data-kind="comics"].immersive .reading-viewport[data-mode="page"] .comic-track { width:100% !important; height:100%; display:flex; align-items:center; justify-content:center; }
+#app[data-kind="comics"].immersive .reading-viewport[data-mode="page"] .comic-track > div { display:none; }
+#app[data-kind="comics"].immersive .reading-viewport[data-mode="page"] .comic-page { width:100%; height:100%; display:flex; align-items:center; justify-content:center; padding:0; margin:0; }
+#app[data-kind="comics"].immersive .reading-viewport[data-mode="page"] .comic-page img { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; margin:auto; }

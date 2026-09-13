@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "host_repository": "lengyuesky/tgdrive",
+  "host_ref": "a029d457e4b1ca8a1a27f737ee13fd547aa3304d",
+  "host_version": "0.1.0",
+  "min_host_version": "0.1.0",
+  "api_version": 2,
+  "supported_api_versions": [1, 2],
+  "local_integration": {
+    "required": true,
+    "description": "宿主仓库为私有仓库（PRIVATE），公开 CI 仅执行独立检查，不得检出宿主或配置访问凭证。发布前必须在本机通过 TGDRIVE_HOST_DIR 指向宿主工作区运行完整 E2E 验证（npm run test:e2e）。外部贡献者无需私有宿主凭据，可独立运行本地全部测试与构建检查。",
+    "fixture_command": "cargo test --locked apps::tests::browser_fixture -- --ignored --exact --nocapture",
+    "fixture_url": "http://127.0.0.1:4187/__apps_fixture"
+  }
+}

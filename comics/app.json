@@ -1,0 +1,12 @@
+{
+  "id": "comics",
+  "name": "漫画",
+  "version": "1.0.8",
+  "api_version": 2,
+  "min_host_version": "0.1.0",
+  "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
+  "author": "tgdrive",
+  "entry": "index.html",
+  "permissions": ["files.read", "media.read"],
+  "settings": [{ "key": "source_dir", "label": "漫画目录", "description": "直属图片组成一章，子目录保留为章节；也可打开 CBZ/ZIP 图片包。", "type": "directory", "default": "/" }]
+}

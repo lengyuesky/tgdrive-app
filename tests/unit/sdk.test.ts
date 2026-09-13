@@ -1,0 +1,136 @@
+import { runInNewContext } from 'node:vm'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Drive } from '../../sdk/types'
+import source from '../../sdk/tgdrive-sdk.js?raw'
+type Listener = (event: any) => void
+function events() {
+  const listeners = new Map<string, Set<Listener>>()
+  return {
+    addEventListener: (name: string, listener: Listener) => {
+      if (!listeners.has(name)) listeners.set(name, new Set())
+      listeners.get(name)!.add(listener)
+    },
+    removeEventListener: (name: string, listener: Listener) => { listeners.get(name)?.delete(listener) },
+    emit: (name: string, value?: unknown) => { for (const listener of [...listeners.get(name) ?? []]) listener(value) },
+    listeners,
+  }
+}
+function boot(visibility: DocumentVisibilityState = 'visible') {
+  const parent = { postMessage: vi.fn() }
+  const window = { ...events(), parent, tgdrive: undefined as Drive | undefined }
+  const document = { ...events(), visibilityState: visibility }
+  const frames = new Map<number, FrameRequestCallback>()
+  let sequence = 0
+  runInNewContext(source, {
+    window, document, setInterval, clearInterval, setTimeout, clearTimeout, DOMException,
+    requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++sequence, callback); return sequence },
+    cancelAnimationFrame: (id: number) => frames.delete(id),
+  })
+  const port = { start: vi.fn(), close: vi.fn(), postMessage: vi.fn(), onmessage: undefined as ((event: { data: unknown }) => void) | undefined }
+  const context = { id: 'books', name: '图书', version: '1.0.0', api_version: 2, dark: false }
+  return {
+    drive: window.tgdrive!, window, document, frames, port, context,
+    connect: () => window.emit('message', { source: parent, data: { channel: 'tgdrive-app-v1', type: 'connect', context }, ports: [port] }),
+    draw: () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach((callback) => callback(0)) },
+  }
+}
+beforeEach(() => vi.useFakeTimers())
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
+
+describe('页面 SDK 的可交互就绪时序', () => {
+  it('媒体地址兼容路径与稳定引用，不把引用对象塞入路径', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const legacy = app.drive.media.url('/电影.mp4', 'thumbnail')
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 1, method: 'media.url', params: { path: '/电影.mp4', kind: 'thumbnail' } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: { url: '/api/apps/media/old' } } })
+    await expect(legacy).resolves.toBe('/api/apps/media/old')
+    const stable = app.drive.media.url({ id: 42, content_version: 'a'.repeat(64) })
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 2, method: 'media.url', params: { id: 42, content_version: 'a'.repeat(64), kind: 'preview' } })
+    app.port.onmessage!({ data: { type: 'response', id: 2, result: { url: '/api/apps/media/new' } } })
+    await expect(stable).resolves.toBe('/api/apps/media/new')
+    app.window.emit('pagehide')
+  })
+  it('就绪上下文可声明沉浸能力，请求仍只通过消息通道发送布尔参数', async () => {
+    const app = boot('hidden')
+    Object.assign(app.context, { capabilities: ['ui.setImmersive'] })
+    app.connect()
+    expect((await app.drive.ready).capabilities).toEqual(['ui.setImmersive'])
+    const request = app.drive.ui.setImmersive(true)
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenCalledWith({ type: 'request', id: 1, method: 'ui.setImmersive', params: { active: true } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: null } })
+    await request
+    app.window.emit('pagehide')
+  })
+
+  it('沉浸可选背景通过同一消息通道传递，不转发额外选项', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const request = app.drive.ui.setImmersive(true, { background: '#f4ebd6' })
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenCalledWith({ type: 'request', id: 1, method: 'ui.setImmersive', params: { active: true, background: '#f4ebd6' } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: null } })
+    await request; app.window.emit('pagehide')
+  })
+
+  it('收到通道后先绘制沙箱自身，再允许应用展示可交互内容', async () => {
+    const app = boot(), ready = vi.fn()
+    const waiting = app.drive.ready.then(ready)
+    app.connect()
+    expect(app.port.start).toHaveBeenCalledOnce()
+    await Promise.resolve()
+    expect(ready).not.toHaveBeenCalled()
+    app.draw()
+    await Promise.resolve()
+    expect(ready).not.toHaveBeenCalled()
+    app.draw()
+    await waiting
+    expect(ready).toHaveBeenCalledWith(app.context)
+    expect(Object.isFrozen(app.context)).toBe(true)
+    expect(app.frames.size).toBe(0)
+    app.window.emit('pagehide')
+  })
+
+  it('后台页面不依赖动画帧即可完成握手', async () => {
+    const app = boot('hidden')
+    app.connect()
+    await expect(app.drive.ready).resolves.toEqual(app.context)
+    expect(app.frames.size).toBe(0)
+    app.window.emit('pagehide')
+  })
+
+  it('绘制等待中转入后台会释放回调而不阻塞 SDK', async () => {
+    const app = boot()
+    app.connect(); app.draw()
+    app.document.visibilityState = 'hidden'
+    app.document.emit('visibilitychange')
+    await expect(app.drive.ready).resolves.toEqual(app.context)
+    expect(app.frames.size).toBe(0)
+    expect(app.document.listeners.get('visibilitychange')?.size).toBe(0)
+    app.window.emit('pagehide')
+  })
+
+  it('首次绘制前关闭页面会拒绝就绪并关闭通道', async () => {
+    const app = boot()
+    app.connect(); app.draw()
+    app.window.emit('pagehide')
+    await expect(app.drive.ready).rejects.toThrow('应用已经关闭')
+    expect(app.frames.size).toBe(0)
+    expect(app.port.close).toHaveBeenCalledOnce()
+  })
+
+  it('新的就绪等待不改变请求取消协议', async () => {
+    const app = boot()
+    app.connect(); app.draw(); app.draw()
+    await app.drive.ready
+    const controller = new AbortController()
+    const request = app.drive.files.stat({ id: 2 }, { signal: controller.signal })
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenCalledWith({ type: 'request', id: 1, method: 'files.stat', params: { id: 2 } })
+    controller.abort()
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'cancel', id: 1 })
+    app.window.emit('pagehide')
+  })
+})

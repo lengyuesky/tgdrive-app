@@ -1,0 +1,32 @@
+.libraries-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: 18px; }
+.library-card { min-width: 0; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(130deg, #242032, #181722); padding: 10px; }
+.library-enter { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; padding: 18px 12px; gap: 12px; }
+.library-enter svg { width: 38px; height: 38px; color: #b799e8; }
+.library-enter h3 { font-size: 19px; line-height: 1.4; overflow-wrap: anywhere; }
+.library-enter p { width: 100%; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; line-height: 1.7; }
+.library-enter small { font-size: 11px; color: #c1a5e0; }
+.library-card-actions { display: flex; gap: 8px; border-top: 1px solid var(--line); padding-top: 9px; }
+.library-card-actions button { flex: 1; font-size: 12px; }
+.library-card-actions .library-delete { color: #d8a4b2; }
+.library-navigation { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+#library-edit-dialog { width: min(520px, 94%); }
+.library-hint { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 16px 0; }
+#library-fields { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+#library-fields label { font-size: 13px; margin-top: 10px; }
+#library-name { width: 100%; min-height: 44px; background: #121019; color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-size: 16px; }
+#library-path { border: 1px solid var(--line); border-radius: 9px; padding: 12px; font-size: 13px; color: #c1add6; overflow-wrap: anywhere; line-height: 1.7; }
+#library-pick { align-self: flex-start; }
+#library-edit-status { color: #dab0dd; font-size: 12px; line-height: 1.8; margin-top: 16px; overflow-wrap: anywhere; }
+#library-edit-status:empty { display: none; }
+#library-edit-dialog .detail-actions { justify-content: flex-end; }
+#new-library { flex-shrink: 0; }
+.library-section > .section-heading { flex-wrap: wrap; }
+.breadcrumbs > span { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 767px) {
+  .libraries-grid { gap: 13px; }
+  .library-enter { padding: 13px 10px; }
+  .library-navigation button { min-height: 44px; }
+  #library-fields button, #library-edit-dialog .detail-actions button, .library-card-actions button { min-height: 44px; }
+  #library-edit-dialog h2 { font-size: 21px; }
+  #new-library { min-height: 44px; }
+}

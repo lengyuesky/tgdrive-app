@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>影视 · 你的私人影院</title>
+  <script src="./tgdrive-sdk.js" defer></script>
+  <script type="module" src="./main.ts"></script>
+</head>
+<body>
+<div id="app" hidden>
+  <aside class="sidebar">
+    <a class="brand" href="#home" aria-label="影视首页"><span class="brand-mark">▶</span><span>影视<small>你的私人影院</small></span></a>
+    <p class="nav-caption">我的影院</p>
+    <nav aria-label="影视导航">
+      <button data-nav="home" class="active"><span data-icon="home"></span><span>首页</span></button>
+      <button data-nav="library"><span data-icon="grid"></span><span>媒体库</span></button>
+      <button data-nav="favorites"><span data-icon="heart"></span><span>收藏</span></button>
+      <button data-nav="history"><span data-icon="clock"></span><span>历史</span></button>
+    </nav>
+    <div class="sidebar-bottom"><div class="local-badge"><i></i> 私有网盘 · 安心观看</div><button id="source" class="quiet"><span data-icon="folder"></span><span>新建媒体库</span></button><button id="settings" class="quiet"><span data-icon="settings"></span><span>媒体库设置</span></button><button id="exit" class="quiet"><span data-icon="back"></span><span>返回网盘</span></button></div>
+  </aside>
+  <main id="main" tabindex="-1">
+    <header class="topbar"><div><span class="eyebrow">属于你的大银幕</span><h1 id="page-title">今晚，看点什么？</h1></div><div class="top-actions"><button id="mobile-source" class="icon-button" aria-label="媒体库设置"><span data-icon="folder"></span></button><button id="refresh" class="icon-button" aria-label="刷新媒体库"><span data-icon="refresh"></span></button><button id="mobile-exit" class="icon-button" aria-label="返回网盘"><span data-icon="back"></span></button><span class="avatar" aria-hidden="true">影</span></div></header>
+    <div id="library-navigation" class="library-navigation" hidden><button id="library-back" class="secondary"><span data-icon="back"></span>全部媒体库</button><button id="library-edit-current" class="secondary"><span data-icon="settings"></span>设置当前媒体库</button></div>
+    <section id="hero" class="hero" hidden><div class="hero-art" aria-hidden="true"><div class="film-orbit"></div><div class="film-light"></div></div><img id="hero-image" alt="" hidden /><div class="hero-shade"></div><div class="hero-content"><span class="pill">专属于你的观影时光</span><h2 id="hero-title"></h2><p id="hero-meta"></p><p class="hero-description">把喜欢的故事，留给此刻。<br />从你的收藏出发，开启下一段旅程。</p><div class="hero-actions"><button id="hero-play" class="primary"><span data-icon="play"></span><span>立即播放</span></button><button id="hero-detail" class="glass-button"><span data-icon="info"></span>查看详情</button></div></div><span class="hero-number" aria-hidden="true">CINEMA<br /><b>私人放映厅</b></span></section>
+    <section id="continue-section" hidden><div class="section-heading"><h2>继续观看 <small>好故事，不必从头开始</small></h2></div><div id="continue-items" class="continue-items"></div></section>
+    <section class="library-section"><div class="section-heading"><h2 id="section-title">我的媒体库</h2><span id="source-label" class="muted"></span><button id="new-library" class="secondary">新建媒体库</button></div>
+      <form id="search-form" class="filters"><div class="search-box"><span data-icon="search"></span><input id="search" type="search" placeholder="搜索片名，发现好故事…" aria-label="搜索视频文件名" /><button id="search-submit" type="button">搜索</button></div><select id="format" aria-label="视频格式"><option value="">全部格式</option><option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option><option value="mov">MOV</option><option value="others">其他格式</option></select><button id="directory-mode" type="button" class="secondary"><span data-icon="folder"></span>目录浏览</button></form>
+      <div id="breadcrumbs" class="breadcrumbs" hidden></div>
+      <p id="list-status" role="status"></p><div id="libraries" class="libraries-grid" hidden></div><div id="items" class="poster-grid"></div>
+      <div id="empty" class="empty" hidden><span class="empty-symbol" data-icon="film"></span><h3 id="empty-title">尚未创建媒体库</h3><p id="empty-text">创建一个媒体库，命名并选择存有影视的文件夹。进入该库后才会加载视频。</p><button id="empty-source" class="primary">新建媒体库</button></div>
+      <div class="pagination"><button id="previous-page" class="secondary" hidden>上一页</button><span id="page-label"></span><button id="next-page" class="secondary" hidden>下一页</button></div>
+      <p class="library-footnote">仅播放你的网盘内容 · 格式兼容性取决于设备 · 不进行服务器转码</p>
+    </section>
+  </main>
+  <nav class="bottom-nav" aria-label="移动影视导航"><button data-nav="home" class="active"><span data-icon="home"></span>首页</button><button data-nav="library"><span data-icon="grid"></span>媒体库</button><button data-nav="favorites"><span data-icon="heart"></span>收藏</button><button data-nav="history"><span data-icon="clock"></span>历史</button></nav>
+  <dialog id="detail" aria-labelledby="detail-title"><button id="detail-close" class="dialog-close icon-button" aria-label="关闭详情"><span data-icon="close"></span></button><div class="detail-top"><div id="detail-poster" class="detail-poster"></div><div class="detail-copy"><span class="eyebrow">我的影视库</span><h2 id="detail-title"></h2><p id="detail-meta" class="muted"></p><p id="detail-path" class="file-path"></p><p id="detail-progress"></p><div class="detail-actions"><button id="detail-play" class="primary"><span data-icon="play"></span><span>播放</span></button><button id="detail-restart" class="secondary">从头播放</button><button id="detail-favorite" class="secondary" aria-pressed="false"><span data-icon="heart"></span><span>收藏</span></button><button id="detail-download" class="secondary"><span data-icon="download"></span>下载</button></div></div></div><div class="episodes-heading"><h3>同目录合集</h3><span id="episode-count" class="muted"></span></div><p id="detail-status" role="status"></p><div id="episodes" class="episodes"></div><div class="pagination"><button id="episodes-prev" class="secondary" hidden>上一批选集</button><button id="episodes-next" class="secondary" hidden>下一批选集</button></div></dialog>
+  <section id="player" class="player" role="dialog" aria-modal="true" aria-label="影视播放器" tabindex="-1" hidden>
+    <header class="player-header"><button id="player-back" class="glass-button"><span data-icon="back"></span>返回片库</button><div><h2 id="playing-title"></h2><span id="play-mode" class="muted"></span></div><button id="player-download" class="icon-button" aria-label="下载当前视频"><span data-icon="download"></span></button></header>
+    <div id="stage" class="stage"><video id="video" preload="none" playsinline crossorigin="anonymous"></video><button id="big-play" class="big-play" aria-label="播放视频"><span data-icon="play"></span></button><div id="play-message" class="play-message" role="status" hidden></div></div>
+    <div class="player-controls"><div class="timeline"><span id="current-time">0:00</span><input id="seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="播放进度" /><span id="duration">0:00</span></div><div class="control-row"><button id="toggle-play" class="icon-button" aria-label="播放或暂停"><span data-icon="play"></span></button><button id="rewind" class="icon-button" aria-label="快退十秒"><span data-icon="rewind"></span></button><button id="forward" class="icon-button" aria-label="快进十秒"><span data-icon="forward"></span></button><button id="previous-episode" class="icon-button" aria-label="上一集"><span data-icon="previous"></span></button><button id="next-episode" class="icon-button" aria-label="下一集"><span data-icon="next"></span></button><button id="mute" class="icon-button" aria-label="切换静音"><span data-icon="volume"></span></button><input id="volume" class="volume" type="range" min="0" max="1" step="0.05" value="1" aria-label="音量" /><span class="control-spacer"></span><select id="speed" aria-label="播放倍速"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select><button id="options-toggle" class="icon-button" aria-label="字幕与播放设置"><span data-icon="settings"></span></button><button id="pip" class="icon-button" aria-label="画中画" hidden><span data-icon="pip"></span></button><button id="fullscreen" class="icon-button" aria-label="全屏播放"><span data-icon="fullscreen"></span></button></div></div>
+    <div id="play-options" class="play-options" hidden><div class="section-heading"><h3>播放设置</h3><button id="options-close" class="icon-button" aria-label="关闭播放设置"><span data-icon="close"></span></button></div><label>字幕<select id="subtitle"><option value="">关闭字幕</option></select></label><label>字幕编码<select id="encoding"><option value="utf-8">UTF-8</option><option value="gb18030">GB18030 / GBK</option></select></label><label>字幕大小<input id="subtitle-size" type="range" min="14" max="40" value="22" /></label><label>字幕偏移（秒）<input id="subtitle-offset" type="number" min="-10" max="10" step="0.5" value="0" /></label><label>音轨<select id="audio"><option value="">默认音轨</option></select></label><label>画面<select id="fit"><option value="contain">适应画面</option><option value="cover">填满画面</option></select></label><label class="check-label"><input id="autoplay" type="checkbox" checked />自动播放下一集</label><p class="muted">ASS 仅显示文本，不还原特效；不支持图片字幕。</p></div>
+    <div id="sync-bar" class="sync-bar"><span id="sync-status"></span><button id="sync-retry" hidden>重试保存</button><button id="sync-remote" hidden>采用云端</button><button id="sync-local" hidden>保留本次</button></div><div id="next-countdown" class="next-countdown" hidden><span id="countdown-text"></span><button id="cancel-next">取消连播</button></div>
+  </section>
+  <dialog id="library-edit-dialog" aria-labelledby="library-edit-title">
+    <form id="library-form">
+      <h2 id="library-edit-title">新建媒体库</h2>
+      <p class="library-hint">一个媒体库对应一个文件夹，包含其子文件夹。保存配置不会扫描视频。</p>
+      <fieldset id="library-fields">
+        <label for="library-name">媒体库名称</label>
+        <input id="library-name" type="text" placeholder="例如：电影、电视剧" maxlength="100" required autocomplete="off" />
+        <label for="library-path">文件夹</label>
+        <output id="library-path">尚未选择文件夹</output>
+        <button id="library-pick" type="button" class="secondary"><span data-icon="folder"></span>选择文件夹</button>
+      </fieldset>
+      <p id="library-edit-status" role="status"></p>
+      <div class="detail-actions"><button id="library-cancel" type="button" class="secondary">取消</button><button id="library-save" type="button" class="primary">保存媒体库</button></div>
+    </form>
+  </dialog>
+  <dialog id="confirm-dialog"><h3 id="confirm-title"></h3><p id="confirm-text"></p><div class="detail-actions"><button id="confirm-cancel" class="secondary">取消</button><button id="confirm-ok" class="primary">确认</button></div></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</div>
+<div id="boot-status" class="boot-status">正在点亮你的私人影院…</div>
+</body>
+</html>
