@@ -33,11 +33,14 @@
 # 1. 确保类型检查与插件构建无错误
 npm run check
 
-# 2. 确保所有单元测试与目录防篡改测试通过
+# 2. 确保所有独立单元测试与目录防篡改测试通过
 npm test
 
-# 3. 确保发布目录协议校验通过
-npm run catalog verify ./catalog/catalog.json
+# 3. 确保根目录分发清单与本地包核验通过
+npm run catalog verify ./catalog.json
+
+# 4. 确保全资产校验和通过
+sha256sum -c SHA256SUMS
 ```
 
 ## 发现 Bug 或安全问题

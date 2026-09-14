@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- **Node.js**：`>= 22.22.0`（CI 环境统一固定为 `22.22.0`）
+- **Node.js**：开发运行支持 `>= 22.22.0`；分发资产构建与验证固定为 `22.22.0`，避免不同 zlib 版本产生同版本摘要差异。
 - **npm**：`>= 10.0.0`
 - **可选工具**：
   - `ffmpeg`：用于生成测试用合成视频文件
@@ -43,7 +43,7 @@ npm run check
 
 ### 2. 运行独立单元测试 (`npm test`)
 
-使用 `vitest run` 运行所有独立单元测试（包括 SDK 消息协议、阅读器排版计算、影视媒体库状态管理、打包工具、发布目录生成与草稿发布门禁），不开放测试服务器：
+使用 `vitest run` 运行所有独立单元测试（包括 SDK 消息协议、阅读器排版计算、影视媒体库状态管理、打包工具、应用目录校验与本地真实包核验），不开放测试服务器：
 
 ```bash
 npm test
@@ -51,34 +51,36 @@ npm test
 
 测试执行于 Node 环境的内存 JSDOM 中，提供对 `localStorage`、`ResizeObserver` 及视口尺寸的仿真。
 
-### 3. 构建发布产物 (`npm run build`)
+### 3. 构建分发产物 (`npm run build`)
 
 ```bash
 npm run build
 ```
 
 该脚本执行流程：
-1. 直接将静态插件 `shorts/` 打包为 `catalog/shorts-1.0.3.tgapp`。
-2. 使用 Vite 对 `books/`、`comics/`、`cinema/` 进行独立生产编译，输出至 `.build/<name>/`。
-3. 自动向产物中复制各第三方依赖的开源许可证及 PDF 所需字型文件。
-4. 调用 `package.mjs`，将编译结果压缩为标准规范的 `.tgapp` 归档。
-5. 扫描所有产物，生成严格符合发布协议的 `catalog/catalog.json` 和 `catalog/SHA256SUMS`。
+1. 优先在隔离的临时 staging 目录中进行构建，避免构建中断损坏已有已发布资产。
+2. 直接将静态插件 `shorts/` 打包为 `apps/shorts-1.0.3.tgapp`。
+3. 使用 Vite 对 `books/`、`comics/`、`cinema/` 进行独立生产编译，输出至 `.build/<name>/`。
+4. 自动向产物中复制各第三方依赖的开源许可证及 PDF 所需字型文件。
+5. 调用 `package.mjs`，将编译结果压缩为标准规范的 `.tgapp` 归档。
+6. 扫描所有产物，生成严格符合分发协议的 `catalog.json`（schema_version: 2）和 `SHA256SUMS`（包含 `apps/` 相对路径）。
+7. 对现有已存在版本核验同版本不可篡改规则（摘要、大小与清单）；全部校验通过后，转入根目录 `apps/`、`catalog.json` 与 `SHA256SUMS`。`apps/` 目录仅保留最新四个插件包。
 
-可通过环境变量重定向输出路径：
+可通过环境变量重定向输出分发根目录（其下同样包含 `apps/` 与根目录清单）：
 ```bash
-TGDRIVE_APP_BUILD_OUTPUT=/path/to/custom-dir npm run build
+TGDRIVE_APP_BUILD_OUTPUT=/path/to/custom-dist npm run build
 ```
 
-### 4. 校验发布目录 (`npm run catalog`)
+### 4. 校验分发目录与包摘要 (`npm run catalog`)
 
-单独校验某个 `catalog.json` 是否满足协议要求（包括完整 manifest、稳定版本、URL 映射、大小上限与记录唯一性），再核对本地资产摘要：
+校验 `catalog.json` 是否满足 schema_version: 2 协议要求（包括完整 manifest、稳定版本、URL 映射、大小上限与每 ID 唯一性），并核对本地 `apps/` 目录中真实包的摘要与大小：
 
 ```bash
-npm run catalog verify ./catalog/catalog.json
-(cd catalog && sha256sum -c SHA256SUMS)
+npm run catalog verify ./catalog.json
+sha256sum -c SHA256SUMS
 ```
 
-`verify` 只校验目录 schema；历史防篡改由合并时检查，本地资产完整性由 checksum 检查。普通构建不联网读取发布历史，正式发布的历史查询、合并及草稿资产校验见 [发布说明](release.md)。
+普通构建与校验不联网；正式分发规范与防篡改说明见 [分发协议说明](release.md)。
 
 ## 插件架构细节
 
@@ -103,12 +105,12 @@ TGDRIVE_HOST_DIR=/path/to/tgdrive npm run test:e2e
 ```
 
 `tests/browser/fixture.mjs` 会：
-1. 在启动外部进程前检查宿主 `${TGDRIVE_HOST_DIR}/frontend/dist/index.html` 和四个当前插件包；缺失、空文件或只有旧版包时直接提示先构建。
+1. 在启动外部进程前检查宿主 `${TGDRIVE_HOST_DIR}/frontend/dist/index.html` 和四个当前插件包（默认读取本仓库 `apps/` 目录）；缺失、空文件或只有旧版包时直接提示先构建。
 2. 使用 `ffmpeg` 自动合成测试视频和阅读/影视夹具文件。
 3. 启动宿主内置的 `apps::tests::browser_fixture` 测试夹具服务（监听 `127.0.0.1:4187`），显式传入绝对包目录。
 4. 加载本仓库打包出的真实插件包，启动 Playwright 进行真实浏览器场景回归。
 
-`TGDRIVE_APP_CATALOG_DIR` 可指定自定义包目录，但仍需包含四个当前版本的包。检查只确认构建产物存在，不代替完整集成测试。发布前须由维护者记录实际验证宿主的完整 Git SHA 到 `compatibility.json`；拆分起点 SHA 不代表拆分后集成已经通过。
+`TGDRIVE_APP_CATALOG_DIR` 默认指向本仓库的 `apps/` 目录，亦可指定自定义包目录，但仍需包含四个当前版本的包。检查只确认构建产物存在，不代替完整集成测试。正式更新前须由维护者记录实际验证宿主的完整 Git SHA 到 `compatibility.json`；拆分起点 SHA 不代表拆分后集成已经通过。
 
 ### 隔离验证与临时目录
 

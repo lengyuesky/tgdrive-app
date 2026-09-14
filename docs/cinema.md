@@ -103,7 +103,7 @@ npm test
 TGDRIVE_HOST_DIR=/path/to/tgdrive PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome npm run test:e2e -- cinema-libraries.spec.ts cinema.spec.ts cinema-lifecycle.spec.ts cinema-art.spec.ts
 ```
 
-本仓库独立构建会产出 `catalog/cinema-1.1.2.tgapp`，宿主及其 Docker 构建不再编译或携带插件。构建不自动安装到正在运行的网盘。标准包限制保持 16 MiB 压缩／32 MiB 解压／8 MiB 单文件。
+本仓库独立构建会产出 `apps/cinema-1.1.2.tgapp`，宿主及其 Docker 构建不再编译或携带插件。构建不自动安装到正在运行的网盘。标准包限制保持 16 MiB 压缩／32 MiB 解压／8 MiB 单文件。
 
 浏览器测试沿用隔离网盘、临时数据库和内存 Telegram。FFmpeg **只用于测试合成**色块、测试音、双音轨 MKV 和中文字幕，不成为生产运行依赖。测试不加载真实 `.env` 或网盘。
 

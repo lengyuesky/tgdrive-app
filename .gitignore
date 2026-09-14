@@ -1,8 +1,7 @@
 node_modules/
 .build/
+/catalog/
 dist/
-catalog/
-*.tgapp
 .DS_Store
 *.log
 .playwright/

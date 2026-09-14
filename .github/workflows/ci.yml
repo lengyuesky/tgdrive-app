@@ -28,11 +28,21 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      - name: 校验已提交的分发资产完整性
+        run: |
+          npm run catalog verify ./catalog.json
+          sha256sum -c SHA256SUMS
+
       - name: 类型检查与插件构建
         run: npm run check
+
+      - name: 校验构建产物与已提交资产完全一致
+        run: git diff --exit-code catalog.json SHA256SUMS apps/
 
       - name: 运行独立单测与目录工具测试
         run: npm test
 
-      - name: 校验生成目录
-        run: npm run catalog verify ./catalog/catalog.json
+      - name: 校验生成目录与校验和
+        run: |
+          npm run catalog verify ./catalog.json
+          sha256sum -c SHA256SUMS

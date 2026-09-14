@@ -1,0 +1,118 @@
+{
+  "schema_version": 2,
+  "repository": "lengyuesky/tgdrive-app",
+  "entries": [
+    {
+      "manifest": {
+        "id": "books",
+        "name": "图书",
+        "version": "1.1.4",
+        "api_version": 2,
+        "min_host_version": "0.1.0",
+        "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
+        "author": "tgdrive",
+        "entry": "index.html",
+        "permissions": [
+          "files.read",
+          "media.read"
+        ],
+        "settings": [
+          {
+            "key": "source_dir",
+            "label": "图书目录",
+            "description": "搜索此目录及子目录中的图书；根目录表示整库。",
+            "type": "directory",
+            "default": "/"
+          }
+        ]
+      },
+      "sha256": "1aeab9a6c0156dd7a13cbb4d7187a2519d47d2d9a4df8dcf022093608c03e909",
+      "size": 2148247,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.1.4.tgapp"
+    },
+    {
+      "manifest": {
+        "id": "cinema",
+        "name": "影视",
+        "version": "1.1.2",
+        "api_version": 2,
+        "min_host_version": "0.1.0",
+        "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",
+        "author": "tgdrive",
+        "entry": "index.html",
+        "permissions": [
+          "files.read",
+          "media.read"
+        ],
+        "settings": []
+      },
+      "sha256": "ad837a71a642f95500f13be34b947c8c7c66bd18619700c0afca11d010ce0d19",
+      "size": 115934,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.1.2.tgapp"
+    },
+    {
+      "manifest": {
+        "id": "comics",
+        "name": "漫画",
+        "version": "1.0.9",
+        "api_version": 2,
+        "min_host_version": "0.1.0",
+        "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
+        "author": "tgdrive",
+        "entry": "index.html",
+        "permissions": [
+          "files.read",
+          "media.read"
+        ],
+        "settings": [
+          {
+            "key": "source_dir",
+            "label": "漫画目录",
+            "description": "直属图片组成一章，子目录保留为章节；也可打开 CBZ/ZIP 图片包。",
+            "type": "directory",
+            "default": "/"
+          }
+        ]
+      },
+      "sha256": "caa401407f82b7017ae2536fd3ee7ddb31cdb69e5bc8f6595224c45ce0f41c40",
+      "size": 63460,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.0.9.tgapp"
+    },
+    {
+      "manifest": {
+        "id": "shorts",
+        "name": "短视频",
+        "version": "1.0.3",
+        "api_version": 2,
+        "min_host_version": "0.1.0",
+        "description": "随机播放网盘文件夹里的视频，支持滑动切换、收藏和下载。",
+        "author": "tgdrive",
+        "entry": "index.html",
+        "permissions": [
+          "files.read",
+          "media.read",
+          "favorites.write"
+        ],
+        "settings": [
+          {
+            "key": "source_dir",
+            "label": "取材文件夹",
+            "description": "播放此文件夹及子目录中的视频；根目录表示整库。",
+            "type": "directory",
+            "default": "/"
+          },
+          {
+            "key": "muted",
+            "label": "静音播放",
+            "description": "静音时更容易自动播放；播放页面切换声音后会记住选择。",
+            "type": "boolean",
+            "default": true
+          }
+        ]
+      },
+      "sha256": "bc76c4e8cb8a6b5749c8cab25bdc8b133e3245df06c99520f03f4ac3b5d50412",
+      "size": 9149,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.0.3.tgapp"
+    }
+  ]
+}

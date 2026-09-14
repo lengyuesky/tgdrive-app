@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -8,6 +8,7 @@ import {
   collectPackages, compareStableVersions, extractFileFromZip, formatSha256Sums,
   mergeCatalogs, parseCatalog, readCatalog, serializeCatalog, sha256Hex,
   validateCatalog, validateEntry, validateManifest, validateRepository,
+  verifyCatalogPackages,
   DEFAULT_REPOSITORY, MAX_CATALOG_BYTES, MAX_ENTRIES, MAX_MANIFEST_BYTES, MAX_PACKAGE_BYTES,
   type AppManifest, type Catalog, type CatalogEntry,
 } from '../../catalog.mjs'
@@ -17,15 +18,31 @@ const run = promisify(execFile)
 const temporary: string[] = []
 
 function sampleManifest(id = 'test-plugin', version = '1.0.0'): AppManifest {
-  return { id, name: '测试插件', version, api_version: 2, min_host_version: '0.1.0', description: '测试用插件', author: 'tgdrive', entry: 'index.html', permissions: ['files.read'], settings: [] }
+  return {
+    id,
+    name: '测试插件',
+    version,
+    api_version: 2,
+    min_host_version: '0.1.0',
+    description: '测试用插件',
+    author: 'tgdrive',
+    entry: 'index.html',
+    permissions: ['files.read'],
+    settings: [],
+  }
 }
 
-function sampleEntry(id = 'test-plugin', version = '1.0.0', tag = 'v1.0.0', sha = 'a'.repeat(64)): CatalogEntry {
-  return { manifest: sampleManifest(id, version), sha256: sha, size: 1024, url: `https://github.com/${DEFAULT_REPOSITORY}/releases/download/${tag}/${id}-${version}.tgapp`, release_tag: tag }
+function sampleEntry(id = 'test-plugin', version = '1.0.0', sha = 'a'.repeat(64), size = 1024): CatalogEntry {
+  return {
+    manifest: sampleManifest(id, version),
+    sha256: sha,
+    size,
+    url: `https://raw.githubusercontent.com/${DEFAULT_REPOSITORY}/main/apps/${id}-${version}.tgapp`,
+  }
 }
 
-function sampleCatalog(entries = [sampleEntry()], tag = 'v1.0.0'): Catalog {
-  return { schema_version: 1, repository: DEFAULT_REPOSITORY, release_tag: tag, entries }
+function sampleCatalog(entries = [sampleEntry()]): Catalog {
+  return { schema_version: 2, repository: DEFAULT_REPOSITORY, entries }
 }
 
 async function fixture(manifest: unknown = sampleManifest(), padding = 0) {
@@ -39,15 +56,16 @@ async function fixture(manifest: unknown = sampleManifest(), padding = 0) {
   return { directory, source, packages }
 }
 
-afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => {
+  await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true })))
+})
 
 describe('catalog 完整清单 schema', () => {
-  it('接受完整清单及有效但不兼容未来宿主的记录，不丢弃历史', () => {
+  it('接受完整清单及有效但不兼容未来宿主的记录', () => {
     const future = sampleEntry('books', '2.0.0')
     future.manifest.api_version = 0xffffffff
     future.manifest.min_host_version = '90.0.0-rc.1+build.01'
-    expect(validateCatalog(sampleCatalog([sampleEntry('books', '1.0.0'), future]))).toBe(true)
-    expect(mergeCatalogs({ currentEntries: [], previousCatalog: sampleCatalog([future]), releaseTag: 'v1.0.1' }).entries).toEqual([future])
+    expect(validateCatalog(sampleCatalog([future]))).toBe(true)
   })
 
   it.each(Object.keys(sampleManifest()))('拒绝缺少必填字段 %s', key => {
@@ -98,12 +116,15 @@ describe('catalog 完整清单 schema', () => {
   })
 
   it('设置各类型有效默认值保持原样，description 可省略', () => {
-    const manifest: AppManifest = { ...sampleManifest(), settings: [
-      { key: 'enabled', label: '启用', type: 'boolean', default: false },
-      { key: 'scale', label: '比例', description: '', type: 'number', default: 1.25 },
-      { key: 'title', label: '标题', type: 'string', default: '中文' },
-      { key: 'directory', label: '目录', type: 'directory', default: './中文//书籍' },
-    ] }
+    const manifest: AppManifest = {
+      ...sampleManifest(),
+      settings: [
+        { key: 'enabled', label: '启用', type: 'boolean', default: false },
+        { key: 'scale', label: '比例', description: '', type: 'number', default: 1.25 },
+        { key: 'title', label: '标题', type: 'string', default: '中文' },
+        { key: 'directory', label: '目录', type: 'directory', default: './中文//书籍' },
+      ],
+    }
     expect(() => validateManifest(manifest)).not.toThrow()
     expect(manifest.settings[3].default).toBe('./中文//书籍')
   })
@@ -129,20 +150,23 @@ describe('catalog 完整清单 schema', () => {
   })
 })
 
-describe('catalog 结构、URL、唯一性与大小', () => {
+describe('catalog 结构、URL、唯一性与大小 (schema_version: 2)', () => {
   it('接受完整合法目录和有效空目录', () => {
     expect(validateCatalog(sampleCatalog([sampleEntry('books', '1.1.4'), sampleEntry('cinema', '1.1.2')]))).toBe(true)
     expect(validateCatalog(sampleCatalog([]))).toBe(true)
   })
 
-  it('拒绝未知字段、错误 schema、数组替代对象和缺必填字段', () => {
-    for (const catalog of [[], null, { ...sampleCatalog(), hidden: true }, { ...sampleCatalog(), schema_version: 2 }, { ...sampleCatalog(), entries: null }]) expect(() => validateCatalog(catalog)).toThrow()
+  it('拒绝未知字段、旧 schema_version 1、错误版本 3、数组替代对象和缺必填字段', () => {
+    for (const catalog of [[], null, { ...sampleCatalog(), hidden: true }, { ...sampleCatalog(), schema_version: 1 }, { ...sampleCatalog(), schema_version: 3 }, { ...sampleCatalog(), release_tag: 'v1.0.0' }, { ...sampleCatalog(), branch: 'main' }, { ...sampleCatalog(), ref: 'refs/heads/main' }, { ...sampleCatalog(), entries: null }]) {
+      expect(() => validateCatalog(catalog)).toThrow()
+    }
     for (const key of Object.keys(sampleCatalog())) {
       const catalog: Record<string, unknown> = { ...sampleCatalog() }
       delete catalog[key]
       expect(() => validateCatalog(catalog)).toThrow('缺少必填字段')
     }
     expect(() => validateEntry({ ...sampleEntry(), hidden: true })).toThrow('未知字段')
+    expect(() => validateEntry({ ...sampleEntry(), release_tag: 'v1.0.0' })).toThrow('未知字段')
   })
 
   it.each(['invalid repository', 'owner/', '/repo', './repo', '../repo', 'owner/.', 'owner/..', 'owner/repo ', ' owner/repo', 'owner/repo\n', 'a/b/c', 'a/'.padEnd(101, 'b')])('拒绝非法仓库 %s', repository => {
@@ -155,19 +179,25 @@ describe('catalog 结构、URL、唯一性与大小', () => {
     expect(() => validateCatalog(sampleCatalog(), { repository: 'other/repo' })).toThrow('不匹配')
   })
 
-  it.each(['latest', 'v1.0', '1.0.0', 'v1.0.0-beta.1', 'v1.0.0+build', 'v01.0.0', 'v1.00.0', 'v1.0.01', 'v1.0.0\n'])('目录与条目均拒绝非法 release_tag %s', tag => {
-    expect(() => validateCatalog({ ...sampleCatalog(), release_tag: tag })).toThrow('release_tag')
-    expect(() => validateEntry(sampleEntry('books', '1.1.4', tag))).toThrow('release_tag')
-  })
-
-  it('拒绝条目引用晚于所属目录的 tag', () => {
-    expect(() => validateCatalog(sampleCatalog([sampleEntry('books', '1.1.4', 'v2.0.0')]))).toThrow('不能晚于')
-  })
-
-  it('URL 必须精确匹配，拒绝跳转主机、凭据、query、fragment 和路径混淆', () => {
+  it('URL 必须精确匹配 raw.githubusercontent.com/<repo>/main/apps/<id>-<version>.tgapp', () => {
     const url = sampleEntry().url
-    for (const badUrl of [url.replace('github.com', 'evil.com'), url.replace('github.com', 'objects.githubusercontent.com'), url.replace('https:', 'http:'), url.replace('github.com', 'user@github.com'), url.replace('github.com', 'github.com:443'), `${url}?token=secret`, `${url}#fragment`, url.replace('v1.0.0', 'v1.0.1'), url.replace('test-plugin-1.0.0', 'wrong-name'), url.replace('/releases/', '/other/../releases/'), url.replace('lengyuesky', 'other')]) {
-      expect(() => validateEntry({ ...sampleEntry(), url: badUrl })).toThrow('URL 不符合规范')
+    expect(url).toBe(`https://raw.githubusercontent.com/${DEFAULT_REPOSITORY}/main/apps/test-plugin-1.0.0.tgapp`)
+    for (const badUrl of [
+      url.replace('raw.githubusercontent.com', 'github.com'),
+      url.replace('raw.githubusercontent.com', 'evil.com'),
+      url.replace('https:', 'http:'),
+      url.replace('raw.githubusercontent.com', 'user@raw.githubusercontent.com'),
+      url.replace('raw.githubusercontent.com', 'raw.githubusercontent.com:443'),
+      `${url}?token=secret`,
+      `${url}#fragment`,
+      url.replace('/main/', '/master/'),
+      url.replace('/main/', '/v1.0.0/'),
+      url.replace('/apps/', '/releases/download/v1.0.0/'),
+      url.replace('test-plugin-1.0.0', 'wrong-name-1.0.0'),
+      url.replace('1.0.0.tgapp', '1.0.1.tgapp'),
+      url.replace('lengyuesky', 'other'),
+    ]) {
+      expect(() => validateEntry({ ...sampleEntry(), url: badUrl })).toThrow('条目 URL 不符合规范')
     }
   })
 
@@ -183,15 +213,19 @@ describe('catalog 结构、URL、唯一性与大小', () => {
     expect(() => validateEntry({ ...sampleEntry(), size: MAX_PACKAGE_BYTES })).not.toThrow()
   })
 
-  it('相同摘要的重复记录仍拒绝，512 条为上限', () => {
-    expect(() => validateCatalog(sampleCatalog([sampleEntry(), sampleEntry()]))).toThrow('禁止重复记录')
+  it('每个应用 ID 仅限一条记录，重复即拒绝', () => {
+    expect(() => validateCatalog(sampleCatalog([sampleEntry('app-a', '1.0.0'), sampleEntry('app-a', '1.0.1')]))).toThrow('禁止重复应用记录')
+    expect(() => validateCatalog(sampleCatalog([sampleEntry('app-a'), sampleEntry('app-a')]))).toThrow('禁止重复应用记录')
     const entries = Array.from({ length: MAX_ENTRIES }, (_, i) => sampleEntry(`app-${i}`))
     expect(validateCatalog(sampleCatalog(entries))).toBe(true)
     expect(() => validateCatalog(sampleCatalog([...entries, sampleEntry('another')]))).toThrow('目录条目数超限')
   })
 
   it('有效字段合计超过 1 MiB 时失败，不靠非法长字段制造测试', () => {
-    const entries = Array.from({ length: MAX_ENTRIES }, (_, i) => ({ ...sampleEntry(`app-${i}`), manifest: { ...sampleManifest(`app-${i}`), description: 'x'.repeat(1600), author: 'x'.repeat(160) } }))
+    const entries = Array.from({ length: MAX_ENTRIES }, (_, i) => ({
+      ...sampleEntry(`app-${i}`),
+      manifest: { ...sampleManifest(`app-${i}`), description: 'x'.repeat(1600), author: 'x'.repeat(160) },
+    }))
     expect(() => validateCatalog(sampleCatalog(entries))).toThrow('目录大小超限')
   })
 
@@ -204,51 +238,149 @@ describe('catalog 结构、URL、唯一性与大小', () => {
   })
 })
 
-describe('catalog 历史合并与防篡改', () => {
-  it('首发正常生成，应用 ID 升序且 SemVer 数值降序', () => {
-    const catalog = mergeCatalogs({ currentEntries: [sampleEntry('shorts', '1.0.3'), sampleEntry('books', '1.1.9'), sampleEntry('books', '1.1.10'), sampleEntry('books', '1.2.0')], releaseTag: 'v1.0.0' })
-    expect(catalog.entries.map(entry => `${entry.manifest.id}@${entry.manifest.version}`)).toEqual(['books@1.2.0', 'books@1.1.10', 'books@1.1.9', 'shorts@1.0.3'])
-    expect(compareStableVersions('18446744073709551615.0.0', '18446744073709551614.0.0')).toBe(1)
+describe('catalog 版本升级、移除与防篡改 (mergeCatalogs)', () => {
+  it('新生成目录按应用 ID 字典序升序排序', () => {
+    const catalog = mergeCatalogs({
+      currentEntries: [
+        sampleEntry('shorts', '1.0.3'),
+        sampleEntry('comics', '1.0.9'),
+        sampleEntry('books', '1.1.4'),
+        sampleEntry('cinema', '1.1.2'),
+      ],
+    })
+    expect(catalog.entries.map(e => e.manifest.id)).toEqual(['books', 'cinema', 'comics', 'shorts'])
+    expect(catalog.schema_version).toBe(2)
   })
 
-  it('历史全量保留，相同内容复用原 URL/tag', () => {
-    const original = sampleEntry('cinema', '1.1.2')
-    const previous = sampleCatalog([original, sampleEntry('books', '1.1.3')])
-    const merged = mergeCatalogs({ currentEntries: [original, sampleEntry('books', '1.1.4')], previousCatalog: previous, releaseTag: 'v1.2.0' })
-    expect(merged.entries).toHaveLength(3)
-    expect(merged.entries.find(entry => entry.manifest.id === 'cinema')).toEqual(original)
-    expect(merged.entries.find(entry => entry.manifest.version === '1.1.3')).toEqual(previous.entries[1])
-    expect(merged.entries.find(entry => entry.manifest.version === '1.1.4')?.release_tag).toBe('v1.2.0')
+  it('允许新版本替换旧版本，保持每 ID 仅一条最新记录', () => {
+    const previous = sampleCatalog([sampleEntry('books', '1.1.4'), sampleEntry('cinema', '1.1.2')])
+    const updated = mergeCatalogs({
+      currentEntries: [sampleEntry('books', '1.1.5'), sampleEntry('cinema', '1.1.2')],
+      previousCatalog: previous,
+    })
+    expect(updated.entries).toHaveLength(2)
+    expect(updated.entries.find(e => e.manifest.id === 'books')?.manifest.version).toBe('1.1.5')
+    expect(updated.entries.find(e => e.manifest.id === 'cinema')?.manifest.version).toBe('1.1.2')
   })
 
-  it('同版本不同摘要拒绝', () => {
-    expect(() => mergeCatalogs({ currentEntries: [{ ...sampleEntry(), sha256: 'f'.repeat(64) }], previousCatalog: sampleCatalog(), releaseTag: 'v1.0.1' })).toThrow('同一应用相同版本不允许更换摘要（tamper detected）')
+  it('允许目录移除插件，不强制保留旧插件', () => {
+    const previous = sampleCatalog([sampleEntry('books', '1.1.4'), sampleEntry('cinema', '1.1.2')])
+    const reduced = mergeCatalogs({
+      currentEntries: [sampleEntry('books', '1.1.4')],
+      previousCatalog: previous,
+    })
+    expect(reduced.entries).toHaveLength(1)
+    expect(reduced.entries[0].manifest.id).toBe('books')
   })
 
-  it.each<Partial<AppManifest>>([
-    { name: '另一个名称' }, { author: '另一个作者' }, { description: '另一个描述' }, { entry: 'other.html' },
-    { permissions: ['files.read', 'media.read'] }, { settings: [{ key: 'muted', label: '静音', type: 'boolean', default: true }] },
-    { api_version: 3 }, { min_host_version: '3.0.0' },
-  ])('相同 id/version/digest 也禁止更换任何完整清单元数据 %j', patch => {
-    const entry = { ...sampleEntry(), manifest: { ...sampleManifest(), ...patch } }
-    expect(() => mergeCatalogs({ currentEntries: [entry], previousCatalog: sampleCatalog(), releaseTag: 'v1.0.1' })).toThrow('不允许更换完整清单或大小')
+  it('同应用版本倒退必须拒绝', () => {
+    const previous = sampleCatalog([sampleEntry('books', '1.1.4')])
+    expect(() => mergeCatalogs({
+      currentEntries: [sampleEntry('books', '1.1.3')],
+      previousCatalog: previous,
+    })).toThrow('不允许同应用版本倒退')
   })
 
-  it('相同摘要不能掩盖变化大小或未通过校验的当前产物', () => {
-    expect(() => mergeCatalogs({ currentEntries: [{ ...sampleEntry(), size: 1025 }], previousCatalog: sampleCatalog(), releaseTag: 'v1.0.1' })).toThrow('完整清单或大小')
-    expect(() => mergeCatalogs({ currentEntries: [{ ...sampleEntry(), size: MAX_PACKAGE_BYTES + 1 }], previousCatalog: sampleCatalog(), releaseTag: 'v1.0.1' })).toThrow('16 MiB')
-    const invalid = { ...sampleEntry(), manifest: { ...sampleManifest(), name: '' } }
-    expect(() => mergeCatalogs({ currentEntries: [invalid], previousCatalog: sampleCatalog(), releaseTag: 'v1.0.1' })).toThrow('manifest.name')
+  it('同一应用相同版本内容不可更换（防篡改检测）', () => {
+    const previous = sampleCatalog([sampleEntry('books', '1.1.4')])
+
+    // 摘要变化
+    expect(() => mergeCatalogs({
+      currentEntries: [{ ...sampleEntry('books', '1.1.4'), sha256: 'b'.repeat(64) }],
+      previousCatalog: previous,
+    })).toThrow('同一应用相同版本不允许更换摘要（tamper detected）')
+
+    // 大小变化
+    expect(() => mergeCatalogs({
+      currentEntries: [{ ...sampleEntry('books', '1.1.4'), size: 2048 }],
+      previousCatalog: previous,
+    })).toThrow('同一应用相同版本不允许更换完整清单或大小')
+
+    // 清单字段变化
+    const changedManifest = { ...sampleManifest('books', '1.1.4'), name: '新图书名称' }
+    expect(() => mergeCatalogs({
+      currentEntries: [{ ...sampleEntry('books', '1.1.4'), manifest: changedManifest }],
+      previousCatalog: previous,
+    })).toThrow('同一应用相同版本不允许更换完整清单或大小')
   })
 
-  it('当前批次重复不可静默去重，包含复用历史的批次也拒绝', () => {
-    for (const previousCatalog of [null, sampleCatalog()]) expect(() => mergeCatalogs({ currentEntries: [sampleEntry(), sampleEntry()], previousCatalog, releaseTag: 'v1.0.1' })).toThrow('禁止重复记录')
+  it('当前批次中包含重复应用 ID 拒绝', () => {
+    expect(() => mergeCatalogs({
+      currentEntries: [sampleEntry('books', '1.1.4'), sampleEntry('books', '1.1.5')],
+    })).toThrow('禁止重复记录')
+  })
+})
+
+describe('verifyCatalogPackages 本地真实包与目录核验（通用安全门禁）', () => {
+  it('四个匹配的真实包核验通过', async () => {
+    const { directory, packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const [pkg] = await collectPackages(packages)
+    const catalog = mergeCatalogs({ currentEntries: [pkg] })
+    await expect(verifyCatalogPackages(catalog, packages)).resolves.toBeUndefined()
   })
 
-  it('历史超量或 tag 倒退直接失败', () => {
-    const previous = sampleCatalog(Array.from({ length: MAX_ENTRIES }, (_, i) => sampleEntry(`hist-${i}`)))
-    expect(() => mergeCatalogs({ currentEntries: [sampleEntry('new-app')], previousCatalog: previous, releaseTag: 'v1.0.1' })).toThrow('目录合并后条目超过上限')
-    for (const releaseTag of ['v1.0.0', 'v0.9.9']) expect(() => mergeCatalogs({ currentEntries: [], previousCatalog: sampleCatalog(), releaseTag })).toThrow('必须大于')
+  it('包内容篡改（大小未变）拒绝', async () => {
+    const { packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const [pkg] = await collectPackages(packages)
+    const catalog = mergeCatalogs({ currentEntries: [pkg] })
+
+    // 修改目录记录的预期 SHA256，模拟本地包内容被静默修改/篡改
+    catalog.entries[0].sha256 = '0'.repeat(64)
+
+    await expect(verifyCatalogPackages(catalog, packages)).rejects.toThrow('SHA256 与目录记录不符')
+  })
+
+  it('包大小篡改（截断或增补空白）拒绝', async () => {
+    const { packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const [pkg] = await collectPackages(packages)
+    const catalog = mergeCatalogs({ currentEntries: [pkg] })
+
+    const filePath = resolve(packages, pkg.filename)
+    const buffer = await readFile(filePath)
+    await writeFile(filePath, Buffer.concat([buffer, Buffer.from(' ')]))
+
+    await expect(verifyCatalogPackages(catalog, packages)).rejects.toThrow('大小与目录记录不符')
+  })
+
+  it('目录中有记录但本地缺失包文件拒绝', async () => {
+    const { packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const [pkg] = await collectPackages(packages)
+    const catalog = mergeCatalogs({ currentEntries: [pkg, sampleEntry('cinema', '1.1.2')] })
+
+    await expect(verifyCatalogPackages(catalog, packages)).rejects.toThrow('本地插件包数量')
+  })
+
+  it('本地有多余的未索引包文件拒绝', async () => {
+    const { directory, packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const [pkg] = await collectPackages(packages)
+    const catalog = mergeCatalogs({ currentEntries: [pkg] })
+
+    // 在 packages 增加一个额外的包
+    const extraSource = `${directory}/extra-source`
+    await mkdir(extraSource)
+    await writeFile(`${extraSource}/app.json`, JSON.stringify(sampleManifest('shorts', '1.0.3')))
+    await writeFile(`${extraSource}/index.html`, '<!doctype html><html></html>')
+    await run(process.execPath, [`${root}/package.mjs`, extraSource, packages])
+
+    await expect(verifyCatalogPackages(catalog, packages)).rejects.toThrow('数量')
+  })
+
+  it('包内清单与 catalog 记录不符拒绝', async () => {
+    const { packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const [pkg] = await collectPackages(packages)
+    // 目录中篡改 description
+    const tamperedManifest = { ...pkg.manifest, description: '被篡改的描述' }
+    const catalog: Catalog = {
+      schema_version: 2,
+      repository: DEFAULT_REPOSITORY,
+      entries: [{
+        manifest: tamperedManifest,
+        sha256: pkg.sha256,
+        size: pkg.size,
+        url: `https://raw.githubusercontent.com/${DEFAULT_REPOSITORY}/main/apps/${pkg.manifest.id}-${pkg.manifest.version}.tgapp`,
+      }],
+    }
+    await expect(verifyCatalogPackages(catalog, packages)).rejects.toThrow('manifest 与目录记录不符')
   })
 })
 
@@ -258,45 +390,122 @@ describe('catalog CLI、真实 ZIP 与 SHA256SUMS', () => {
     const example = documentation.match(/```json\s+([\s\S]*?)```/)
     expect(example).not.toBeNull()
     const catalog = parseCatalog(example![1])
+    expect(catalog.schema_version).toBe(2)
     expect(catalog.entries[0].manifest).toEqual(JSON.parse(await readFile(`${root}/books/app.json`, 'utf8')))
   })
 
-  it('显式 CLI 参数覆盖环境默认值，并验证实际包和全部 checksum', async () => {
-    const { directory, packages } = await fixture()
-    const output = `${directory}/output`
-    await run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, output, '--tag=v2.0.0', '--repo=explicit/repo'], { env: { ...process.env, TGDRIVE_APP_RELEASE_TAG: 'v9.0.0', TGDRIVE_APP_GITHUB_REPO: 'env/repo' } })
-    const catalog = await readCatalog(`${output}/catalog.json`, { repository: 'explicit/repo' })
-    expect(catalog.release_tag).toBe('v2.0.0')
-    expect(catalog.entries[0].url).toContain('/explicit/repo/releases/download/v2.0.0/')
+  it('CLI generate 生成带 apps/ 路径的 SHA256SUMS 与根目录 catalog.json', async () => {
+    const { directory, packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const output = `${directory}/dist`
+    const appsDir = `${output}/apps`
+    await mkdir(appsDir, { recursive: true })
     const [pkg] = await collectPackages(packages)
-    expect(pkg.manifest).toEqual(sampleManifest())
-    expect(catalog.entries[0].sha256).toBe(sha256Hex(pkg.buffer))
-    expect(catalog.entries[0].size).toBe(pkg.buffer.length)
-    expect(await readFile(`${output}/SHA256SUMS`, 'utf8')).toBe(formatSha256Sums([
-      { name: pkg.filename, sha256: pkg.sha256 },
-      { name: 'catalog.json', sha256: sha256Hex(await readFile(`${output}/catalog.json`)) },
-    ]))
-    const result = await run(process.execPath, [`${root}/catalog.mjs`, 'verify', `${output}/catalog.json`])
-    expect(result.stdout).toContain('目录校验通过')
+    await cp(`${packages}/${pkg.filename}`, `${appsDir}/${pkg.filename}`)
+
+    await run(process.execPath, [`${root}/catalog.mjs`, 'generate', appsDir, output, '--repo=custom/tgapp'])
+    const catalog = await readCatalog(`${output}/catalog.json`, { repository: 'custom/tgapp' })
+    expect(catalog.schema_version).toBe(2)
+    expect(catalog.repository).toBe('custom/tgapp')
+    expect(catalog.entries[0].url).toBe(`https://raw.githubusercontent.com/custom/tgapp/main/apps/${pkg.filename}`)
+
+    const sumsContent = await readFile(`${output}/SHA256SUMS`, 'utf8')
+    expect(sumsContent).toContain(`apps/${pkg.filename}`)
+    expect(sumsContent).toContain('catalog.json')
+
+    const verifyResult = await run(process.execPath, [`${root}/catalog.mjs`, 'verify', `${output}/catalog.json`])
+    expect(verifyResult.stdout).toContain('目录校验通过')
+    expect(verifyResult.stdout).toContain('已核对本地包')
   })
 
-  it.each(['9007199254740993', '-9007199254740993', '1e400'])('原始历史目录数字 %s 必须拒绝而不是合并后静默舍入', async (literal) => {
+  it('CLI verify 支持指定独立的包目录', async () => {
+    const { directory, packages } = await fixture(sampleManifest('books', '1.1.4'))
+    const [pkg] = await collectPackages(packages)
+    const catalog = mergeCatalogs({ currentEntries: [pkg] })
+    const catalogPath = `${directory}/test-catalog.json`
+    await writeFile(catalogPath, serializeCatalog(catalog))
+
+    const result = await run(process.execPath, [`${root}/catalog.mjs`, 'verify', catalogPath, packages])
+    expect(result.stdout).toContain('已核对本地包')
+  })
+
+  it.each(['缺失', '普通文件'])('CLI verify 默认包目录为%s时失败，不退化为仅校验结构', async (kind) => {
+    const { directory, packages } = await fixture()
+    const catalogPath = `${directory}/catalog.json`
+    await writeFile(catalogPath, serializeCatalog(mergeCatalogs({ currentEntries: await collectPackages(packages) })))
+    if (kind === '普通文件') await writeFile(`${directory}/apps`, '不是包目录')
+    await expect(run(process.execPath, [`${root}/catalog.mjs`, 'verify', catalogPath])).rejects.toMatchObject({ code: 1 })
+  })
+
+  it('CLI verify 拒绝多余参数，不能静默忽略校验选项', async () => {
+    const { directory, packages } = await fixture()
+    const catalogPath = `${directory}/catalog.json`
+    await writeFile(catalogPath, serializeCatalog(mergeCatalogs({ currentEntries: await collectPackages(packages) })))
+    await expect(run(process.execPath, [`${root}/catalog.mjs`, 'verify', catalogPath, packages, '--skip-checks'])).rejects.toMatchObject({ code: 1 })
+  })
+
+  it.each([false, true])('CLI generate 自动保护已有同版本内容，显式空基线也不能绕过（%s）', async (explicitPrevious) => {
+    const { directory, packages, source } = await fixture()
+    const args = [`${root}/catalog.mjs`, 'generate', packages, directory]
+    await run(process.execPath, args)
+    const catalogBefore = await readFile(`${directory}/catalog.json`)
+    const sumsBefore = await readFile(`${directory}/SHA256SUMS`)
+    await writeFile(`${source}/index.html`, '<!doctype html><p>同版本被修改的内容</p>')
+    await run(process.execPath, [`${root}/package.mjs`, source, packages])
+    if (explicitPrevious) {
+      await writeFile(`${directory}/empty.json`, serializeCatalog(sampleCatalog([])))
+      args.push(`--previous=${directory}/empty.json`)
+    }
+    await expect(run(process.execPath, args)).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('不允许更换摘要') })
+    expect(await readFile(`${directory}/catalog.json`)).toEqual(catalogBefore)
+    expect(await readFile(`${directory}/SHA256SUMS`)).toEqual(sumsBefore)
+  })
+
+  it('CLI generate 拒绝已有版本倒退和损坏基线，保留原索引与校验清单', async () => {
+    const { directory, packages } = await fixture()
+    await writeFile(`${directory}/SHA256SUMS`, '原校验清单')
+    for (const previous of [serializeCatalog(sampleCatalog([sampleEntry('test-plugin', '2.0.0')])), '{broken']) {
+      await writeFile(`${directory}/catalog.json`, previous)
+      await expect(run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, directory])).rejects.toMatchObject({ code: 1 })
+      expect(await readFile(`${directory}/catalog.json`, 'utf8')).toBe(previous)
+      expect(await readFile(`${directory}/SHA256SUMS`, 'utf8')).toBe('原校验清单')
+    }
+  })
+
+  it('CLI generate 拒绝包目录位于输出目录外，不留下错误索引或校验清单', async () => {
+    const { directory, packages } = await fixture()
+    const output = `${directory}/separate`
+    await expect(run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, output])).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('必须位于分发输出目录内') })
+    await expect(readFile(`${output}/catalog.json`)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(`${output}/SHA256SUMS`)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('CLI 拒绝已废止的 --tag 参数', async () => {
+    const { directory, packages } = await fixture()
+    await expect(
+      run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, directory, '--tag=v2.0.0'])
+    ).rejects.toMatchObject({ code: 1 })
+  })
+
+  it.each(['9007199254740993', '-9007199254740993', '1e400'])('原始历史目录数字 %s 必须拒绝', async (literal) => {
     const catalog = sampleCatalog()
     const raw = JSON.stringify(catalog).replace('"settings":[]', `"settings":[{"key":"scale","label":"比例","type":"number","default":${literal}}]`)
     expect(() => parseCatalog(raw)).toThrow()
     const { directory, packages } = await fixture()
     const previous = `${directory}/previous.json`
     await writeFile(previous, raw)
-    await expect(run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, `${directory}/next`, '--tag=v1.0.1', `--previous=${previous}`])).rejects.toMatchObject({ code: 1 })
-    expect(await readFile(previous, 'utf8')).toBe(raw)
+    await expect(
+      run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, `${directory}/next`, `--previous=${previous}`])
+    ).rejects.toMatchObject({ code: 1 })
   })
 
-  it('显式 previous 缺失、空、坏 JSON 均失败，不降级首发', async () => {
+  it('显式 previous 缺失、空、坏 JSON 均失败', async () => {
     const { directory, packages } = await fixture()
     for (const content of [null, '', '{broken']) {
       const previous = `${directory}/previous.json`
       if (content !== null) await writeFile(previous, content)
-      await expect(run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, directory, '--tag=v1.0.1', `--previous=${previous}`])).rejects.toMatchObject({ code: 1 })
+      await expect(
+        run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, directory, `--previous=${previous}`])
+      ).rejects.toMatchObject({ code: 1 })
     }
   })
 
@@ -306,7 +515,6 @@ describe('catalog CLI、真实 ZIP 与 SHA256SUMS', () => {
     await writeFile(path, `${JSON.stringify(sampleCatalog())}${' '.repeat(MAX_CATALOG_BYTES)}`)
     await expect(readCatalog(path)).rejects.toThrow('大小超限')
     await expect(run(process.execPath, [`${root}/catalog.mjs`, 'verify', path])).rejects.toMatchObject({ code: 1 })
-    await expect(run(process.execPath, [`${root}/catalog.mjs`, 'generate', packages, directory, '--tga=v1.0.0'])).rejects.toMatchObject({ code: 1 })
   })
 
   it('真实归档中的非法清单、错误文件名和超限包均被拒绝', async () => {
@@ -337,6 +545,89 @@ describe('catalog CLI、真实 ZIP 与 SHA256SUMS', () => {
   })
 
   it('checksum 格式按文件名排序', () => {
-    expect(formatSha256Sums([{ name: 'shorts-1.0.3.tgapp', sha256: 'b'.repeat(64) }, { name: 'catalog.json', sha256: 'a'.repeat(64) }])).toBe(`${'a'.repeat(64)}  catalog.json\n${'b'.repeat(64)}  shorts-1.0.3.tgapp\n`)
+    expect(
+      formatSha256Sums([
+        { name: 'apps/shorts-1.0.3.tgapp', sha256: 'b'.repeat(64) },
+        { name: 'catalog.json', sha256: 'a'.repeat(64) },
+      ])
+    ).toBe(`${'b'.repeat(64)}  apps/shorts-1.0.3.tgapp\n${'a'.repeat(64)}  catalog.json\n`)
   })
+})
+
+describe('build.mjs 与独立分发输出行为', () => {
+  it('TGDRIVE_APP_BUILD_OUTPUT 指定独立输出分发目录时生成完整分发产物并通过校验', async () => {
+    const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
+    temporary.push(output)
+    await run(process.execPath, [`${root}/build.mjs`], {
+      env: { ...process.env, TGDRIVE_APP_BUILD_OUTPUT: output },
+    })
+    const catalog = await readCatalog(`${output}/catalog.json`)
+    expect(catalog.schema_version).toBe(2)
+    expect(catalog.entries).toHaveLength(4)
+    const packages = await collectPackages(`${output}/apps`)
+    expect(packages).toHaveLength(4)
+    await expect(verifyCatalogPackages(catalog, `${output}/apps`)).resolves.toBeUndefined()
+    const shaCheck = await run('sha256sum', ['-c', 'SHA256SUMS'], { cwd: output })
+    // execFile 成功退出已证明校验通过，不绑定系统语言中的“成功”或“OK”。
+    expect(shaCheck.stdout).toContain('apps/books-1.1.4.tgapp:')
+    expect(shaCheck.stdout).toContain('catalog.json:')
+  }, 20_000)
+
+  it('目标 catalog.json 存在同版本篡改时，在 staging 阻断并不破坏目标目录', async () => {
+    const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
+    temporary.push(output)
+    const tamperedCatalog = sampleCatalog([sampleEntry('books', '1.1.4', 'f'.repeat(64))])
+    await writeFile(`${output}/catalog.json`, JSON.stringify(tamperedCatalog, null, 2))
+
+    await expect(
+      run(process.execPath, [`${root}/build.mjs`], {
+        env: { ...process.env, TGDRIVE_APP_BUILD_OUTPUT: output },
+      })
+    ).rejects.toMatchObject({ stderr: expect.stringContaining('同一应用相同版本不允许更换摘要') })
+
+    // 目标目录的 catalog.json 未被覆盖破坏
+    expect(await readFile(`${output}/catalog.json`, 'utf8')).toBe(JSON.stringify(tamperedCatalog, null, 2))
+  }, 20_000)
+
+  it('目标 catalog.json 损坏或格式错误时，构建失败且现有资产保持不变', async () => {
+    const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
+    temporary.push(output)
+    const brokenContent = '{ "schema_version": 1, "repository": "broken" '
+    await writeFile(`${output}/catalog.json`, brokenContent)
+    await mkdir(`${output}/apps`, { recursive: true })
+    const markerContent = '不可被覆盖'
+    await writeFile(`${output}/apps/marker.txt`, markerContent)
+
+    // 构建必须失败，不能把损坏的 catalog 误当成 ENOENT 首次构建
+    await expect(
+      run(process.execPath, [`${root}/build.mjs`], {
+        env: { ...process.env, TGDRIVE_APP_BUILD_OUTPUT: output },
+      })
+    ).rejects.toMatchObject({ code: 1 })
+
+    // 目标目录的损坏文件和现有资产完全保持原样未被静默覆盖
+    expect(await readFile(`${output}/catalog.json`, 'utf8')).toBe(brokenContent)
+    expect(await readFile(`${output}/apps/marker.txt`, 'utf8')).toBe(markerContent)
+  }, 20_000)
+
+  it('构建成功后自动清理 apps/ 中的历史旧版本包，仅保留最新四包', async () => {
+    const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
+    temporary.push(output)
+    await mkdir(`${output}/apps`, { recursive: true })
+    await writeFile(`${output}/apps/comics-1.0.8.tgapp`, '旧版占位')
+    await writeFile(`${output}/apps/legacy-0.0.1.tgapp`, '废弃包')
+
+    await run(process.execPath, [`${root}/build.mjs`], {
+      env: { ...process.env, TGDRIVE_APP_BUILD_OUTPUT: output },
+    })
+
+    const packages = await collectPackages(`${output}/apps`)
+    expect(packages).toHaveLength(4)
+    expect(packages.map(p => p.filename)).toEqual([
+      'books-1.1.4.tgapp',
+      'cinema-1.1.2.tgapp',
+      'comics-1.0.9.tgapp',
+      'shorts-1.0.3.tgapp',
+    ])
+  }, 20_000)
 })

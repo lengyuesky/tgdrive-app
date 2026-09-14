@@ -30,13 +30,11 @@ export interface CatalogEntry {
   sha256: string
   size: number
   url: string
-  release_tag: string
 }
 
 export interface Catalog {
-  schema_version: 1
+  schema_version: 2
   repository: string
-  release_tag: string
   entries: CatalogEntry[]
 }
 
@@ -44,6 +42,7 @@ export interface PackageMetadata {
   manifest: AppManifest
   sha256: string
   size: number
+  url?: string
 }
 
 export interface CollectedPackage extends PackageMetadata {
@@ -56,7 +55,6 @@ export const MAX_CATALOG_BYTES: number
 export const MAX_ENTRIES: number
 export const MAX_PACKAGE_BYTES: number
 export const MAX_MANIFEST_BYTES: number
-export const TAG_PATTERN: RegExp
 export const REPO_PATTERN: RegExp
 export const SHA256_PATTERN: RegExp
 export const APP_ID_PATTERN: RegExp
@@ -64,7 +62,6 @@ export const VERSION_PATTERN: RegExp
 
 export function parsePublishJson(text: string): unknown
 export function validateRepository(repository: unknown): asserts repository is string
-export function validateReleaseTag(tag: unknown): asserts tag is string
 export function compareStableVersions(left: string, right: string): number
 export function validateManifest(manifest: unknown): asserts manifest is AppManifest
 export function readLimitedFile(path: string, maxBytes: number, label: string): Promise<Buffer>
@@ -76,10 +73,10 @@ export function serializeCatalog(catalog: Catalog): string
 export function parseCatalog(content: Buffer | string, options?: { repository?: string }): Catalog
 export function readCatalog(path: string, options?: { repository?: string }): Promise<Catalog>
 export function mergeCatalogs(options: {
-  currentEntries: PackageMetadata[]
+  currentEntries: PackageMetadata[] | CatalogEntry[]
   previousCatalog?: Catalog | null
-  releaseTag: string
   repository?: string
 }): Catalog
 export function collectPackages(packagesDir: string): Promise<CollectedPackage[]>
 export function formatSha256Sums(fileEntries: Array<{ name: string; sha256: string }>): string
+export function verifyCatalogPackages(catalog: Catalog, packagesDir: string): Promise<void>

@@ -1,7 +1,7 @@
-// catalog.mjs：插件发布目录生成、历史合并、严格校验与 SHA256SUMS 工具。
+// catalog.mjs：根目录插件分发目录生成、更新校验、本地包核验与 SHA256SUMS 工具。
 import { open, writeFile, readdir, mkdir } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -12,7 +12,6 @@ export const MAX_CATALOG_BYTES = 1024 * 1024
 export const MAX_ENTRIES = 512
 export const MAX_PACKAGE_BYTES = 16 * 1024 * 1024
 export const MAX_MANIFEST_BYTES = 64 * 1024
-export const TAG_PATTERN = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
 export const REPO_PATTERN = /^(?!\.{1,2}\/)[a-zA-Z0-9_.-]+\/(?!\.{1,2}$)[a-zA-Z0-9_.-]+$/
 export const SHA256_PATTERN = /^[0-9a-f]{64}$/
 export const APP_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/
@@ -60,12 +59,7 @@ export function validateRepository(repository) {
   if (!validText(repository, 100) || !matches(REPO_PATTERN, repository)) throw new Error('仓库标识无效，必须为合法 owner/repo')
 }
 
-export function validateReleaseTag(tag) {
-  if (!matches(TAG_PATTERN, tag)) throw new Error('release_tag 必须为无前导零的稳定 vX.Y.Z')
-  versionParts(tag.slice(1))
-}
-
-/** 稳定 SemVer 按数值分段比较，避免字典序和浮点精度影响发布顺序。 */
+/** 稳定 SemVer 按数值分段比较，避免字典序和浮点精度影响版本顺序。 */
 export function compareStableVersions(left, right) {
   const a = versionParts(left)
   const b = versionParts(right)
@@ -162,18 +156,17 @@ export function sha256Hex(buffer) {
   return createHash('sha256').update(buffer).digest('hex')
 }
 
-/** 校验完整条目，包括清单、大小、稳定 tag 与精确的仓库资产 URL。 */
+/** 校验完整条目，包括清单、大小与精确的 raw.githubusercontent.com 包 URL。 */
 export function validateEntry(entry, options = {}) {
   const repository = options.repository ?? DEFAULT_REPOSITORY
   validateRepository(repository)
-  validateObject(entry, '目录条目', ['manifest', 'sha256', 'size', 'url', 'release_tag'])
+  validateObject(entry, '目录条目', ['manifest', 'sha256', 'size', 'url'])
   validateManifest(entry.manifest)
   if (!matches(SHA256_PATTERN, entry.sha256)) throw new Error('sha256 必须为 64 位小写 hex')
   if (!Number.isInteger(entry.size) || entry.size <= 0 || entry.size > MAX_PACKAGE_BYTES) throw new Error('size 必须为正整数且不能超过 16 MiB')
-  validateReleaseTag(entry.release_tag)
   const { id, version } = entry.manifest
-  const expectedUrl = `https://github.com/${repository}/releases/download/${entry.release_tag}/${id}-${version}.tgapp`
-  if (entry.url !== expectedUrl) throw new Error('条目 URL 不符合规范，必须精确指向指定仓库、稳定 tag 和包文件名')
+  const expectedUrl = `https://raw.githubusercontent.com/${repository}/main/apps/${id}-${version}.tgapp`
+  if (entry.url !== expectedUrl) throw new Error('条目 URL 不符合规范，必须精确指向指定仓库 main 分支的 apps 包文件')
 }
 
 /** 序列化与实际写入使用相同字节上限，包含末尾换行。 */
@@ -183,21 +176,20 @@ export function serializeCatalog(catalog) {
   return json
 }
 
+/** 校验 catalog 顶层结构，schema_version 固定为 2，每个 ID 最多一条最新记录。 */
 export function validateCatalog(catalog, options = {}) {
-  validateObject(catalog, 'catalog', ['schema_version', 'repository', 'release_tag', 'entries'])
-  if (catalog.schema_version !== 1) throw new Error('不支持的 schema_version，预期 1')
+  validateObject(catalog, 'catalog', ['schema_version', 'repository', 'entries'])
+  if (catalog.schema_version !== 2) throw new Error('不支持的 schema_version，预期 2')
   validateRepository(catalog.repository)
   if (options.repository !== undefined && catalog.repository !== options.repository) throw new Error('目录所属仓库与当前仓库不匹配')
-  validateReleaseTag(catalog.release_tag)
   if (!Array.isArray(catalog.entries)) throw new Error('entries 必须为数组')
   if (catalog.entries.length > MAX_ENTRIES) throw new Error('目录条目数超限（最大 512 条）')
   const seen = new Set()
   for (const entry of catalog.entries) {
     validateEntry(entry, { repository: catalog.repository })
-    if (compareStableVersions(entry.release_tag.slice(1), catalog.release_tag.slice(1)) > 0) throw new Error('条目 release_tag 不能晚于目录 release_tag')
-    const key = `${entry.manifest.id}@${entry.manifest.version}`
-    if (seen.has(key)) throw new Error(`禁止重复记录：${key}`)
-    seen.add(key)
+    const id = entry.manifest.id
+    if (seen.has(id)) throw new Error(`禁止重复应用记录：${id}`)
+    seen.add(id)
   }
   serializeCatalog(catalog)
   return true
@@ -219,42 +211,53 @@ export async function readCatalog(path, options = {}) {
   return parseCatalog(await readLimitedFile(path, MAX_CATALOG_BYTES, '目录'), options)
 }
 
-/** 历史全量保留；同版本的摘要、完整清单和长度均不可改变。 */
-export function mergeCatalogs({ currentEntries, previousCatalog = null, releaseTag, repository = DEFAULT_REPOSITORY }) {
-  validateReleaseTag(releaseTag)
+/**
+ * 生成或更新最新版目录。
+ * 允许新版本替换旧版本，允许目录移除插件；
+ * 不允许同 ID 倒退版本；
+ * 对现有快照内相同 id/version 严格校验 digest、manifest 与 size 防篡改。
+ */
+export function mergeCatalogs({ currentEntries, previousCatalog = null, repository = DEFAULT_REPOSITORY }) {
   validateRepository(repository)
-  const merged = new Map()
-  if (previousCatalog !== null) {
+  const prevMap = new Map()
+  if (previousCatalog !== null && previousCatalog !== undefined) {
     validateCatalog(previousCatalog, { repository })
-    if (compareStableVersions(releaseTag.slice(1), previousCatalog.release_tag.slice(1)) <= 0) throw new Error('新 release_tag 必须大于上一稳定目录版本')
-    for (const prev of previousCatalog.entries) merged.set(`${prev.manifest.id}@${prev.manifest.version}`, prev)
+    for (const prev of previousCatalog.entries) {
+      prevMap.set(prev.manifest.id, prev)
+    }
   }
   if (!Array.isArray(currentEntries)) throw new Error('当前发布条目必须为数组')
-  const currentKeys = new Set()
+  const currentMap = new Map()
   for (const cur of currentEntries) {
     const entry = {
       manifest: cur?.manifest,
       sha256: cur?.sha256,
       size: cur?.size,
-      url: `https://github.com/${repository}/releases/download/${releaseTag}/${cur?.manifest?.id}-${cur?.manifest?.version}.tgapp`,
-      release_tag: releaseTag,
+      url: cur?.url ?? `https://raw.githubusercontent.com/${repository}/main/apps/${cur?.manifest?.id}-${cur?.manifest?.version}.tgapp`,
     }
-    // 复用历史之前仍验证当前产物，不能让相同摘要掩盖错误元数据。
     validateEntry(entry, { repository })
-    const key = `${entry.manifest.id}@${entry.manifest.version}`
-    if (currentKeys.has(key)) throw new Error(`禁止重复记录：${key}`)
-    currentKeys.add(key)
-    const prev = merged.get(key)
+    const id = entry.manifest.id
+    if (currentMap.has(id)) throw new Error(`禁止重复记录：${id}`)
+    const prev = prevMap.get(id)
     if (prev) {
-      if (prev.sha256 !== entry.sha256) throw new Error(`同一应用相同版本不允许更换摘要（tamper detected）：${key}`)
-      if (prev.size !== entry.size || !isDeepStrictEqual(prev.manifest, entry.manifest)) throw new Error(`同一应用相同版本不允许更换完整清单或大小：${key}`)
-    } else {
-      merged.set(key, entry)
+      const cmp = compareStableVersions(entry.manifest.version, prev.manifest.version)
+      if (cmp < 0) {
+        throw new Error(`不允许同应用版本倒退：${id} 从 ${prev.manifest.version} 降至 ${entry.manifest.version}`)
+      }
+      if (cmp === 0) {
+        if (prev.sha256 !== entry.sha256) {
+          throw new Error(`同一应用相同版本不允许更换摘要（tamper detected）：${id}@${entry.manifest.version}`)
+        }
+        if (prev.size !== entry.size || !isDeepStrictEqual(prev.manifest, entry.manifest)) {
+          throw new Error(`同一应用相同版本不允许更换完整清单或大小：${id}@${entry.manifest.version}`)
+        }
+      }
     }
+    currentMap.set(id, entry)
   }
-  const entries = [...merged.values()].sort((a, b) => a.manifest.id.localeCompare(b.manifest.id) || compareStableVersions(b.manifest.version, a.manifest.version))
-  if (entries.length > MAX_ENTRIES) throw new Error('目录合并后条目超过上限，发布失败而非截断历史')
-  const catalog = { schema_version: 1, repository, release_tag: releaseTag, entries }
+  const entries = [...currentMap.values()].sort((a, b) => a.manifest.id.localeCompare(b.manifest.id))
+  if (entries.length > MAX_ENTRIES) throw new Error('目录合并后条目超过上限')
+  const catalog = { schema_version: 2, repository, entries }
   validateCatalog(catalog, { repository })
   return catalog
 }
@@ -276,6 +279,36 @@ export async function collectPackages(packagesDir) {
   return packages
 }
 
+/** 校验 catalog 与本地真实 .tgapp 插件包双向完全一致。 */
+export async function verifyCatalogPackages(catalog, packagesDir) {
+  validateCatalog(catalog)
+  const packages = await collectPackages(packagesDir)
+  const pkgMap = new Map(packages.map(p => [p.manifest.id, p]))
+
+  if (packages.length !== catalog.entries.length) {
+    throw new Error(`本地插件包数量（${packages.length}）与目录条目数（${catalog.entries.length}）不一致`)
+  }
+
+  for (const entry of catalog.entries) {
+    const pkg = pkgMap.get(entry.manifest.id)
+    if (!pkg) {
+      throw new Error(`未在 ${packagesDir} 找到目录对应插件包：${entry.manifest.id}-${entry.manifest.version}.tgapp`)
+    }
+    if (pkg.manifest.version !== entry.manifest.version) {
+      throw new Error(`本地插件包版本（${pkg.manifest.version}）与目录记录（${entry.manifest.version}）不符：${entry.manifest.id}`)
+    }
+    if (pkg.size !== entry.size) {
+      throw new Error(`本地插件包大小与目录记录不符：${entry.manifest.id}`)
+    }
+    if (pkg.sha256 !== entry.sha256) {
+      throw new Error(`本地插件包 SHA256 与目录记录不符（tamper detected）：${entry.manifest.id}`)
+    }
+    if (!isDeepStrictEqual(pkg.manifest, entry.manifest)) {
+      throw new Error(`本地插件包 manifest 与目录记录不符：${entry.manifest.id}`)
+    }
+  }
+}
+
 export function formatSha256Sums(fileEntries) {
   const sorted = [...fileEntries].sort((a, b) => a.name.localeCompare(b.name))
   return sorted.map(({ sha256, name }) => `${sha256}  ${name}\n`).join('')
@@ -285,34 +318,48 @@ async function main() {
   const args = process.argv.slice(2)
   const command = args[0] ?? 'generate'
   if (command === 'verify') {
-    if (args.length > 2) throw new Error('verify 只接受一个目录文件路径')
-    const catalogPath = resolve(args[1] ?? './catalog/catalog.json')
+    if (args.length > 3) throw new Error('verify 只接受目录文件路径与可选的包目录')
+    const catalogPath = resolve(args[1] ?? './catalog.json')
     const catalog = await readCatalog(catalogPath)
-    console.log(`目录校验通过：${catalogPath}（共 ${catalog.entries.length} 条）`)
+    const packagesDir = resolve(args[2] ?? resolve(dirname(catalogPath), 'apps'))
+    // 分发校验始终检查真实包，缺失或不可读时不能退化为只检查 JSON。
+    await verifyCatalogPackages(catalog, packagesDir)
+    console.log(`目录校验通过：${catalogPath}（共 ${catalog.entries.length} 条，已核对本地包：${packagesDir}）`)
     return
   }
   if (command !== 'generate') throw new Error(`未知命令：${command}`)
-  const packagesDir = resolve(args[1] ?? './catalog')
-  const outputDir = resolve(args[2] ?? packagesDir)
-  let releaseTag = process.env.TGDRIVE_APP_RELEASE_TAG ?? 'v1.0.0'
+  const packagesDir = resolve(args[1] ?? './apps')
+  const outputDir = resolve(args[2] ?? '.')
   let repository = process.env.TGDRIVE_APP_GITHUB_REPO ?? DEFAULT_REPOSITORY
   let previousPath = null
   for (const arg of args.slice(3)) {
-    if (arg.startsWith('--tag=')) releaseTag = arg.slice('--tag='.length)
-    else if (arg.startsWith('--repo=')) repository = arg.slice('--repo='.length)
+    if (arg.startsWith('--repo=')) repository = arg.slice('--repo='.length)
     else if (arg.startsWith('--previous=') && arg.length > '--previous='.length) previousPath = resolve(arg.slice('--previous='.length))
     else throw new Error(`未知或空命令行参数：${arg}`)
   }
-  const previousCatalog = previousPath ? await readCatalog(previousPath, { repository }) : null
+  const targetCatalogPath = resolve(outputDir, 'catalog.json')
+  let previousCatalog = null
+  try {
+    previousCatalog = await readCatalog(targetCatalogPath, { repository })
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
   const packages = await collectPackages(packagesDir)
   if (packages.length === 0) throw new Error('未找到任何 .tgapp 插件包')
-  const catalog = mergeCatalogs({ currentEntries: packages, previousCatalog, releaseTag, repository })
+  // 显式基线只能增加校验，不能替代目标目录已有的版本绑定。
+  if (previousPath) mergeCatalogs({ currentEntries: packages, previousCatalog: await readCatalog(previousPath, { repository }), repository })
+  const catalog = mergeCatalogs({ currentEntries: packages, previousCatalog, repository })
   const catalogJson = serializeCatalog(catalog)
+  const relPrefix = relative(outputDir, packagesDir).replace(/\\/g, '/')
+  if (relPrefix === '..' || relPrefix.startsWith('../') || /[\r\n]/.test(relPrefix)) {
+    throw new Error('插件包目录必须位于分发输出目录内，不能生成指向外部目录的校验清单')
+  }
+  const prefix = relPrefix ? `${relPrefix}/` : ''
   await mkdir(outputDir, { recursive: true })
-  await writeFile(resolve(outputDir, 'catalog.json'), catalogJson)
+  await writeFile(targetCatalogPath, catalogJson)
   await writeFile(resolve(outputDir, 'SHA256SUMS'), formatSha256Sums([
+    ...packages.map(p => ({ name: `${prefix}${p.filename}`, sha256: p.sha256 })),
     { name: 'catalog.json', sha256: sha256Hex(Buffer.from(catalogJson)) },
-    ...packages.map(p => ({ name: p.filename, sha256: p.sha256 })),
   ]))
   console.log(`成功生成 catalog.json（${Buffer.byteLength(catalogJson)} 字节，${catalog.entries.length} 条）与 SHA256SUMS`)
 }

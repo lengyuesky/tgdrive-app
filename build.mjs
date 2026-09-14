@@ -1,16 +1,22 @@
-// 独立插件构建工具：打包静态与编译插件，生成 .build、catalog 与发布清单。
+// 独立插件构建工具：打包静态与编译插件，生成 .build、apps 与根目录分发清单。
 import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
-import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises'
+import { dirname, resolve, join } from 'node:path'
+import { copyFile, mkdir, readdir, writeFile, rm, readFile } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { isDeepStrictEqual } from 'node:util'
 import { spawn } from 'node:child_process'
 import { build } from 'vite'
-import { mergeCatalogs, collectPackages, formatSha256Sums, sha256Hex, serializeCatalog, DEFAULT_REPOSITORY } from './catalog.mjs'
+import {
+  mergeCatalogs, collectPackages, formatSha256Sums, sha256Hex,
+  serializeCatalog, DEFAULT_REPOSITORY, readCatalog, verifyCatalogPackages,
+} from './catalog.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const modules = resolve(root, 'node_modules')
-const catalog = resolve(process.env.TGDRIVE_APP_BUILD_OUTPUT ?? `${root}/catalog`)
+const officialApps = ['shorts', 'books', 'comics', 'cinema']
 
-async function pack(source, destination = catalog) {
+async function pack(source, destination) {
   await new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(process.execPath, [`${root}/package.mjs`, source, destination], { stdio: 'inherit' })
     child.on('error', rejectPromise)
@@ -18,7 +24,7 @@ async function pack(source, destination = catalog) {
   })
 }
 
-async function buildReader(name) {
+async function buildReader(name, destination) {
   const output = `${root}/.build/${name}`
   await build({
     configFile: false,
@@ -72,43 +78,106 @@ async function buildReader(name) {
     }
   }
 
-  await pack(output)
+  await pack(output, destination)
 }
 
 async function buildAll() {
-  await mkdir(catalog, { recursive: true })
-  await pack(`${root}/shorts`)
-  for (const name of ['books', 'comics', 'cinema']) {
-    await buildReader(name)
-  }
-
-  // 自动生成 catalog.json 与 SHA256SUMS
-  const releaseTag = process.env.TGDRIVE_APP_RELEASE_TAG ?? 'v1.0.0'
+  const distRoot = resolve(process.env.TGDRIVE_APP_BUILD_OUTPUT ?? root)
+  const targetAppsDir = resolve(distRoot, 'apps')
+  const targetCatalogPath = resolve(distRoot, 'catalog.json')
+  const targetSumsPath = resolve(distRoot, 'SHA256SUMS')
   const repository = process.env.TGDRIVE_APP_GITHUB_REPO ?? DEFAULT_REPOSITORY
-  const packages = await collectPackages(catalog)
 
-  const catalogObj = mergeCatalogs({
-    currentEntries: packages,
-    releaseTag,
-    repository,
-  })
+  // 1. 在隔离临时 staging 目录构建全部插件包，避免构建中途失败导致目标目录损坏
+  const stagingDir = await mkdtemp(join(tmpdir(), 'tgdrive-build-staging-'))
+  const stagingAppsDir = resolve(stagingDir, 'apps')
+  await mkdir(stagingAppsDir, { recursive: true })
 
-  const catalogJsonStr = serializeCatalog(catalogObj)
-  const catalogPath = `${catalog}/catalog.json`
-  await writeFile(catalogPath, catalogJsonStr)
+  try {
+    await pack(`${root}/shorts`, stagingAppsDir)
+    for (const name of ['books', 'comics', 'cinema']) {
+      await buildReader(name, stagingAppsDir)
+    }
 
-  const sumsEntries = [
-    { name: 'catalog.json', sha256: sha256Hex(Buffer.from(catalogJsonStr, 'utf8')) },
-    ...packages.map((p) => ({ name: p.filename, sha256: p.sha256 })),
-  ]
-  const sumsPath = `${catalog}/SHA256SUMS`
-  await writeFile(sumsPath, formatSha256Sums(sumsEntries))
-  console.log(`生成 catalog.json 与 SHA256SUMS：${catalog}`)
+    // 2. 收集并校验 staging 产物完整性与源 app.json 一致性
+    const packages = await collectPackages(stagingAppsDir)
+    if (packages.length !== officialApps.length || new Set(packages.map(p => p.manifest.id)).size !== officialApps.length) {
+      throw new Error(`构建产物必须恰好包含四个官方插件包（预期 ${officialApps.join(', ')}）`)
+    }
+    for (const pkg of packages) {
+      const sourceManifest = JSON.parse(await readFile(`${root}/${pkg.manifest.id}/app.json`, 'utf8'))
+      if (!isDeepStrictEqual(sourceManifest, pkg.manifest)) {
+        throw new Error(`插件 ${pkg.manifest.id} 包清单与源 app.json 不一致，需重新构建`)
+      }
+    }
+
+    // 3. 若目标目录已有 catalog.json，读取并交由 mergeCatalogs 执行同版本不可篡改校验。
+    // 仅当文件不存在（ENOENT）时允许首次构建，其他损坏/协议错误原样失败阻断，绝不静默覆盖。
+    let previousCatalog = null
+    try {
+      previousCatalog = await readCatalog(targetCatalogPath, { repository })
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.cause?.code === 'ENOENT') {
+        previousCatalog = null
+      } else {
+        throw error
+      }
+    }
+
+    // 4. 生成 catalog.json 与 SHA256SUMS（单一真源 mergeCatalogs 严格执行同版本防篡改与版本单调校验）
+    const catalogObj = mergeCatalogs({
+      currentEntries: packages,
+      previousCatalog,
+      repository,
+    })
+    const catalogJsonStr = serializeCatalog(catalogObj)
+    const stagingCatalogPath = resolve(stagingDir, 'catalog.json')
+    await writeFile(stagingCatalogPath, catalogJsonStr)
+
+    const sumsEntries = [
+      ...packages.map(p => ({ name: `apps/${p.filename}`, sha256: p.sha256 })),
+      { name: 'catalog.json', sha256: sha256Hex(Buffer.from(catalogJsonStr, 'utf8')) },
+    ]
+    const sumsStr = formatSha256Sums(sumsEntries)
+    const stagingSumsPath = resolve(stagingDir, 'SHA256SUMS')
+    await writeFile(stagingSumsPath, sumsStr)
+
+    // 5. staging 内部做校验
+    await verifyCatalogPackages(catalogObj, stagingAppsDir)
+
+    // 6. 验证完全通过后，转入已授权的目标输出目录
+    await mkdir(targetAppsDir, { recursive: true })
+
+    // apps/ 仅保留最新四个包：清理目标目录中的旧版或其他 .tgapp
+    const currentFilenames = new Set(packages.map(p => p.filename))
+    const existingTargetFiles = await readdir(targetAppsDir, { withFileTypes: true })
+    for (const item of existingTargetFiles) {
+      if (item.name.endsWith('.tgapp') && !currentFilenames.has(item.name)) {
+        await rm(resolve(targetAppsDir, item.name), { force: true })
+      }
+    }
+
+    // 转入最新包
+    for (const pkg of packages) {
+      await copyFile(resolve(stagingAppsDir, pkg.filename), resolve(targetAppsDir, pkg.filename))
+    }
+
+    // 转入 catalog.json 与 SHA256SUMS
+    await copyFile(stagingCatalogPath, targetCatalogPath)
+    await copyFile(stagingSumsPath, targetSumsPath)
+
+    console.log(`生成 catalog.json、SHA256SUMS 与 apps/ 插件包：${distRoot}`)
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true })
+  }
 }
 
 if (process.argv[2]) {
-  // 保留原 build:apps 传入已编译源码目录和输出目录的用法。
-  await pack(resolve(process.argv[2]), resolve(process.argv[3] ?? catalog))
+  // 保留原传入已编译源码目录和输出目录的用法
+  const defaultPackDestination = process.env.TGDRIVE_APP_BUILD_OUTPUT
+    ? resolve(process.env.TGDRIVE_APP_BUILD_OUTPUT)
+    : resolve(root, 'apps')
+  await pack(resolve(process.argv[2]), resolve(process.argv[3] ?? defaultPackDestination))
 } else {
   await buildAll()
 }

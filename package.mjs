@@ -7,7 +7,7 @@ import { MAX_MANIFEST_BYTES, parsePublishJson, readLimitedFile } from './catalog
 
 const root = dirname(fileURLToPath(import.meta.url))
 const source = resolve(process.argv[2] ?? `${root}/shorts`)
-const output = resolve(process.argv[3] ?? `${root}/catalog`)
+const output = resolve(process.argv[3] ?? `${root}/apps`)
 const manifest = parsePublishJson(new TextDecoder('utf-8', { fatal: true }).decode(await readLimitedFile(`${source}/app.json`, MAX_MANIFEST_BYTES, '应用清单')))
 if (!/^[a-z][a-z0-9-]{0,63}$/.test(manifest.id) || !/^[0-9A-Za-z.+-]{1,80}$/.test(manifest.version)) {
   throw new Error('应用 ID 或版本无效')

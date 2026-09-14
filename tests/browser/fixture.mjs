@@ -10,7 +10,7 @@ import { verifyFixtureBuilds } from './fixture-preflight.mjs'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hostDir = process.env.TGDRIVE_HOST_DIR
-const catalogDir = resolve(process.env.TGDRIVE_APP_CATALOG_DIR ?? `${repoRoot}/catalog`)
+const catalogDir = resolve(process.env.TGDRIVE_APP_CATALOG_DIR ?? `${repoRoot}/apps`)
 await verifyFixtureBuilds(hostDir, catalogDir)
 
 const temporary = await mkdtemp(`${tmpdir()}/tgdrive-apps-browser-`)
