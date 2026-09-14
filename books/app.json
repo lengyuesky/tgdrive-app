@@ -1,7 +1,7 @@
 {
   "id": "books",
   "name": "图书",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "api_version": 2,
   "min_host_version": "0.1.0",
   "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",

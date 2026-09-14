@@ -57,6 +57,10 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .preferences { padding:12px 18px; display:flex; gap:16px; flex-wrap:wrap; border-bottom:1px solid var(--line); background:var(--surface); max-height:32vh; overflow:auto; }
 .preferences label { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); }
 .preferences input[type="range"] { width:110px; accent-color:var(--accent); padding:0; }
+.range-stepper { display:inline-flex; align-items:center; gap:6px; }
+.step-btn { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; min-width:26px; min-height:26px; padding:0; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--text); font-size:14px; font-weight:700; line-height:1; cursor:pointer; flex-shrink:0; transition:border-color .15s, color .15s; }
+.step-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+.step-btn:disabled { opacity:.3; cursor:default; }
 .reading-viewport { min-height:0; flex:1; overflow:auto; position:relative; overscroll-behavior:contain; padding:18px 12px; overflow-anchor:none; }
 .reading-viewport:focus { outline:none; }
 .flow-content { margin:0 auto; padding:12px 20px 70px; font-family:"Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", SimSun, serif; overflow-wrap:anywhere; }
@@ -108,6 +112,7 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
   #app[data-kind="comics"] .library-card { padding:0; }
   .preferences, .bookmarks-panel { max-height:60dvh; }
   .reader-footer select { min-width:0; }
+  .step-btn { min-width:36px; min-height:36px; width:36px; height:36px; font-size:18px; }
 }
 /* 正文分页只改变当前内容单元，操作浮层不参与正文尺寸计算。 */
 .mobile-only { display:none; }
@@ -155,6 +160,9 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .immersive .preferences, .immersive .reader-navigation, .immersive .reader-more { display:flex; flex-direction:column; align-items:stretch; gap:12px; }
 .immersive .reader-panel label { display:flex; align-items:center; justify-content:space-between; width:100%; gap:12px; font-size:14px; }
 .immersive .reader-panel input[type="range"] { width:60%; }
+.immersive .reader-panel .range-stepper { display:flex; align-items:center; gap:8px; width:65%; justify-content:flex-end; }
+.immersive .reader-panel .range-stepper input[type="range"] { flex:1; width:auto; min-width:0; }
+.immersive .reader-panel .step-btn { width:38px; height:38px; min-width:38px; min-height:38px; font-size:18px; border-radius:8px; }
 .immersive .reader-panel select { max-width:75%; min-width:100px; }
 .immersive .reader-panel .width-option { display:none; }
 .immersive .reader-navigation #toc { width:100%; max-width:100%; }

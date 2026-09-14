@@ -11,16 +11,16 @@
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
   - `apps/shorts-1.0.3.tgapp`
-  - `apps/books-1.1.5.tgapp`
-  - `apps/comics-1.0.12.tgapp`
+  - `apps/books-1.1.6.tgapp`
+  - `apps/comics-1.0.13.tgapp`
   - `apps/cinema-1.1.2.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/books-1.1.5.tgapp
+<sha256>  apps/books-1.1.6.tgapp
 <sha256>  apps/cinema-1.1.2.tgapp
-<sha256>  apps/comics-1.0.12.tgapp
+<sha256>  apps/comics-1.0.13.tgapp
 <sha256>  apps/shorts-1.0.3.tgapp
 <sha256>  catalog.json
 ```
@@ -43,7 +43,7 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.1.5",
+        "version": "1.1.6",
         "api_version": 2,
         "min_host_version": "0.1.0",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
@@ -62,7 +62,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.1.5.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.1.6.tgapp"
     }
   ]
 }

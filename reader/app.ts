@@ -31,7 +31,7 @@ export async function startApp(options: AppOptions) {
         <button id="reader-more-toggle" class="mobile-only">更多</button>
         <div id="reader-more" class="reader-more" aria-label="更多操作"><div class="panel-heading mobile-only"><strong>更多操作</strong><button data-close-panel>关闭</button></div><button id="download">下载原文件</button><button id="reader-settings" class="mobile-only">目录设置</button><button id="reader-close" class="mobile-only">返回网盘</button></div>
       </div>
-      <div id="preferences" class="preferences" aria-label="阅读设置" hidden><div class="panel-heading mobile-only"><strong>阅读设置</strong><button data-close-panel>关闭</button></div><label>主题<select id="theme"><option value="system">跟随主站</option><option value="light">明亮</option><option value="sepia">护眼</option><option value="dark">深色</option></select></label><label class="flow-option">字号<input id="font-size" type="range" min="12" max="36" step="1" /></label><label class="flow-option">行距<input id="line-height" type="range" min="1.2" max="2.8" step="0.1" /></label><label class="flow-option width-option">正文宽度<input id="width" type="range" min="360" max="1400" step="20" /></label><label id="encoding-option" hidden>文本编码<select id="encoding"><option value="utf-8">UTF-8</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option><option value="gb18030">GB18030 / GBK</option></select></label><label id="mode-option" hidden>阅读模式<select id="mode"><option value="scroll">上下滚动</option><option value="page">单页翻页</option></select></label><label id="direction-option" hidden>翻页方向<select id="direction"><option value="ltr">从左到右</option><option value="rtl">从右到左</option></select></label><label id="zoom-option" hidden>缩放<select id="zoom"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">适合宽度</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option></select></label></div>
+      <div id="preferences" class="preferences" aria-label="阅读设置" hidden><div class="panel-heading mobile-only"><strong>阅读设置</strong><button data-close-panel>关闭</button></div><label>主题<select id="theme"><option value="system">跟随主站</option><option value="light">明亮</option><option value="sepia">护眼</option><option value="dark">深色</option></select></label><label class="flow-option"><span>字号</span><span class="range-stepper"><button type="button" id="font-size-decrease" class="step-btn" aria-label="减小字号" title="减小字号">−</button><input id="font-size" type="range" min="12" max="36" step="1" /><button type="button" id="font-size-increase" class="step-btn" aria-label="增大字号" title="增大字号">+</button></span></label><label class="flow-option"><span>行距</span><span class="range-stepper"><button type="button" id="line-height-decrease" class="step-btn" aria-label="减小行距">−</button><input id="line-height" type="range" min="1.2" max="2.8" step="0.1" /><button type="button" id="line-height-increase" class="step-btn" aria-label="增大行距" title="增大行距">+</button></span></label><label class="flow-option width-option">正文宽度<input id="width" type="range" min="360" max="1400" step="20" /></label><label id="encoding-option" hidden>文本编码<select id="encoding"><option value="utf-8">UTF-8</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option><option value="gb18030">GB18030 / GBK</option></select></label><label id="mode-option" hidden>阅读模式<select id="mode"><option value="scroll">上下滚动</option><option value="page">单页翻页</option></select></label><label id="direction-option" hidden>翻页方向<select id="direction"><option value="ltr">从左到右</option><option value="rtl">从右到左</option></select></label><label id="zoom-option" hidden>缩放<select id="zoom"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">适合宽度</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option></select></label></div>
       <div id="bookmarks" class="bookmarks-panel" aria-label="书签" hidden><div class="panel-heading mobile-only"><strong>书签</strong><button data-close-panel>关闭</button></div><div class="bookmark-tools"><input id="bookmark-name" maxlength="120" placeholder="书签名称（可选）" aria-label="书签名称" /><button id="add-bookmark">添加当前位置</button><button id="bookmark-more" hidden>更多书签</button></div><div id="bookmark-items"></div></div>
       <div id="conflict" class="conflict" role="alert" hidden><span>另一设备更新了进度，已暂停自动覆盖。</span><button id="use-cloud">使用已保存进度</button><button id="use-current">从当前页继续并保存</button></div>
       <div id="reading-status" role="status"></div><main id="viewport" class="reading-viewport" tabindex="0" aria-label="阅读内容"></main>
@@ -90,6 +90,10 @@ export async function startApp(options: AppOptions) {
   }
   function syncPreferences() {
     for (const [id, key] of Object.entries({ theme: 'theme', 'font-size': 'fontSize', 'line-height': 'lineHeight', width: 'width', mode: 'mode', direction: 'direction', zoom: 'zoom' })) get<HTMLInputElement>(id).value = String(prefs[key as keyof Preferences])
+    get<HTMLButtonElement>('font-size-decrease').disabled = prefs.fontSize <= 12
+    get<HTMLButtonElement>('font-size-increase').disabled = prefs.fontSize >= 36
+    get<HTMLButtonElement>('line-height-decrease').disabled = prefs.lineHeight <= 1.2
+    get<HTMLButtonElement>('line-height-increase').disabled = prefs.lineHeight >= 2.8
     get('viewport').dataset.mode = prefs.mode
     applyTheme()
   }
@@ -335,6 +339,37 @@ export async function startApp(options: AppOptions) {
       savePreference({ [key]: ['fontSize','lineHeight','width','zoom'].includes(key) ? Number(raw) : raw })
     })
   }
+  const step = (id: string, action: () => unknown) => {
+    get(id).addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      try { Promise.resolve(action()).catch(report) } catch (error) { report(error) }
+    })
+  }
+  step('font-size-decrease', () => {
+    const next = Math.max(12, Math.round(prefs.fontSize - 1))
+    if (next !== prefs.fontSize) savePreference({ fontSize: next })
+  })
+  step('font-size-increase', () => {
+    const next = Math.min(36, Math.round(prefs.fontSize + 1))
+    if (next !== prefs.fontSize) savePreference({ fontSize: next })
+  })
+  step('line-height-decrease', () => {
+    const next = Math.max(1.2, Math.round((prefs.lineHeight - 0.1) * 10) / 10)
+    if (next !== prefs.lineHeight) savePreference({ lineHeight: next })
+  })
+  step('line-height-increase', () => {
+    const next = Math.min(2.8, Math.round((prefs.lineHeight + 0.1) * 10) / 10)
+    if (next !== prefs.lineHeight) savePreference({ lineHeight: next })
+  })
+  const updateStepperDisabled = () => {
+    get<HTMLButtonElement>('font-size-decrease').disabled = Number(get<HTMLInputElement>('font-size').value) <= 12
+    get<HTMLButtonElement>('font-size-increase').disabled = Number(get<HTMLInputElement>('font-size').value) >= 36
+    get<HTMLButtonElement>('line-height-decrease').disabled = Number(get<HTMLInputElement>('line-height').value) <= 1.2
+    get<HTMLButtonElement>('line-height-increase').disabled = Number(get<HTMLInputElement>('line-height').value) >= 2.8
+  }
+  get('font-size').addEventListener('input', updateStepperDisabled)
+  get('line-height').addEventListener('input', updateStepperDisabled)
   get('encoding').addEventListener('change', () => {
     const reader = view as ReaderView & { setEncoding?: (value: string) => Promise<void> }
     if (reader?.setEncoding) void navigate(async () => { await reader.setEncoding!(get<HTMLSelectElement>('encoding').value); toc() }).catch(report)
