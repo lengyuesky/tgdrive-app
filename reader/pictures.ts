@@ -40,7 +40,11 @@ export class PictureWindow {
   private refresh() {
     if (this.signal.aborted) { this.destroy(); return }
     const box = this.viewport.getBoundingClientRect(), centerX = (box.left + box.right) / 2, centerY = (box.top + box.bottom) / 2
-    const distance = (rect: DOMRect) => Math.hypot(((rect.left + rect.right) / 2 - centerX) / Math.max(1, box.width), ((rect.top + rect.bottom) / 2 - centerY) / Math.max(1, box.height))
+    // 长图中心可能离视口数万像素，但正在显示的部分仍须优先加载并保留解码结果。
+    const distance = (rect: DOMRect) => Math.hypot(
+      Math.max(rect.left - centerX, centerX - rect.right, 0) / Math.max(1, box.width),
+      Math.max(rect.top - centerY, centerY - rect.bottom, 0) / Math.max(1, box.height),
+    )
     const vMargin = (this.options?.verticalMargin ?? 1) * box.height
     const maxVisible = this.options?.maxVisible ?? 3
     const limit = this.options?.costLimit ?? 128 * MiB
