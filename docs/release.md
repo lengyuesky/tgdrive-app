@@ -12,7 +12,7 @@
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
   - `apps/shorts-1.0.3.tgapp`
   - `apps/books-1.1.4.tgapp`
-  - `apps/comics-1.0.9.tgapp`
+  - `apps/comics-1.0.10.tgapp`
   - `apps/cinema-1.1.2.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
@@ -20,7 +20,7 @@
 ```
 <sha256>  apps/books-1.1.4.tgapp
 <sha256>  apps/cinema-1.1.2.tgapp
-<sha256>  apps/comics-1.0.9.tgapp
+<sha256>  apps/comics-1.0.10.tgapp
 <sha256>  apps/shorts-1.0.3.tgapp
 <sha256>  catalog.json
 ```

@@ -54,7 +54,7 @@
       "manifest": {
         "id": "comics",
         "name": "漫画",
-        "version": "1.0.9",
+        "version": "1.0.10",
         "api_version": 2,
         "min_host_version": "0.1.0",
         "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
@@ -74,9 +74,9 @@
           }
         ]
       },
-      "sha256": "caa401407f82b7017ae2536fd3ee7ddb31cdb69e5bc8f6595224c45ce0f41c40",
-      "size": 63460,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.0.9.tgapp"
+      "sha256": "da7f2a98a82277fbe166d08c1a27e3f90281be46f97a738b3659600d20be62ea",
+      "size": 63901,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.0.10.tgapp"
     },
     {
       "manifest": {

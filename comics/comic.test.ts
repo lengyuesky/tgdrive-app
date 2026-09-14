@@ -146,4 +146,50 @@ describe('长漫画滚动定位', () => {
     await finish(reader.turn(-1))
     expect(reader.current().index).toBe(1498)
   })
+
+  it('连续小步滚动跨页时阅读进度单调推进，视口不发生回弹或乱跳', async () => {
+    const { reader, viewport, finish, scrollBy } = fixture(100, 1000)
+    await finish(reader.open({ format: 'comic', index: 0, ratio: 0 }))
+    let lastPosition = -1
+    const step = 200
+    // 连续小步滚动 25 次，跨越 5 页（每页 1000px）
+    for (let i = 0; i < 25; i++) {
+      await scrollBy(step)
+      const loc = reader.current()
+      const globalPos = loc.index * 1000 + (loc.ratio ?? 0) * 1000
+      expect(globalPos).toBeGreaterThan(lastPosition)
+      lastPosition = globalPos
+    }
+    expect(reader.current().index).toBe(5)
+  })
+
+  it('滚动期间图片延迟加载并测出不同高度时，视口不发生大幅回跳', async () => {
+    const { reader, viewport, finish, scrollBy, pageHeights, measure } = fixture(100, 1000)
+    await finish(reader.open({ format: 'comic', index: 5, ratio: 0 }))
+    // 正在滚动中进入第 6 页
+    await scrollBy(500)
+    const posBefore = reader.current()
+    expect(posBefore.index).toBe(5)
+    // 此时第 6 页（下方页面）加载出长图并触发测量
+    pageHeights.set(6, 2500)
+    measure()
+    const posAfter = reader.current()
+    // 正在进行的阅读位置与比例不受下方图片加载的影响
+    expect(posAfter.index).toBe(posBefore.index)
+    expect(Math.abs((posAfter.ratio ?? 0) - (posBefore.ratio ?? 0))).toBeLessThan(0.01)
+  })
+
+  it('未就绪的图片节点高度偏小时不被采信，保留占位防止轨道塌陷', async () => {
+    const { reader, viewport, finish, pageHeights, measure } = fixture(50, 1200)
+    // 模拟第 11 页尚未就绪，返回 CSS 兜底骨架高度（180px）
+    pageHeights.set(11, 180)
+    await finish(reader.open({ format: 'comic', index: 10, ratio: 0 }))
+    measure()
+    // 该节点不应被当作有效测量高度，应保留预估 minHeight 占位
+    const node11 = viewport.querySelector<HTMLElement>('.comic-page[data-index="11"]')
+    if (node11) {
+      expect(parseFloat(node11.style.minHeight)).toBeGreaterThanOrEqual(240)
+    }
+    expect(reader.current().index).toBe(10)
+  })
 })
