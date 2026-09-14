@@ -192,4 +192,19 @@ describe('长漫画滚动定位', () => {
     }
     expect(reader.current().index).toBe(10)
   })
+
+  it('从第0页打开后跳转到第450页并向下滑动不会跳到430几页', async () => {
+    const { reader, viewport, finish, scrollBy } = fixture(1000, 1200)
+    await finish(reader.open())
+    expect(reader.current().index).toBe(0)
+    await finish(reader.go(449))
+    expect(reader.current().index).toBe(449)
+    // 向下滑动
+    for (let step = 0; step < 10; step++) {
+      await scrollBy(300)
+      const loc = reader.current()
+      expect(loc.index).toBeGreaterThanOrEqual(449)
+      expect(loc.index).toBeLessThan(460)
+    }
+  })
 })

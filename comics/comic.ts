@@ -118,44 +118,49 @@ export class ComicReader implements ReaderView {
     this.rendering = true; this.pendingAnchor = undefined; this.index = boundedIndex(index, this.pages.length)
     this.preloader?.setCenter(this.index)
     const continuous = this.context.prefs.mode === 'scroll'
-    let shift = 0
-    if (programmatic || !continuous) {
-      this.trackFirst = continuous ? Math.max(0, this.index - 20) : this.index
-      this.trackEnd = continuous ? Math.min(this.pages.length, this.index + 21) : this.index + 1
-    } else {
-      const nearStart = this.trackFirst > 0 && (this.index - this.trackFirst < 6)
-      const nearEnd = this.trackEnd < this.pages.length && (this.trackEnd - this.index < 6)
-      if (nearStart || nearEnd) {
-        const nextFirst = Math.max(0, this.index - 20)
-        const nextEnd = Math.min(this.pages.length, this.index + 21)
-        if (nextFirst !== this.trackFirst || nextEnd !== this.trackEnd) {
-          shift = this.sum(0, nextFirst) - this.sum(0, this.trackFirst)
-          this.trackFirst = nextFirst
-          this.trackEnd = nextEnd
-        }
-      }
-    }
+    // 逻辑页码覆盖整本，CSS 轨道限定在当前页前后各二十页，避免浏览器截断超长布局
+    this.trackFirst = continuous ? Math.max(0, this.index - 20) : this.index
+    this.trackEnd = continuous ? Math.min(this.pages.length, this.index + 21) : this.index + 1
     const first = continuous ? Math.max(0, this.index - 2) : this.index
     const last = continuous ? Math.min(this.pages.length, this.index + 3) : this.index + 1
-    for (const [key, node] of this.nodes) if (key < first || key >= last) { this.observer.unobserve(node); this.nodes.delete(key) }
-    const children: HTMLElement[] = []
-    for (let i = first; i < last; i++) {
+    // 确保占位容器已挂载到 root
+    if (this.before.parentElement !== this.root) this.root.prepend(this.before)
+    if (this.after.parentElement !== this.root) this.root.append(this.after)
+
+    // 非破坏性更新：只移除滑窗外的过期节点，绝不清空整个容器，避免滚动条坍塌归零
+    for (const [key, node] of this.nodes) {
+      if (key < first || key >= last) {
+        this.observer.unobserve(node)
+        node.remove()
+        this.nodes.delete(key)
+      }
+    }
+    let refNode: Node = this.after
+    for (let i = last - 1; i >= first; i--) {
       let node = this.nodes.get(i)
       if (!node) {
-        node = document.createElement('figure'); node.className = 'comic-page'; node.dataset.index = String(i)
+        node = document.createElement('figure')
+        node.className = 'comic-page'
+        node.dataset.index = String(i)
         node.style.minHeight = `${this.heights[i]!}px`
         const image = document.createElement('img'), label = document.createElement('figcaption')
-        image.dataset.resource = String(i); image.alt = this.pages[i]!.name; image.decoding = 'async'
-        image.style.aspectRatio = `1 / 1.45`
-        label.textContent = this.sections[i]!.label; node.append(image, label)
-        this.nodes.set(i, node); this.observer.observe(node)
+        image.dataset.resource = String(i)
+        image.alt = this.pages[i]!.name
+        image.decoding = 'async'
+        image.style.aspectRatio = '1 / 1.45'
+        label.textContent = this.sections[i]!.label
+        node.append(image, label)
+        this.nodes.set(i, node)
+        this.observer.observe(node)
       }
-      children.push(node)
+      if (node.nextSibling !== refNode || node.parentElement !== this.root) {
+        this.root.insertBefore(node, refNode)
+      }
+      refNode = node
     }
     this.before.style.height = continuous ? `${this.sum(this.trackFirst, first)}px` : '0px'
     this.after.style.height = continuous ? `${this.sum(last, this.trackEnd) + this.bottomPadding()}px` : '0px'
     this.root.style.width = `${this.availableWidth()}px`
-    this.root.replaceChildren(this.before, ...children, this.after)
     if (!this.pictures) this.pictures = new PictureWindow(this.context.viewport, this.root, this.context.signal, async (image, signal) => {
       const index = Number(image.dataset.resource)
       return this.preloader ? this.preloader.get(index, signal) : Promise.reject(new Error('预加载器未初始化'))
@@ -165,11 +170,8 @@ export class ComicReader implements ReaderView {
       else this.measure()
     }, { maxVisible: 5, verticalMargin: 2 })
     else this.pictures.update(this.root)
-    if (programmatic) {
-      this.context.viewport.scrollTop = continuous ? this.sum(this.trackFirst, this.index) + ratio * this.heights[this.index]! : 0
-    } else if (continuous && shift !== 0) {
-      this.context.viewport.scrollTop -= shift
-    }
+    // 换窗时严格同步局部坐标，保持同一逻辑页和页内比例，防止滚动条跌入轨道起点
+    this.context.viewport.scrollTop = continuous ? this.sum(this.trackFirst, this.index) + ratio * this.heights[this.index]! : 0
     this.anchor = { format: 'comic', index: this.index, ratio }
     await frame()
     if (this.stopped || active !== this.generation) return
@@ -218,7 +220,7 @@ export class ComicReader implements ReaderView {
       }
     }
     if (measuredHeight > 30) {
-      const shouldUpdateAll = this.measured.size <= 1 || (this.nodes.size > 0 && [...this.nodes.keys()].every((k) => this.measured.has(k)))
+      const shouldUpdateAll = !this.isScrolling() && (this.measured.size <= 1 || (this.nodes.size > 0 && [...this.nodes.keys()].every((k) => this.measured.has(k))))
       if (shouldUpdateAll) {
         for (let j = 0; j < this.heights.length; j++) {
           if (!this.measured.has(j)) {
@@ -263,7 +265,12 @@ export class ComicReader implements ReaderView {
       if (this.context.viewport.clientWidth !== this.width || this.context.viewport.clientHeight !== this.height) {
         this.measure(this.anchor, true)
       }
-      const position = this.current()
+      let position = this.current()
+      // 防跌落保护：自然滚动时若 position 异常暴跌落回滑窗之前（例如掉回 trackFirst），立即自愈纠偏
+      if (this.context.prefs.mode === 'scroll' && this.index > this.trackFirst + 3 && position.index < this.index - 3) {
+        this.context.viewport.scrollTop = this.sum(this.trackFirst, this.index) + (this.anchor.ratio ?? 0) * this.heights[this.index]!
+        position = this.current()
+      }
       this.anchor = position
       if (this.context.prefs.mode === 'scroll') {
         if (position.index !== this.index) {

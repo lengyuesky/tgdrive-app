@@ -243,7 +243,7 @@ describe('catalog 版本升级、移除与防篡改 (mergeCatalogs)', () => {
     const catalog = mergeCatalogs({
       currentEntries: [
         sampleEntry('shorts', '1.0.3'),
-        sampleEntry('comics', '1.0.10'),
+        sampleEntry('comics', '1.0.11'),
         sampleEntry('books', '1.1.4'),
         sampleEntry('cinema', '1.1.2'),
       ],
@@ -626,7 +626,7 @@ describe('build.mjs 与独立分发输出行为', () => {
     expect(packages.map(p => p.filename)).toEqual([
       'books-1.1.4.tgapp',
       'cinema-1.1.2.tgapp',
-      'comics-1.0.10.tgapp',
+      'comics-1.0.11.tgapp',
       'shorts-1.0.3.tgapp',
     ])
   }, 20_000)

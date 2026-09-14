@@ -8,7 +8,7 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 |---|---|---|---|---|
 | `shorts` | 短视频 | `1.0.3` | 2 | 随机播放网盘文件夹里的视频，支持滑动切换、收藏与下载 |
 | `books` | 图书 | `1.1.4` | 2 | 阅读 TXT、EPUB 2/3 与中文字体 PDF，支持排版偏好、书签与跨设备进度 |
-| `comics` | 漫画 | `1.0.10` | 2 | 连续滚动或左右单页翻阅图片目录与 CBZ/ZIP 漫画包 |
+| `comics` | 漫画 | `1.0.11` | 2 | 连续滚动或左右单页翻阅图片目录与 CBZ/ZIP 漫画包 |
 | `cinema` | 影视 | `1.1.2` | 2 | 命名媒体库、封面缓存优化、文本字幕、音轨切换与客户端 MKV 流式解封装 |
 
 所有插件遵循统一沙箱规范，使用沙箱内 iframe 隔离运行，无服务器转码或外部 CDN 依赖。
@@ -83,7 +83,7 @@ sha256sum -c SHA256SUMS
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.0.3.tgapp`、`books-1.1.4.tgapp`、`comics-1.0.10.tgapp`、`cinema-1.1.2.tgapp`）
+- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.0.3.tgapp`、`books-1.1.4.tgapp`、`comics-1.0.11.tgapp`、`cinema-1.1.2.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 
