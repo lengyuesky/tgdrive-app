@@ -1,6 +1,6 @@
 /** 漫画只挂载相邻五页，滚动轨道限定在相邻四十一页以避免超长 CSS 溢出。 */
 import { Archive } from '../reader/archive'
-import { LIMITS, RangeFile, isImage, natural, isAbort } from '../reader/io'
+import { LIMITS, RangeFile, isImage, natural } from '../reader/io'
 import { PictureWindow } from '../reader/pictures'
 import { ComicPreloader } from './preload'
 import { boundedIndex, frame, sectionState, type ReaderView, type Section, type ViewContext } from '../reader/view'
@@ -14,6 +14,8 @@ export class ComicReader implements ReaderView {
   private archive?: Archive
   private heights: number[] = []
   private index = 0
+  private trackFirst = 0
+  private trackEnd = 0
   private root = document.createElement('div')
   private before = document.createElement('div')
   private after = document.createElement('div')
@@ -65,17 +67,17 @@ export class ComicReader implements ReaderView {
     await this.restore(location?.format === 'comic' ? location : { format: 'comic', index: 0 })
   }
   private sum(from: number, to: number) { let value = 0; for (let i = from; i < to; i++) value += this.heights[i] ?? 0; return value }
-  private bottomPadding() { return this.context.prefs.mode === 'scroll' ? Math.max(0, this.context.viewport.clientHeight - (this.heights.at(-1) ?? 0)) : 0 }
+  private bottomPadding() { return this.context.prefs.mode === 'scroll' && this.trackEnd === this.pages.length ? Math.max(0, this.context.viewport.clientHeight - (this.heights.at(-1) ?? 0)) : 0 }
   current(): Location {
     const scroll = this.context.viewport.scrollTop
-    let index = 0, top = 0
+    let index = this.trackFirst, top = 0
     if (this.context.prefs.mode === 'scroll') {
       const maxScroll = this.context.viewport.scrollHeight - this.context.viewport.clientHeight
-      if (maxScroll > 0 && scroll >= maxScroll - 2 && this.pages.length > 0) {
+      if (this.trackEnd === this.pages.length && maxScroll > 0 && scroll >= maxScroll - 2 && this.pages.length > 0) {
         const lastIdx = this.pages.length - 1
         return { format: 'comic', index: lastIdx, entry: this.pages[lastIdx]?.entry, ratio: 0 }
       }
-      while (index < this.pages.length - 1 && top + this.heights[index]! <= scroll + 1) {
+      while (index < this.trackEnd - 1 && top + this.heights[index]! <= scroll + 1) {
         top += this.heights[index]!
         index++
       }
@@ -89,12 +91,15 @@ export class ComicReader implements ReaderView {
     return { ...sectionState(index, this.sections.length), pageIndex: index, pageCount: this.sections.length }
   }
   turn(delta: -1 | 1) { return this.go(this.current().index + delta) }
-  private async window(index: number, ratio: number, syncScroll = true) {
+  private async window(index: number, ratio: number) {
     if (this.stopped) return
     const active = ++this.generation
     this.rendering = true; this.pendingAnchor = undefined; this.index = boundedIndex(index, this.pages.length)
     this.preloader?.setCenter(this.index)
     const continuous = this.context.prefs.mode === 'scroll'
+    // 逻辑页码覆盖整本，CSS 轨道只覆盖当前页前后各二十页，避免浏览器截断超长布局。
+    this.trackFirst = continuous ? Math.max(0, this.index - 20) : this.index
+    this.trackEnd = continuous ? Math.min(this.pages.length, this.index + 21) : this.index + 1
     const first = continuous ? Math.max(0, this.index - 2) : this.index
     const last = continuous ? Math.min(this.pages.length, this.index + 3) : this.index + 1
     for (const [key, node] of this.nodes) if (key < first || key >= last) { this.observer.unobserve(node); this.nodes.delete(key) }
@@ -112,8 +117,8 @@ export class ComicReader implements ReaderView {
       }
       children.push(node)
     }
-    this.before.style.height = continuous ? `${this.sum(0, first)}px` : '0px'
-    this.after.style.height = continuous ? `${this.sum(last, this.pages.length) + this.bottomPadding()}px` : '0px'
+    this.before.style.height = continuous ? `${this.sum(this.trackFirst, first)}px` : '0px'
+    this.after.style.height = continuous ? `${this.sum(last, this.trackEnd) + this.bottomPadding()}px` : '0px'
     this.root.style.width = `${this.availableWidth()}px`
     this.root.replaceChildren(this.before, ...children, this.after)
     if (!this.pictures) this.pictures = new PictureWindow(this.context.viewport, this.root, this.context.signal, async (image, signal) => {
@@ -126,10 +131,9 @@ export class ComicReader implements ReaderView {
       else this.measure(position, false)
     }, { maxVisible: 5, verticalMargin: 2 })
     else this.pictures.update(this.root)
-    if (syncScroll) {
-      this.context.viewport.scrollTop = continuous ? this.sum(0, this.index) + ratio * this.heights[this.index]! : 0
-      this.anchor = { format: 'comic', index: this.index, ratio }
-    }
+    // 滚动换窗也必须同步局部坐标，保持同一逻辑页和页内比例。
+    this.context.viewport.scrollTop = continuous ? this.sum(this.trackFirst, this.index) + ratio * this.heights[this.index]! : 0
+    this.anchor = { format: 'comic', index: this.index, ratio }
     await frame()
     if (this.stopped || active !== this.generation) return
     this.rendering = false; this.measure(this.pendingAnchor, false); this.pendingAnchor = undefined
@@ -152,31 +156,21 @@ export class ComicReader implements ReaderView {
       this.width = width; changed = true
       this.root.style.width = `${this.availableWidth(width)}px`
     }
-    const currentIdx = position.index
-    let topDelta = 0
     let measuredHeight = 0
     for (const [i, node] of this.nodes) {
       node.style.minHeight = ''
       const h = node.getBoundingClientRect().height
       if (h > 30 && Math.abs(h - this.heights[i]!) > 1) {
-        const diff = h - this.heights[i]!
         this.heights[i] = h
         this.measured.add(i)
         measuredHeight = h
         changed = true
-        if (this.context.prefs.mode === 'scroll' && i < currentIdx) {
-          topDelta += diff
-        }
       }
     }
     if (measuredHeight > 30) {
       for (let j = 0; j < this.heights.length; j++) {
         if (!this.measured.has(j)) {
-          const diff = measuredHeight - this.heights[j]!
           this.heights[j] = measuredHeight
-          if (this.context.prefs.mode === 'scroll' && j < currentIdx) {
-            topDelta += diff
-          }
         }
       }
     }
@@ -184,17 +178,14 @@ export class ComicReader implements ReaderView {
     const continuous = this.context.prefs.mode === 'scroll'
     const keys = [...this.nodes.keys()].sort((a, b) => a - b)
     if (keys.length) {
-      this.before.style.height = continuous ? `${this.sum(0, keys[0]!)}px` : '0px'
-      this.after.style.height = continuous ? `${this.sum(keys.at(-1)! + 1, this.pages.length) + this.bottomPadding()}px` : '0px'
+      this.before.style.height = continuous ? `${this.sum(this.trackFirst, keys[0]!)}px` : '0px'
+      this.after.style.height = continuous ? `${this.sum(keys.at(-1)! + 1, this.trackEnd) + this.bottomPadding()}px` : '0px'
     }
-    if (resized || forced) {
-      if (continuous) {
-        this.context.viewport.scrollTop = this.sum(0, position.index) + (position.ratio ?? 0) * this.heights[position.index]!
-      }
-      this.anchor = position
-    } else if (topDelta !== 0 && continuous) {
-      this.context.viewport.scrollTop += topDelta
+    // 布局缩短会立即截断 scrollTop，不能在截断后的值上累加高度差。
+    if (continuous) {
+      this.context.viewport.scrollTop = this.sum(this.trackFirst, position.index) + (position.ratio ?? 0) * this.heights[position.index]!
     }
+    this.anchor = position
   }
   private onScroll = () => {
     if (this.pendingScroll || this.stopped) return
@@ -209,7 +200,7 @@ export class ComicReader implements ReaderView {
       this.anchor = position
       if (this.context.prefs.mode === 'scroll') {
         if (position.index !== this.index) {
-          void this.window(position.index, position.ratio ?? 0, false).catch(this.context.error)
+          void this.window(position.index, position.ratio ?? 0).catch(this.context.error)
         } else {
           this.context.changed()
         }
@@ -218,11 +209,11 @@ export class ComicReader implements ReaderView {
       }
     })
   }
-  async go(index: number) { await this.window(index, 0, true) }
+  async go(index: number) { await this.window(index, 0) }
   async restore(location: Location) {
     const selected = location.entry ? this.pages.findIndex((page) => page.entry === location.entry) : -1
     if (location.entry && selected < 0) this.context.error(new Error('原图片已不在本章，已定位到有效相邻页'))
-    await this.window(selected >= 0 ? selected : location.index, location.ratio ?? 0, true)
+    await this.window(selected >= 0 ? selected : location.index, location.ratio ?? 0)
   }
   async configure(prefs: Preferences) {
     const location = this.current()
