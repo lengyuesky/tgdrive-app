@@ -1,7 +1,7 @@
 /** 网盘 Range 适配、共享并发队列和有界块缓存。 */
 import type { Drive, FileEntry } from '../sdk/types'
 export const MiB = 1024 * 1024
-export const LIMITS = { txt: 64 * MiB, epub: 128 * MiB, pdf: 512 * MiB, archive: 2048 * MiB, entry: 32 * MiB, markup: 8 * MiB, entries: 10000, expanded: 2048 * MiB, pixels: 32_000_000 }
+export const LIMITS = { txt: 64 * MiB, epub: 512 * MiB, pdf: 512 * MiB, archive: 2048 * MiB, entry: 32 * MiB, markup: 8 * MiB, entries: 10000, expanded: 2048 * MiB, pixels: 32_000_000 }
 export const abortError = () => new DOMException('读取已取消', 'AbortError')
 export const isAbort = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 export class Gate {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EpubReader } from './epub'
 import { Archive } from '../reader/archive'
-import { RangeFile } from '../reader/io'
+import { RangeFile, LIMITS } from '../reader/io'
 import { defaults } from '../reader/state'
 import { deferred, file, memoryDrive } from '../reader/library/test-fixtures'
 import { zip } from '../tests/browser/readers-fixtures.mjs'
@@ -90,5 +90,11 @@ describe('EPUB 层级目录及独立准备', () => {
     await started.promise; controller.abort(); viewport.textContent = '新详情'
     await rejected
     expect(closed).toHaveBeenCalled(); expect(viewport.textContent).toBe('新详情'); expect(context.changed).not.toHaveBeenCalled()
+  })
+  it('EPUB 文件上限已提升至 512 MiB，支持大文件并在超限时明确报错', () => {
+    const mock = memoryDrive(), viewport = document.createElement('main')
+    expect(() => new EpubReader({ drive: mock.drive, file: { ...file(3, '/超大.epub'), size: LIMITS.epub + 1 }, viewport, signal: new AbortController().signal, prefs: defaults, changed: vi.fn(), error: vi.fn() })).toThrow('512 MiB')
+    const reader = new EpubReader({ drive: mock.drive, file: { ...file(4, '/256mb.epub'), size: 256 * 1024 * 1024 }, viewport, signal: new AbortController().signal, prefs: defaults, changed: vi.fn(), error: vi.fn() })
+    reader.destroy()
   })
 })

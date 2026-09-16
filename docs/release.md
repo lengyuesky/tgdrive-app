@@ -43,7 +43,7 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.2.0",
+        "version": "1.2.1",
         "api_version": 2,
         "min_host_version": "0.1.0",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
@@ -62,7 +62,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.2.0.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.2.1.tgapp"
     }
   ]
 }
