@@ -1,6 +1,8 @@
 /** 只解码视口附近的图片，按像素预算回收 Blob URL。 */
 import { imageBlob } from './image'
 import { isAbort, MiB } from './io'
+export const PICTURE_COST_LIMIT = 128 * MiB
+export const pictureCost = (width: number, height: number) => width * height * 4
 export interface PictureWindowOptions {
   maxVisible?: number
   verticalMargin?: number
@@ -47,7 +49,7 @@ export class PictureWindow {
     )
     const vMargin = (this.options?.verticalMargin ?? 1) * box.height
     const maxVisible = this.options?.maxVisible ?? 3
-    const limit = this.options?.costLimit ?? 128 * MiB
+    const limit = this.options?.costLimit ?? PICTURE_COST_LIMIT
     const visible = this.images.map((image) => ({ image, box: image.getBoundingClientRect() }))
       .filter((item) => item.box.bottom >= box.top - vMargin && item.box.top <= box.bottom + vMargin
         && item.box.right >= box.left - box.width && item.box.left <= box.right + box.width)
@@ -55,7 +57,7 @@ export class PictureWindow {
     this.desired.clear()
     let cost = 0
     for (const { image } of visible) {
-      const info = this.info.get(image), pixels = info ? info.width * info.height * 4 : 0
+      const info = this.info.get(image), pixels = info ? pictureCost(info.width, info.height) : 0
       if (cost + pixels > limit) continue
       this.desired.add(image); cost += pixels
     }
@@ -79,7 +81,7 @@ export class PictureWindow {
       this.refresh()
       if (!this.desired.has(image)) return
       const url = URL.createObjectURL(result.blob)
-      this.records.set(image, { url, cost: result.width * result.height * 4 })
+      this.records.set(image, { url, cost: pictureCost(result.width, result.height) })
       image.onerror = () => { this.failed.add(image); this.release(image); this.error(new Error('图片解码失败，可重新打开本章重试')) }
       this.layout(() => { image.src = url })
     } catch (error) {

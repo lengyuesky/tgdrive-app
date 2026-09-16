@@ -6,6 +6,7 @@ type Panel = 'preferences' | 'bookmarks' | 'navigation' | 'reader-more'
 interface ChromeOptions {
   books?: boolean; immersive?: boolean; drive: Drive; context: ReadyContext
   turn: (delta: -1 | 1) => void; paged: () => boolean; error: (error: unknown) => void
+  onPanelChange?: (panel?: Panel) => void
 }
 export class ReaderChrome {
   private media = window.matchMedia?.(MOBILE_READING_QUERY)
@@ -33,12 +34,16 @@ export class ReaderChrome {
       element.addEventListener('click', listener); this.removers.push(() => element.removeEventListener('click', listener))
     }
     bind('reader-menu-toggle', () => this.reveal())
-    bind('toc-toggle', () => this.togglePanel('navigation'))
-    bind('reader-more-toggle', () => this.togglePanel('reader-more'))
-    for (const button of root.querySelectorAll<HTMLElement>('[data-close-panel]')) {
-      const listener = () => this.closePanel()
-      button.addEventListener('click', listener); this.removers.push(() => button.removeEventListener('click', listener))
+    bind('toc-toggle', () => this.togglePanel('navigation', this.get('toc-toggle')))
+    bind('reader-more-toggle', () => this.togglePanel('reader-more', this.get('reader-more-toggle')))
+    const closeListener = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('[data-close-panel]')) {
+        this.closePanel()
+      }
     }
+    root.addEventListener('click', closeListener)
+    this.removers.push(() => root.removeEventListener('click', closeListener))
     bind('reader-backdrop', () => this.closePanel())
     this.media?.addEventListener('change', this.resize)
     window.visualViewport?.addEventListener('resize', this.visualResize)
@@ -65,8 +70,10 @@ export class ReaderChrome {
       this.active = active
       this.root.classList.toggle('immersive', active)
       this.get(active ? 'reader-footer-actions' : 'reader-desktop-actions').append(this.get('reader-actions'))
-      this.get('navigation').hidden = active
-      this.get('reader-more').hidden = active
+      this.get('navigation').hidden = true
+      this.get('reader-more').hidden = true
+      this.get('preferences').hidden = true
+      this.get('bookmarks').hidden = true
       this.controls = !active || !this.ready
     }
     this.render()
@@ -93,6 +100,7 @@ export class ReaderChrome {
   async enter() {
     this.closePanel(false)
     this.get('preferences').hidden = true; this.get('bookmarks').hidden = true
+    this.get('navigation').hidden = true; this.get('reader-more').hidden = true
     this.reading = true; this.ready = false; this.controls = true
     await this.apply()
   }
@@ -105,6 +113,7 @@ export class ReaderChrome {
     this.reading = false; this.ready = false; this.closePanel(false)
     await this.apply()
     this.get('preferences').hidden = true; this.get('bookmarks').hidden = true
+    this.get('navigation').hidden = true; this.get('reader-more').hidden = true
   }
   reveal() { if (this.panel) this.closePanel(false); this.controls = true; this.render() }
   toggle() {
@@ -112,41 +121,47 @@ export class ReaderChrome {
     this.closePanel(false); this.controls = !this.controls; this.render()
     if (!this.controls) this.get('viewport').focus({ preventScroll: true })
   }
-  togglePanel(panel: Panel) {
-    if (!this.active) {
-      this.get(panel).hidden = !this.get(panel).hidden
-      return !this.get(panel).hidden
-    }
+  togglePanel(panel: Panel, trigger?: HTMLElement) {
     if (this.panel === panel) { this.closePanel(); return false }
     this.closePanel(false)
-    this.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    const activeEl = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    this.previousFocus = trigger ?? (activeEl && !activeEl.closest('[hidden]') ? activeEl : undefined)
     this.panel = panel; this.controls = true
     this.get(panel).hidden = false; this.render()
     const first = this.focusable(this.get(panel))[0]
     first?.focus({ preventScroll: true })
+    this.options.onPanelChange?.(panel)
     return true
   }
   closePanel(focus = true) {
+    const prevPanel = this.panel
     if (this.panel) this.get(this.panel).hidden = true
+    const prev = this.previousFocus
     this.panel = undefined
     this.get('viewport').inert = false
-    if (focus) this.previousFocus?.focus({ preventScroll: true })
+    if (focus) prev?.focus({ preventScroll: true })
     this.previousFocus = undefined
     this.render()
+    if (prevPanel) this.options.onPanelChange?.(undefined)
   }
   private focusable(panel: HTMLElement) {
     return [...panel.querySelectorAll<HTMLElement>('button,input,select,textarea,a[href],[tabindex="0"]')]
       .filter((element) => !element.closest('[hidden]') && !element.hasAttribute('disabled') && getComputedStyle(element).display !== 'none')
   }
   private key = (event: KeyboardEvent) => {
-    if (!this.active || !this.reading) return
+    if (!this.reading) return
     if (event.key === 'Escape') {
-      event.preventDefault()
-      if (this.panel) this.closePanel()
-      else { this.reveal(); this.get('back').focus({ preventScroll: true }) }
-    } else if (event.key === 'Tab' && !this.panel && !this.controls) {
+      if (this.panel) {
+        event.preventDefault()
+        this.closePanel()
+      } else if (this.active) {
+        event.preventDefault()
+        this.reveal()
+        this.get('back').focus({ preventScroll: true })
+      }
+    } else if (this.active && event.key === 'Tab' && !this.panel && !this.controls) {
       event.preventDefault(); this.reveal(); this.get('back').focus({ preventScroll: true })
-    } else if (event.key === 'Tab' && this.panel) {
+    } else if (this.active && event.key === 'Tab' && this.panel) {
       const elements = this.focusable(this.get(this.panel)), first = elements[0], last = elements.at(-1)
       if (!first) { event.preventDefault(); return }
       if (event.shiftKey && (document.activeElement === first || !elements.includes(document.activeElement as HTMLElement))) { event.preventDefault(); last?.focus() }

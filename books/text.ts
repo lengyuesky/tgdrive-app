@@ -1,7 +1,7 @@
 /** 有界完整 TXT 解码，保留真实字符位置，不沿用文件预览的 256 KiB 截断。 */
 import { FlowReader } from '../reader/flow'
 import { LIMITS, MiB, RangeFile } from '../reader/io'
-import type { ViewContext } from '../reader/view'
+import type { NavigationItem, ViewContext } from '../reader/view'
 import type { Location } from '../reader/state'
 export function detectEncoding(bytes: Uint8Array) {
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le'
@@ -21,7 +21,7 @@ export function textSections(text: string) {
     starts.push({ start: match.index!, label: match[0].trim() })
   }
   if (!starts.length || starts[0]!.start > 0) starts.unshift({ start: 0, label: starts.length ? '前言' : '正文' })
-  const sections: { start: number; end: number; label: string; entry: string }[] = []
+  const sections: { start: number; end: number; label: string; entry: string; chapterStart: number; chapterLabel: string; part: number }[] = []
   for (let i = 0; i < starts.length; i++) {
     const end = starts[i + 1]?.start ?? text.length
     let start = starts[i]!.start, part = 0
@@ -32,15 +32,27 @@ export function textSections(text: string) {
         if (line > start + 16000) stop = line + 1
         if (text.charCodeAt(stop - 1) >= 0xd800 && text.charCodeAt(stop - 1) <= 0xdbff) stop--
       }
-      sections.push({ start, end: stop, label: `${starts[i]!.label}${part ? `（续 ${part}）` : ''}`, entry: String(start) })
+      sections.push({ start, end: stop, label: `${starts[i]!.label}${part ? `（续 ${part}）` : ''}`, entry: String(start), chapterStart: starts[i]!.start, chapterLabel: starts[i]!.label, part })
       start = stop; part++
     } while (start < end)
   }
   if (sections.length > 10000) throw new Error('文本窗口数量超过 10000')
   return sections
 }
+/** 技术窗口只作为章下的导航项，不插入正文，也不改变原文 UTF-16 偏移。 */
+export function textNavigation(chunks: ReturnType<typeof textSections>): NavigationItem[] {
+  const navigation: NavigationItem[] = []
+  for (let index = 0; index < chunks.length; index++) {
+    const chunk = chunks[index]!
+    const location: Location = { format: 'txt', index, offset: chunk.start, entry: chunk.entry }
+    if (chunk.part === 0) navigation.push({ label: chunk.chapterLabel, depth: 0, location })
+    if (chunk.part > 0 || chunks[index + 1]?.chapterStart === chunk.chapterStart) navigation.push({ label: `分段 ${chunk.part + 1}`, depth: 1, location: { ...location } })
+  }
+  return navigation
+}
 export class TextReader extends FlowReader {
   readonly format = 'txt'
+  navigation: NavigationItem[] = []
   private source: RangeFile
   private text = ''
   private chunks: ReturnType<typeof textSections> = []
@@ -56,7 +68,7 @@ export class TextReader extends FlowReader {
     }
     if (!text.trim()) throw new Error('文本文件为空')
     const chunks = textSections(text)
-    this.encoding = encoding; this.text = text; this.chunks = chunks; this.sections = chunks
+    this.encoding = encoding; this.text = text; this.chunks = chunks; this.sections = chunks; this.navigation = textNavigation(chunks)
   }
   private async decode(encoding: string) {
     const decoder = new TextDecoder(encoding, { fatal: encoding === 'utf-8' })
@@ -89,5 +101,5 @@ export class TextReader extends FlowReader {
     await this.prepare({ format: 'txt', index: 0, encoding })
     await this.restore({ format: 'txt', index: 0, offset: Math.floor(ratio * this.text.length), encoding })
   }
-  destroy() { super.destroy(); this.source.destroy(); this.text = ''; this.chunks = [] }
+  destroy() { super.destroy(); this.source.destroy(); this.text = ''; this.chunks = []; this.navigation = [] }
 }

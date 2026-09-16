@@ -49,3 +49,19 @@ it('纵向滚动位移和已有选区不能误触发菜单', () => {
   const range = document.createRange(); range.selectNodeContents(app.viewport); window.getSelection()?.addRange(range)
   app.tap(500); expect(app.toggle).not.toHaveBeenCalled(); expect(app.turn).not.toHaveBeenCalled()
 })
+
+it('放大后的原生横向平移和长按后横拖不会先于滚动检查误翻页', () => {
+  const app = setup()
+  app.send('pointerdown', 800); app.viewport.scrollLeft = 120; app.send('pointerup', 400)
+  app.send('pointerdown', 800); app.viewport.scrollTop = 100; app.send('pointerup', 400)
+  app.send('pointerdown', 800); app.time(600); app.send('pointermove', 500); app.send('pointerup', 400)
+  expect(app.turn).not.toHaveBeenCalled(); expect(app.toggle).not.toHaveBeenCalled()
+})
+
+it('开始移动及时的慢横滑保留原一秒手势窗口，不把它误当成长按', () => {
+  const app = setup()
+  app.send('pointerdown', 800); app.time(100); app.send('pointermove', 700); app.time(500); app.send('pointerup', 300)
+  expect(app.turn).toHaveBeenCalledExactlyOnceWith(1)
+  app.send('pointerdown', 800); app.time(400); app.send('pointermove', 700); app.send('pointerup', 300)
+  expect(app.turn).toHaveBeenCalledTimes(1)
+})

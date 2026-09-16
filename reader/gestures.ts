@@ -9,7 +9,7 @@ interface GestureOptions {
 const interactive = (target: EventTarget | null) => target instanceof Element && !!target.closest('a,button,input,select,textarea,[role="link"],[contenteditable="true"],.flow-block-scroll')
 export class ReadingGestures {
   private pointers = new Set<number>()
-  private start?: { id: number; x: number; y: number; at: number; top: number; left: number; moved: number }
+  private start?: { id: number; x: number; y: number; at: number; top: number; left: number; moved: number; firstMoveAt?: number }
   constructor(private viewport: HTMLElement, private options: GestureOptions) {
     viewport.addEventListener('pointerdown', this.down)
     viewport.addEventListener('pointermove', this.move)
@@ -23,17 +23,22 @@ export class ReadingGestures {
     this.start = { id: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now(), top: this.viewport.scrollTop, left: this.viewport.scrollLeft, moved: 0 }
   }
   private move = (event: PointerEvent) => {
-    if (this.start?.id === event.pointerId) this.start.moved = Math.max(this.start.moved, Math.hypot(event.clientX - this.start.x, event.clientY - this.start.y))
+    if (this.start?.id === event.pointerId) {
+      this.start.moved = Math.max(this.start.moved, Math.hypot(event.clientX - this.start.x, event.clientY - this.start.y))
+      if (this.start.moved > 10) this.start.firstMoveAt ??= performance.now() - this.start.at
+    }
   }
   private up = (event: PointerEvent) => {
     const start = this.start
     this.start = undefined; this.pointers.delete(event.pointerId)
     if (!start || start.id !== event.pointerId || this.pointers.size || !this.options.enabled() || this.selected() || interactive(event.target) || (window.visualViewport?.scale ?? 1) > 1.01) return
     const dx = event.clientX - start.x, dy = event.clientY - start.y, elapsed = performance.now() - start.at
-    if (this.options.paged() && !this.options.controls() && elapsed < 1000 && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    // 原生平移或长按后的拖动优先于翻页，不能先判横滑再检查滚动位移。
+    if (Math.abs(start.top - this.viewport.scrollTop) > 2 || Math.abs(start.left - this.viewport.scrollLeft) > 2) return
+    if (this.options.paged() && !this.options.controls() && elapsed < 1000 && (start.firstMoveAt ?? elapsed) <= 350 && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       event.preventDefault(); this.options.turn(dx < 0 ? 1 : -1); return
     }
-    if (elapsed > 350 || Math.max(start.moved, Math.hypot(dx, dy)) > 10 || Math.abs(start.top - this.viewport.scrollTop) > 2 || Math.abs(start.left - this.viewport.scrollLeft) > 2) return
+    if (elapsed > 350 || Math.max(start.moved, Math.hypot(dx, dy)) > 10) return
     const box = this.viewport.getBoundingClientRect(), x = (event.clientX - box.left) / Math.max(1, box.width)
     if (this.options.controls() || x >= .25 && x <= .75) { event.preventDefault(); this.options.toggle() }
     else if (this.options.paged()) { event.preventDefault(); this.options.turn(x < .25 ? -1 : 1) }

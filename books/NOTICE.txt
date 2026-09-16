@@ -1,0 +1,8 @@
+图书应用第三方软件说明
+
+本应用包含 pdfjs-dist 6.3.289 legacy 构建及其内嵌的 core-js 3.50.0 运行时兼容代码。
+pdfjs-dist 作者：Mozilla Foundation / Apache Software Foundation，采用 Apache-2.0 许可证，完整文本见同目录 pdfjs.txt。
+core-js 作者：Denis Pushkarev (zloirock.ru) / CoreJS Company (core-js.io)，采用 MIT 许可证，完整文本见同目录 core-js.txt。
+DOMPurify 作者：cure53，采用 Apache-2.0 / MPL-2.0 许可证，完整文本见同目录 dompurify.txt。
+
+应用只在构建时打包上述依赖，运行时不会访问外部网络。

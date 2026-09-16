@@ -1,0 +1,116 @@
+import { describe, expect, it } from 'vitest'
+import { ReadingDataStore, aggregateFlags, aggregateReading, readingFrom, validSummary } from './reading'
+import { reconcileWorks, mergeWorks } from './grouping'
+import { LibraryAccess } from './sources'
+import { file, memoryDrive, signal, sources, unit } from './test-fixtures'
+import type { LibraryProgress, UnitReading } from './model'
+
+const progress = (entry = file(2, '/书/正文.txt'), index = 0): LibraryProgress => ({ file: entry, title: '正文', location: { format: 'txt', index } })
+describe('阅读摘要、显式读完与作品标志', () => {
+  it('旧 file/title/location 记录继续有效；缺少摘要不伪造百分比，版本变化不恢复旧位置', async () => {
+    const root = file(1, '/书', true), book = file(2, '/书/正文.txt'), mock = memoryDrive([root, book]), access = new LibraryAccess(mock.drive)
+    access.setSources(sources(root)); const store = new ReadingDataStore(mock.drive, access)
+    const legacy = mock.seed('progress:2', progress(book, 3))
+    const loaded = await store.load(book, signal())
+    expect(loaded.progress).toEqual(legacy)
+    expect(loaded.reading).toMatchObject({ status: 'reading', location: { format: 'txt', index: 3 }, summary: undefined })
+    expect(aggregateReading([loaded.reading]).percent).toBeUndefined()
+    mock.nodes.set(2, { ...book, content_version: 'v2' })
+    const changed = await store.load(mock.nodes.get(2)!, signal())
+    expect(changed.reading).toMatchObject({ status: 'unread', versionChanged: true, location: undefined, summary: undefined })
+    expect(mock.records.get('progress:2')).toEqual(legacy)
+    expect(validSummary({ pageIndex: 2, pageCount: 2 })).toBe(false)
+    expect(validSummary({ percent: Infinity })).toBe(false)
+    expect(validSummary({ pageIndex: 1, pageCount: 3, label: '本节' })).toBe(true)
+  })
+  it('到末端只算在读，读完必须显式动作；重读先确认并保留旧 progress 和所有书签', async () => {
+    const root = file(1, '/书', true), book = file(2, '/书/正文.txt'), mock = memoryDrive([root, book]), access = new LibraryAccess(mock.drive)
+    access.setSources(sources(root)); const store = new ReadingDataStore(mock.drive, access)
+    const saved = await store.saveProgress({ ...progress(book, 9), summary: { percent: 100 } }, null, signal())
+    expect((await store.load(book, signal())).reading.status).toBe('reading')
+    const bookmark = mock.seed('bookmark:2:a', { title: '书签', content_version: 'v1', location: { format: 'txt', index: 4 } })
+    const loaded = await store.load(book, signal()), read = await store.markRead(book, loaded.state, signal())
+    expect((await store.load(book, signal())).reading.status).toBe('read')
+    await expect(store.restart(book, read, 'txt', false, signal())).rejects.toMatchObject({ code: 'confirm_restart' })
+    expect((await store.load(book, signal())).reading.status).toBe('read')
+    expect(await store.restart(book, read, 'txt', true, signal())).toMatchObject({ state: { value: { status: 'reading' } }, location: { format: 'txt', index: 0 } })
+    expect(mock.records.get('bookmark:2:a')).toEqual(bookmark)
+    expect(mock.records.get('progress:2')).toEqual(saved.record)
+    expect(mock.remove).not.toHaveBeenCalled()
+  })
+  it('想读和收藏相互独立且不改阅读状态；CAS 冲突或未知记录不破坏原记录', async () => {
+    const mock = memoryDrive(), access = new LibraryAccess(mock.drive), store = new ReadingDataStore(mock.drive, access)
+    const id = 'a'.repeat(32), empty = await store.flags(id)
+    const want = await store.setFlags(id, empty, { wantToRead: true })
+    expect(want.value).toMatchObject({ wantToRead: true, favorite: false })
+    const favorite = await store.setFlags(id, want, { favorite: true })
+    expect(favorite.value).toMatchObject({ wantToRead: true, favorite: true })
+    await expect(store.setFlags(id, want, { favorite: false })).rejects.toMatchObject({ code: 'storage_conflict' })
+    expect(mock.set.mock.calls.every(([key]) => key === `library:flags:${id}`)).toBe(true)
+    mock.seed(`library:flags:${id}`, { schemaVersion: 99, favorite: true })
+    await expect(store.flags(id)).rejects.toMatchObject({ code: 'unknown_flags' })
+    expect(mock.remove).not.toHaveBeenCalled()
+  })
+  it('作品汇总成员状态；任何未知摘要不产生全书百分比，合并保留原作品标志', () => {
+    const reading = (nodeId: number, status: UnitReading['status']): UnitReading => ({ nodeId, status, updatedAt: nodeId, versionChanged: false })
+    expect(aggregateReading([reading(1, 'unread'), reading(2, 'read')])).toMatchObject({ status: 'reading', percent: undefined, updatedAt: 2 })
+    expect(aggregateReading([reading(1, 'read'), reading(2, 'read')])).toMatchObject({ status: 'read', percent: 100 })
+    expect(aggregateReading([undefined, reading(2, 'unread')]).status).toBe('unread')
+    const works = reconcileWorks([], [unit(file(2, '/漫画/一.cbz')), unit(file(3, '/漫画/二.cbz'))], 'comics')
+    const merged = mergeWorks(works, works.map(work => work.id))
+    const flags = new Map([[works[1]!.id, { schemaVersion: 1 as const, wantToRead: true, favorite: false }]])
+    expect(aggregateFlags(merged[0]!, merged, flags).wantToRead).toBe(true)
+    expect(readingFrom(file(2, '/书/正文.txt'), null).status).toBe('unread')
+  })
+  it('批量状态读取和合并作品标志可直接用于界面，不产生取消收藏后又被旧别名恢复的情况', async () => {
+    const root = file(1, '/漫画', true), units = [unit(file(2, '/漫画/一.cbz')), unit(file(3, '/漫画/二.cbz'))], mock = memoryDrive([root, ...units.map(unit => unit.file)]), access = new LibraryAccess(mock.drive)
+    access.setSources(sources(root)); const store = new ReadingDataStore(mock.drive, access)
+    const original = reconcileWorks([], units, 'comics'), merged = mergeWorks(original, original.map(work => work.id))
+    mock.seed(`library:flags:${original[1]!.id}`, { schemaVersion: 1, wantToRead: true, favorite: true })
+    const state = await store.loadCatalogState(units, merged, signal())
+    expect(aggregateFlags(merged[0]!, merged, state.flags)).toMatchObject({ wantToRead: true, favorite: true })
+    // 详情可能仍持有合并前的对象，标志操作按当前快照解析主作品。
+    await store.setWorkFlags(original[1]!, merged, state.flagSnapshots, { favorite: false }, signal())
+    const changed = await store.loadCatalogState(units, merged, signal())
+    expect(aggregateFlags(merged[0]!, merged, changed.flags)).toMatchObject({ wantToRead: true, favorite: false })
+    expect(mock.stat).not.toHaveBeenCalled(); expect(mock.remove).not.toHaveBeenCalled()
+    expect(mock.storageList.mock.calls.every(([params]) => params?.limit === 200)).toBe(true)
+    mock.seed('progress:2', { bad: true })
+    await expect(store.loadCatalogState(units, merged, signal())).rejects.toMatchObject({ code: 'unknown_progress' })
+  })
+  it('别名关闭标志的 CAS 冲突保留原记录，重读后可重试且旧 true 不会再次激活', async () => {
+    const root = file(1, '/漫画', true), units = [unit(file(2, '/漫画/一.cbz')), unit(file(3, '/漫画/二.cbz'))], mock = memoryDrive([root, ...units.map(unit => unit.file)]), access = new LibraryAccess(mock.drive)
+    access.setSources(sources(root)); const store = new ReadingDataStore(mock.drive, access)
+    const original = reconcileWorks([], units, 'comics'), works = mergeWorks(original, original.map(work => work.id)), primary = works[0]!, alias = original[1]!.id
+    for (const work of original) mock.seed(`library:flags:${work.id}`, { schemaVersion: 1, favorite: true, wantToRead: true })
+    const state = await store.loadCatalogState(units, works, signal()), set = mock.set.getMockImplementation()!
+    let conflict = true
+    mock.set.mockImplementation(async (key, value, revision, options) => {
+      if (key === `library:flags:${alias}` && conflict) { conflict = false; mock.seed(key, { schemaVersion: 1, favorite: true, wantToRead: true }) }
+      return set(key, value, revision, options)
+    })
+    await expect(store.setWorkFlags(primary, works, state.flagSnapshots, { favorite: false, wantToRead: false }, signal())).rejects.toMatchObject({ code: 'flags_not_saved', cause: { code: 'storage_conflict' } })
+    const latest = await store.loadCatalogState(units, works, signal())
+    expect(aggregateFlags(primary, works, latest.flags).favorite).toBe(true)
+    await store.setWorkFlags(primary, works, latest.flagSnapshots, { favorite: false, wantToRead: false }, signal())
+    const saved = await store.loadCatalogState(units, works, signal())
+    expect(aggregateFlags(primary, works, saved.flags)).toMatchObject({ favorite: false, wantToRead: false })
+    expect(mock.records.has(`library:flags:${alias}`)).toBe(true); expect(mock.remove).not.toHaveBeenCalled()
+  })
+  it('多成员摘要不把各卷百分比简单平均后冒充整部作品比例', () => {
+    const members: UnitReading[] = [1, 2].map(nodeId => ({ nodeId, status: 'reading', updatedAt: 1, versionChanged: false, summary: { percent: 50 } }))
+    expect(aggregateReading(members).percent).toBeUndefined()
+    expect(aggregateReading([members[0]])).toMatchObject({ status: 'reading', percent: 50 })
+  })
+  it('进度 CAS 不改旧记录，历史缓存失败也准确报告进度已经保存', async () => {
+    const root = file(1, '/书', true), book = file(2, '/书/正文.txt'), mock = memoryDrive([root, book]), access = new LibraryAccess(mock.drive)
+    access.setSources(sources(root))
+    const store = new ReadingDataStore(mock.drive, access, async () => { throw new Error('历史配额失败') })
+    const saved = await store.saveProgress(progress(book, 2), null, signal())
+    expect(saved.historyWarning).toContain('进度已保存')
+    await expect(store.saveProgress(progress(book, 3), null, signal())).rejects.toMatchObject({ code: 'storage_conflict' })
+    expect(mock.records.get('progress:2')).toEqual(saved.record)
+    mock.seed('library:reading:2', { schemaVersion: 99, status: 'read' })
+    await expect(store.load(book, signal())).rejects.toMatchObject({ code: 'unknown_reading_state' })
+  })
+})

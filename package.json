@@ -15,6 +15,7 @@
     "check": "npm run typecheck && npm run build",
     "test": "vitest run",
     "test:comics": "playwright test -c tests/standalone/playwright.config.ts",
+    "test:readers": "playwright test -c tests/standalone/readers.config.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

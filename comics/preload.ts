@@ -35,6 +35,7 @@ export class ComicPreloader {
   private queue: number[] = []
   private center = 0
   private disposed = false
+  private controller = new AbortController()
   readonly ahead: number
   readonly behind: number
   readonly maxCache: number
@@ -121,34 +122,20 @@ export class ComicPreloader {
     if (existing) return existing.promise
 
     const controller = new AbortController()
-    const signal = AbortSignal.any([this.options.signal, controller.signal])
-    const page = this.options.pages[index]
-    if (!page) return Promise.reject(new Error(`无效页码: ${index}`))
-
+    const signal = AbortSignal.any([this.options.signal, this.controller.signal, controller.signal])
+    // readPage 将同步错误也转为异步拒绝；迟到的旧 finally 不能删掉同页的新任务。
     const promise = (async () => {
       try {
-        let bytes: Uint8Array<ArrayBuffer>
-        if (this.options.archive) {
-          bytes = await this.options.archive.read(page.entry, LIMITS.entry, signal)
-        } else {
-          const source = new RangeFile(this.options.drive, page.file!, signal, LIMITS.entry)
-          try {
-            bytes = await source.read(0, page.file!.size, LIMITS.entry, signal)
-          } finally {
-            source.destroy()
-          }
-        }
+        const bytes = await this.readPage(index, signal)
         signal.throwIfAborted()
         this.cache.set(index, bytes)
         this.prune()
         return bytes
       } catch (error) {
-        if (!isAbort(error) && !this.disposed && this.options.error) {
-          this.options.error(error)
-        }
+        if (!isAbort(error) && !signal.aborted && !this.disposed && this.options.error) this.options.error(error)
         throw error
       } finally {
-        this.inflight.delete(index)
+        if (this.inflight.get(index)?.controller === controller) this.inflight.delete(index)
         this.pump()
       }
     })()
@@ -157,26 +144,40 @@ export class ComicPreloader {
     return promise
   }
 
+  private async readPage(index: number, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+    signal.throwIfAborted()
+    const page = this.options.pages[index]
+    if (!Number.isSafeInteger(index) || !page) throw new Error(`无效页码：${index}`)
+    if (this.options.archive) return this.options.archive.read(page.entry, LIMITS.entry, signal)
+    const source = new RangeFile(this.options.drive, page.file!, signal, LIMITS.entry)
+    try { return await source.read(0, page.file!.size, LIMITS.entry, signal) }
+    finally { source.destroy() }
+  }
+
+  /** 缩略图只借用已完成的缓存；未命中时独立取消，不移动预读中心或挤掉正文缓存。 */
+  async readIndependent(index: number, callerSignal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+    const signal = AbortSignal.any([this.options.signal, this.controller.signal, callerSignal])
+    signal.throwIfAborted()
+    const bytes = this.cache.get(index) ?? await this.readPage(index, signal)
+    signal.throwIfAborted()
+    return bytes
+  }
+
   async get(index: number, callerSignal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
-    callerSignal?.throwIfAborted()
+    this.options.signal.throwIfAborted(); this.controller.signal.throwIfAborted(); callerSignal?.throwIfAborted()
     const cached = this.cache.get(index)
     if (cached) return cached
-
-    const inFlight = this.inflight.get(index)
-    if (inFlight) {
-      if (!callerSignal) return inFlight.promise
-      return new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
-        const onAbort = () => reject(callerSignal.reason ?? new DOMException('读取已取消', 'AbortError'))
-        callerSignal.addEventListener('abort', onAbort, { once: true })
-        inFlight.promise.then(
-          (val) => { callerSignal.removeEventListener('abort', onAbort); resolve(val) },
-          (err) => { callerSignal.removeEventListener('abort', onAbort); reject(err) }
-        )
-      })
-    }
-
-    this.queue = this.queue.filter((i) => i !== index)
-    return this.load(index)
+    this.queue = this.queue.filter(i => i !== index)
+    const pending = this.inflight.get(index)?.promise ?? this.load(index)
+    if (!callerSignal) return pending
+    return new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
+      const onAbort = () => reject(callerSignal.reason ?? new DOMException('读取已取消', 'AbortError'))
+      callerSignal.addEventListener('abort', onAbort, { once: true })
+      pending.then(
+        value => { callerSignal.removeEventListener('abort', onAbort); resolve(value) },
+        error => { callerSignal.removeEventListener('abort', onAbort); reject(error) },
+      )
+    })
   }
 
   has(index: number): boolean {
@@ -185,6 +186,7 @@ export class ComicPreloader {
 
   destroy() {
     this.disposed = true
+    this.controller.abort()
     this.queue = []
     for (const task of this.inflight.values()) {
       task.controller.abort()

@@ -1,12 +1,12 @@
 {
   "id": "books",
   "name": "图书",
-  "version": "1.1.6",
+  "version": "1.2.0",
   "api_version": 2,
   "min_host_version": "0.1.0",
   "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
   "author": "tgdrive",
   "entry": "index.html",
   "permissions": ["files.read", "media.read"],
-  "settings": [{ "key": "source_dir", "label": "图书目录", "description": "搜索此目录及子目录中的图书；根目录表示整库。", "type": "directory", "default": "/" }]
+  "settings": [{ "key": "source_dir", "label": "图书目录", "description": "过渡期保留作旧版配置迁移入口，新设置请在应用内管理来源；根目录表示整库。", "type": "directory", "default": "/" }]
 }

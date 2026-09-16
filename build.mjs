@@ -68,6 +68,8 @@ async function buildReader(name, destination) {
   if (name === 'books') {
     await copyFile(`${modules}/dompurify/LICENSE`, `${output}/licenses/dompurify.txt`)
     await copyFile(`${modules}/pdfjs-dist/LICENSE`, `${output}/licenses/pdfjs.txt`)
+    await copyFile(`${root}/books/licenses/core-js.txt`, `${output}/licenses/core-js.txt`)
+    await copyFile(`${root}/books/NOTICE.txt`, `${output}/licenses/NOTICE.txt`)
     for (const directory of ['cmaps', 'standard_fonts']) {
       await mkdir(`${output}/${directory}`, { recursive: true })
       for (const item of await readdir(`${modules}/pdfjs-dist/${directory}`, { withFileTypes: true })) {

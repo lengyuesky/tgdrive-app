@@ -36,6 +36,12 @@ export function cleanChapter(text: string, path: string): DocumentFragment {
   return DOMPurify.sanitize(body, { RETURN_DOM_FRAGMENT: true, ALLOWED_TAGS: allowedTags, ALLOWED_ATTR: ['id','alt','colspan','rowspan','data-resource','data-link','role','tabindex'], ALLOW_DATA_ATTR: false })
 }
 interface EpubSection extends Section { path: string; hash: string }
+interface EpubNavigation extends EpubSection { depth: number }
+const ancestorCount = (element: Element, scope: Element, name: string) => {
+  let count = 0
+  for (let parent = element.parentElement; parent && parent !== scope; parent = parent.parentElement) if (parent.localName === name) count++
+  return count
+}
 export class EpubReader extends FlowReader {
   readonly format = 'epub'
   author = ''
@@ -75,7 +81,7 @@ export class EpubReader extends FlowReader {
       paths.push(relativeResource(packagePath, target.getAttribute('href') ?? '').path)
     }
     if (!paths.length || paths.length > 10000) throw new Error('EPUB 章节为空或过多')
-    const navigation: EpubSection[] = []
+    const navigation: EpubNavigation[] = []
     const nav = [...items.values()].find((item) => (item.getAttribute('properties') ?? '').split(/\s+/).includes('nav'))
     const ncx = items.get(elements(packageDoc, 'spine')[0]?.getAttribute('toc') ?? '')
     if (nav || ncx) {
@@ -83,12 +89,34 @@ export class EpubReader extends FlowReader {
       const navDoc = xml(await this.archive.text(navPath))
       if (nav) {
         const scope = elements(navDoc, 'nav').find((node) => node.getAttributeNS('http://www.idpf.org/2007/ops', 'type')?.split(/\s+/).includes('toc')) ?? navDoc.documentElement
+        const spine = new Set(paths), targets = new Map<Element, ReturnType<typeof relativeResource>>()
         for (const link of elements(scope, 'a')) {
-          try { const target = relativeResource(navPath, link.getAttribute('href') ?? ''); navigation.push({ ...target, label: link.textContent?.trim().slice(0, 120) || '章节', entry: `${target.path}#${target.hash}` }) } catch { /* 外部目录链接不可打开。 */ }
+          try {
+            const target = relativeResource(navPath, link.getAttribute('href') ?? '')
+            if (spine.has(target.path)) targets.set(link, target)
+          } catch { /* 外部目录链接不可打开。 */ }
+        }
+        for (const node of scope.getElementsByTagName('*')) {
+          let target = targets.get(node), label = node.textContent?.trim().slice(0, 120), depth = Math.max(0, ancestorCount(node, scope, 'li') - 1)
+          if (node.localName === 'li') {
+            const heading = [...node.children].find(child => child.localName === 'span')
+            const links = elements(node, 'a')
+            if (!heading || links.some(link => link.closest('li') === node && targets.has(link))) continue
+            // 无链接组标题借首个有效子目标；空组不伪造书首，展开动作由界面独立处理。
+            target = links.map(link => targets.get(link)).find(Boolean)
+            label = heading.textContent?.trim().slice(0, 120); depth = ancestorCount(node, scope, 'li')
+            if (!label) continue
+          } else if (node.localName !== 'a') continue
+          if (target) navigation.push({ ...target, label: label || '章节', entry: `${target.path}#${target.hash}`, depth })
         }
       } else for (const point of elements(navDoc, 'navPoint')) {
-        const src = elements(point, 'content')[0]?.getAttribute('src') ?? ''
-        try { const target = relativeResource(navPath, src); navigation.push({ ...target, label: elements(point, 'text')[0]?.textContent?.trim().slice(0, 120) || '章节', entry: `${target.path}#${target.hash}` }) } catch { /* 非法目录项不进入导航。 */ }
+        const content = [...point.children].find(child => child.localName === 'content')
+        const label = [...point.children].find(child => child.localName === 'navLabel')
+        if (!content) continue
+        try {
+          const target = relativeResource(navPath, content.getAttribute('src') ?? '')
+          navigation.push({ ...target, label: label?.textContent?.trim().slice(0, 120) || '章节', entry: `${target.path}#${target.hash}`, depth: ancestorCount(point, navDoc.documentElement, 'navPoint') })
+        } catch { /* 非法目录项不进入导航。 */ }
       }
     }
     // spine 是阅读顺序，目录 hash 只是跳转目标；同一 XHTML 不能重复计为整章。
@@ -96,7 +124,7 @@ export class EpubReader extends FlowReader {
     if (navigation.length > 10000) throw new Error('EPUB 导航条目超过 10000')
     this.navigation = navigation.flatMap((item) => {
       const index = this.chapters.findIndex((chapter) => chapter.path === item.path)
-      return index < 0 ? [] : [{ label: item.label, location: { format: 'epub' as const, index, entry: item.entry } }]
+      return index < 0 ? [] : [{ label: item.label, depth: item.depth, location: { format: 'epub' as const, index, entry: item.entry } }]
     })
     this.sections = this.chapters
   }

@@ -41,7 +41,9 @@ test.beforeAll(async () => {
   const entry = output.output.find((item) => item.type === 'chunk' && item.isEntry)
   if (!entry || entry.type !== 'chunk') throw new Error('漫画测试入口缺失')
   bundle = entry.code
-  style = await readFile(new URL('../../reader/style.css', import.meta.url), 'utf8')
+  const baseCss = await readFile(new URL('../../reader/style.css', import.meta.url), 'utf8')
+  const readingCss = await readFile(new URL('../../reader/reading.css', import.meta.url), 'utf8')
+  style = `${baseCss}\n${readingCss}`
 })
 test.afterEach(async ({ page }) => {
   expect(await page.evaluate(() => window.comicFixture?.errors ?? [])).toEqual([])

@@ -10,7 +10,7 @@ const pictureHooks = vi.hoisted(() => ({
   update: (_root: HTMLElement) => {},
   layout: (_mutate: () => void) => {},
 }))
-vi.mock('../reader/pictures', () => ({ PictureWindow: class {
+vi.mock('../reader/pictures', async importOriginal => ({ ...await importOriginal<typeof import('../reader/pictures')>(), PictureWindow: class {
   constructor(_viewport: HTMLElement, root: HTMLElement, _signal: AbortSignal, _read: unknown, _error: unknown, layout: (mutate: () => void) => void) {
     pictureHooks.layout = layout; pictureHooks.update(root)
   }

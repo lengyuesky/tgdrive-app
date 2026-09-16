@@ -1,0 +1,160 @@
+/* 阅读器增量样式：由阅读馆集成入口在 style.css 之后引入，不改变书库布局。 */
+#app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) { display:block; overflow:auto; }
+#app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) .comic-track { width:var(--comic-track-width) !important; height:var(--comic-track-height); display:flex; align-items:flex-start; justify-content:center; max-width:none; }
+#app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) .comic-track > div { display:none; }
+#app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) .comic-page { flex:0 0 auto; display:block; margin:0; padding:0; }
+#app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) .comic-page img { display:block; margin:0; max-width:none; max-height:196605px; object-fit:contain; }
+#app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) .comic-page figcaption { display:none; }
+.reading-viewport[data-format="pdf"] canvas { max-width:none; max-height:none; }
+/* 宿主已经扣除安全区；这里只提高阅读面板的小步进按钮触控面积。 */
+.reader .step-btn { width:44px; height:44px; min-width:44px; min-height:44px; }
+
+/* 统一阅读目录与导航面板样式 */
+.reader .reader-navigation {
+  padding: 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  max-height: 55vh;
+  overflow: hidden;
+}
+.reader .reader-navigation .panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.reader .reader-navigation .toc-search-bar {
+  display: flex;
+  width: 100%;
+}
+.reader .reader-navigation .toc-search-bar input {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 14px;
+}
+.reader .reader-navigation .toc-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--bg);
+}
+.reader .reader-navigation .toc-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  transition: background 0.15s;
+}
+.reader .reader-navigation .toc-item-row:hover,
+.reader .reader-navigation .toc-item-row.is-current {
+  background: var(--soft);
+}
+.reader .reader-navigation .toc-fold-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0;
+}
+.reader .reader-navigation .toc-fold-toggle:hover {
+  color: var(--accent);
+  background: var(--surface);
+}
+.reader .reader-navigation .toc-spacer {
+  display: inline-block;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  flex-shrink: 0;
+}
+.reader .reader-navigation .toc-thumbnail-box {
+  width: 36px;
+  height: 48px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--soft);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.reader .reader-navigation .toc-thumbnail-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.reader .reader-navigation .toc-thumbnail-img:not([src]) {
+  display: none;
+}
+.reader .reader-navigation .toc-item-btn {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 6px 8px;
+  font-size: 14px;
+  color: var(--text);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.reader .reader-navigation .toc-item-btn:hover {
+  color: var(--accent);
+}
+.reader .reader-navigation .toc-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader .reader-navigation .toc-quick-jump {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.reader .reader-navigation .toc-quick-jump label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.reader .reader-navigation .toc-quick-jump select,
+.reader .reader-navigation .toc-quick-jump input {
+  min-height: 44px;
+}
+.reader .reader-navigation .toc-quick-jump button {
+  min-height: 44px;
+  min-width: 44px;
+}

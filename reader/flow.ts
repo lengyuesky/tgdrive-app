@@ -1,11 +1,13 @@
 /** TXT/EPUB 只挂载当前内容单元；滚动和单列分页共用逻辑字符锚点。 */
-import type { Location, Preferences } from './state'
-import type { ReaderView, Section, ViewContext, NavigationState } from './view'
+import { localFonts, type Location, type Preferences } from './state'
+import type { ReaderView, Section, ViewContext, NavigationState, NavigationItem } from './view'
 import { boundedIndex, contentSize, frame, pageCount, PAGE_GAP, revealRect, sectionState, textPosition } from './view'
 import { isAbort } from './io'
 export abstract class FlowReader implements ReaderView {
   title: string
   sections: Section[] = []
+  navigation?: NavigationItem[]
+  readonly capabilities = { modes: ['scroll', 'page'], fonts: ['serif', 'sans', 'system'], fontSize: true, lineHeight: true, width: true, margin: true } as const
   protected index = 0
   protected article = document.createElement('article')
   protected generation = 0
@@ -23,10 +25,15 @@ export abstract class FlowReader implements ReaderView {
   private queue = Promise.resolve()
   private layoutFrame?: number
   private layoutLocation?: Location
+  private viewportPadding: { left: string; right: string }
+  private preparation?: Promise<void>
+  private preparationEncoding?: string
   abstract readonly format: 'txt' | 'epub'
   constructor(protected context: ViewContext) {
     this.title = context.file.name
+    this.viewportPadding = { left: context.viewport.style.paddingLeft, right: context.viewport.style.paddingRight }
     this.article.className = 'flow-content'
+    this.article.addEventListener('load', this.onResourceLoad, true)
     this.pager.className = 'flow-pages'
     context.viewport.addEventListener('scroll', this.onScroll, { passive: true })
     this.pager.addEventListener('scroll', this.onScroll, { passive: true })
@@ -54,8 +61,20 @@ export abstract class FlowReader implements ReaderView {
     this.queue = operation
     return operation
   }
+  private prepareOnce(location?: Location) {
+    if (!this.preparation || location?.encoding && location.encoding !== this.preparationEncoding) {
+      const previous = this.preparation
+      this.preparationEncoding = location?.encoding
+      this.preparation = Promise.resolve(previous).then(() => { this.check(); return this.prepare(location) }).then(() => this.check()).catch(error => { this.destroy(); throw error })
+    }
+    return this.preparation
+  }
+  async loadNavigation(): Promise<NavigationItem[]> {
+    await this.prepareOnce(); this.check()
+    return structuredClone(this.navigation?.length ? this.navigation : this.sections.map((section, index) => ({ label: section.label, depth: 0, location: { format: this.format, index, entry: section.entry } })))
+  }
   async open(location?: Location) {
-    await this.prepare(location); this.check()
+    await this.prepareOnce(location); this.check()
     await this.restore(location?.format === this.format ? location : { format: this.format, index: 0 })
   }
   private page() {
@@ -63,11 +82,26 @@ export abstract class FlowReader implements ReaderView {
     return { index: boundedIndex(Math.round(this.pager.scrollLeft / Math.max(1, this.stride)), count), count }
   }
   navigationState(): NavigationState {
-    const state = sectionState(this.index, this.sections.length)
+    const state = { ...sectionState(this.index, this.sections.length), atEnd: this.atEnd(), effectiveMode: this.paged ? 'page' as const : 'scroll' as const }
     if (!this.paged) return state
     const page = this.page()
     return { ...state, pageIndex: page.index, pageCount: page.count, canPrevious: state.canPrevious || page.index > 0, canNext: state.canNext || page.index < page.count - 1 }
   }
+  private atEnd() {
+    if (this.stopped || this.context.signal.aborted || !this.lastLocation || this.restoring || this.layoutLocation || !this.sections.length || this.index !== this.sections.length - 1) return false
+    const scroller = this.scroller, box = scroller.getBoundingClientRect(), style = getComputedStyle(scroller)
+    if (this.paged) { const page = this.page(); if (page.index !== page.count - 1) return false }
+    else {
+      // 为字符锚点保留的尾部空白不属于正文，不能要求读者再滚过一整屏空白。
+      const bottom = this.article.getBoundingClientRect().bottom - (parseFloat(this.article.style.paddingBottom) || 0)
+      if (bottom > box.bottom - (parseFloat(style.paddingBottom) || 0) + 1) return false
+    }
+    return ![...this.article.querySelectorAll<HTMLImageElement>('img[data-resource]')].some(image => {
+      const rect = image.getBoundingClientRect()
+      return rect.right > box.left && rect.left < box.right && rect.bottom > box.top && rect.top < box.bottom && (!image.complete || !image.naturalWidth)
+    })
+  }
+  private onResourceLoad = () => { this.layout(() => {}) }
   private readLocation(): Location {
     const scroller = this.scroller, page = this.page()
     return { format: this.format, index: this.index, entry: this.sections[this.index]?.entry,
@@ -160,6 +194,12 @@ export abstract class FlowReader implements ReaderView {
     viewport.dataset.format = this.format; viewport.dataset.mode = prefs.mode
     this.article.style.fontSize = `${prefs.fontSize}px`
     this.article.style.lineHeight = String(prefs.lineHeight)
+    this.article.style.fontFamily = localFonts[prefs.font ?? 'serif'] ?? localFonts.serif
+    const margin = prefs.margin === undefined ? undefined : Math.min(64, Math.max(0, Number.isFinite(prefs.margin) ? prefs.margin : 12))
+    viewport.style.paddingLeft = margin === undefined ? this.viewportPadding.left : `${margin}px`
+    viewport.style.paddingRight = margin === undefined ? this.viewportPadding.right : `${margin}px`
+    this.article.style.paddingLeft = margin === undefined ? '' : '0px'
+    this.article.style.paddingRight = margin === undefined ? '' : '0px'
     this.article.classList.toggle('is-paginated', this.paged)
     if (this.paged) {
       if (this.article.parentElement !== this.pager) this.pager.replaceChildren(this.article)
@@ -234,8 +274,11 @@ export abstract class FlowReader implements ReaderView {
     this.layoutFrame = undefined; this.layoutLocation = undefined
   }
   destroy() {
+    if (this.stopped) return
     this.stopped = true; this.generation++; this.sectionController.abort(); clearTimeout(this.scrollTimer); this.cancelLayout()
     this.resize.disconnect(); this.context.viewport.removeEventListener('scroll', this.onScroll); this.pager.removeEventListener('scroll', this.onScroll)
+    this.article.removeEventListener('load', this.onResourceLoad, true)
+    this.context.viewport.style.paddingLeft = this.viewportPadding.left; this.context.viewport.style.paddingRight = this.viewportPadding.right
     this.article.replaceChildren(); this.pager.replaceChildren()
   }
   protected report(error: unknown) { if (!isAbort(error) && !this.stopped && !this.context.signal.aborted) this.context.error(error) }
