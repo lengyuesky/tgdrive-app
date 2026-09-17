@@ -20,7 +20,7 @@ afterEach(() => {
   if (rangeRect) Object.defineProperty(Range.prototype, 'getBoundingClientRect', rangeRect)
   else delete (Range.prototype as Partial<Range>).getBoundingClientRect
 })
-function epub(version: 2 | 3, drm = false, customNav?: string) {
+function epub(version: 2 | 3, drm: boolean | string = false, customNav?: string, encryptionOptions?: { algorithm?: string; extra?: [string, string][] }) {
   const nav = customNav ?? (version === 3
     ? '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="one.xhtml">卷一</a><ol><li><a href="one.xhtml#middle">同章中点</a><ol><li><a href="one.xhtml#end">同章尾声</a></li></ol></li></ol></li><li><a href="two.xhtml">卷二</a></li><li><a href="https://invalid.example/a">外部</a></li></ol></nav></body></html>'
     : '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap><navPoint><navLabel><text>卷一</text></navLabel><content src="one.xhtml"/><navPoint><navLabel><text>同章中点</text></navLabel><content src="one.xhtml#middle"/><navPoint><navLabel><text>同章尾声</text></navLabel><content src="one.xhtml#end"/></navPoint></navPoint></navPoint><navPoint><navLabel><text>卷二</text></navLabel><content src="two.xhtml"/></navPoint></navMap></ncx>')
@@ -30,7 +30,8 @@ function epub(version: 2 | 3, drm = false, customNav?: string) {
     [`OPS/nav.${version === 3 ? 'xhtml' : 'ncx'}`, nav],
     ['OPS/one.xhtml', '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>第一段</p><p id="middle">第二段</p><p id="end">第三段</p></body></html>'],
     ['OPS/two.xhtml', '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>终章</p></body></html>'],
-    ...(drm ? [['META-INF/encryption.xml', '<encryption><EncryptedData><EncryptionMethod Algorithm="unknown"/><CipherData><CipherReference URI="OPS/one.xhtml"/></CipherData></EncryptedData></encryption>'] as [string, string]] : []),
+    ...(encryptionOptions?.extra ?? []),
+    ...(drm === false ? [] : [['META-INF/encryption.xml', `<encryption><EncryptedData><EncryptionMethod Algorithm="${encryptionOptions?.algorithm ?? 'unknown'}"/><CipherData><CipherReference URI="${typeof drm === 'string' ? drm : 'OPS/one.xhtml'}"/></CipherData></EncryptedData></encryption>`] as [string, string]]),
   ])
 }
 function fixture(bytes: Uint8Array) {
@@ -96,5 +97,32 @@ describe('EPUB 层级目录及独立准备', () => {
     expect(() => new EpubReader({ drive: mock.drive, file: { ...file(3, '/超大.epub'), size: LIMITS.epub + 1 }, viewport, signal: new AbortController().signal, prefs: defaults, changed: vi.fn(), error: vi.fn() })).toThrow('512 MiB')
     const reader = new EpubReader({ drive: mock.drive, file: { ...file(4, '/256mb.epub'), size: 256 * 1024 * 1024 }, viewport, signal: new AbortController().signal, prefs: defaults, changed: vi.fn(), error: vi.fn() })
     reader.destroy()
+  })
+})
+
+describe('EPUB 加密声明识别', () => {
+  it('指向包内缺失条目的残留加密声明不阻止打开', async () => {
+    const { reader, viewport, context } = fixture(epub(3, 'OEBPS/Styles/dkagent.css'))
+    const items = await reader.loadNavigation()
+    expect(items.map(item => item.label)).toEqual(['卷一', '同章中点', '同章尾声', '卷二'])
+    expect(reader.sections).toHaveLength(2)
+    await reader.open(items[0]!.location)
+    expect(viewport.textContent).toBe('第一段第二段第三段')
+    expect(context.error).not.toHaveBeenCalled()
+  })
+  it('指向真实条目的加密声明仍拒绝，百分号编码不可绕过', async () => {
+    const { reader } = fixture(epub(3, 'OPS/one%2Exhtml'))
+    await expect(reader.loadNavigation()).rejects.toThrow('DRM')
+  })
+  it('非法或越界的加密引用视为残留，不阻止打开', async () => {
+    const { reader } = fixture(epub(3, '../outside.xhtml'))
+    expect(await reader.loadNavigation()).toHaveLength(4)
+  })
+  it('官方字体混淆声明继续放行', async () => {
+    const { reader } = fixture(epub(3, 'OPS/fonts/body.ttf', undefined, { algorithm: 'http://www.idpf.org/2008/embedding', extra: [['OPS/fonts/body.ttf', 'font']] }))
+    const items = await reader.loadNavigation()
+    expect(items).toHaveLength(4)
+    await reader.open(items[3]!.location)
+    expect(reader.current().index).toBe(1)
   })
 })

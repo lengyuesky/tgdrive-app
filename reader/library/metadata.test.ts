@@ -7,12 +7,13 @@ import { file, memoryDrive, signal, sources, unit } from './test-fixtures'
 import { png, zip } from '../../tests/browser/readers-fixtures.mjs'
 
 const container = '<container><rootfiles><rootfile full-path="Book/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
-function epubArchive(cover: string, extra = '') {
+function epubArchive(cover: string, extra = '', entries: [string, string][] = []) {
   return zip([
     ['META-INF/container.xml', container],
     ['Book/content.opf', `<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>内嵌书名</dc:title><dc:creator>作者甲</dc:creator><dc:creator>作者乙</dc:creator><dc:description>安全&lt;b&gt;简介&lt;/b&gt;</dc:description>${extra}</metadata><manifest>${cover}<item id="body" href="body.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="body"/></spine></package>`],
     ['Book/cover.png', png(12, 20, [10, 30, 50])],
     ['Book/body.xhtml', '<html><body>绝不能为获取元数据解析正文</body></html>'],
+    ...entries,
   ])
 }
 function setup(path: string, bytes: Uint8Array) {
@@ -78,6 +79,18 @@ describe('阅读馆内嵌元数据白名单与安全失败', () => {
       expect(mock.set).not.toHaveBeenCalled(); mock.service.destroy()
     }
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it('残留加密声明不阻止元数据提取，指向真实条目的加密声明仍拒绝', async () => {
+    const encryption = (uri: string) => [['META-INF/encryption.xml', `<encryption><EncryptedData><EncryptionMethod Algorithm="unknown"/><CipherData><CipherReference URI="${uri}"/></CipherData></EncryptedData></encryption>`] as [string, string]]
+    const cover = '<item id="cover" href="cover.png" media-type="image/png" properties="cover-image"/>'
+    const vestigial = setup('/书/残留.epub', epubArchive(cover, '', encryption('OEBPS/Styles/dkagent.css')))
+    const ok = await vestigial.service.get(unit(vestigial.entry), signal())
+    expect(ok).toMatchObject({ coverPath: 'Book/cover.png', metadata: { title: '内嵌书名', authors: ['作者甲', '作者乙'] }, warnings: [] })
+    vestigial.service.destroy()
+    const encrypted = setup('/书/加密.epub', epubArchive(cover, '', encryption('Book/cover.png')))
+    const denied = await encrypted.service.get(unit(encrypted.entry), signal())
+    expect(denied.metadata).toEqual({}); expect(denied.warnings).toContain('不支持 DRM 或加密 EPUB 内容')
+    expect(encrypted.set).not.toHaveBeenCalled(); encrypted.service.destroy()
   })
   it('PDF Info/XMP 白名单只产生纯文本，未知摘要不伪造作者或简介', () => {
     expect(pdfMetadata({ Title: 'PDF 标题', Author: '甲;乙', Subject: '<b>简介</b>', JavaScript: '恶意' })).toEqual({ title: 'PDF 标题', authors: ['甲', '乙'], description: '简介' })

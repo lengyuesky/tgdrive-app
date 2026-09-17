@@ -35,10 +35,13 @@ export async function epubArchiveMetadata(archive: Archive, signal: AbortSignal)
   if (doc.documentElement.localName !== 'package') throw new LibraryError('invalid_epub', 'EPUB OPF 根节点无效')
   if (archive.entries.has('META-INF/encryption.xml')) {
     const encryption = safeXml(await archive.text('META-INF/encryption.xml', signal))
+    const inside = (uri: string) => { try { return archive.entries.has(archivePath(decodeURIComponent(uri))) } catch { return false } }
     for (const data of elements(encryption, 'EncryptedData')) {
-      const algorithm = elements(data, 'EncryptionMethod')[0]?.getAttribute('Algorithm'), uri = elements(data, 'CipherReference')[0]?.getAttribute('URI') ?? ''
-      if (!['http://www.idpf.org/2008/embedding', 'http://ns.adobe.com/pdf/enc#RC'].includes(algorithm ?? '') || !/\.(ttf|otf|woff2?)$/i.test(uri)) throw new LibraryError('encrypted_epub', '不支持 DRM 或加密 EPUB 内容')
-      relativeResource('', uri)
+      const algorithm = elements(data, 'EncryptionMethod')[0]?.getAttribute('Algorithm'), references = elements(data, 'CipherReference').map(item => item.getAttribute('URI') ?? '')
+      if (['http://www.idpf.org/2008/embedding', 'http://ns.adobe.com/pdf/enc#RC'].includes(algorithm ?? '') && /\.(ttf|otf|woff2?)$/i.test(references[0] ?? '')) { relativeResource('', references[0] ?? ''); continue }
+      // 与 books/epub.ts 保持一致：声明加密但包内不存在所指条目时，是剥离重打包残留的无效标记，忽略即可。
+      if (!references.some(uri => inside(uri))) continue
+      throw new LibraryError('encrypted_epub', '不支持 DRM 或加密 EPUB 内容')
     }
   }
   const metadataRoot = [...doc.documentElement.children].find(element => element.localName === 'metadata')

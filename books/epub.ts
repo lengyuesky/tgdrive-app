@@ -66,10 +66,14 @@ export class EpubReader extends FlowReader {
     if (elements(packageDoc, 'meta').some((meta) => meta.getAttribute('property') === 'rendition:layout' && meta.textContent?.trim() === 'pre-paginated')) throw new Error('首版不支持固定版式 EPUB，请使用 PDF 版本')
     if (this.archive.entries.has('META-INF/encryption.xml')) {
       const encryption = xml(await this.archive.text('META-INF/encryption.xml'))
+      const inside = (uri: string) => { try { return this.archive.entries.has(archivePath(decodeURIComponent(uri))) } catch { return false } }
       for (const data of elements(encryption, 'EncryptedData')) {
         const algorithm = elements(data, 'EncryptionMethod')[0]?.getAttribute('Algorithm')
-        const uri = elements(data, 'CipherReference')[0]?.getAttribute('URI') ?? ''
-        if (!['http://www.idpf.org/2008/embedding','http://ns.adobe.com/pdf/enc#RC'].includes(algorithm ?? '') || !/\.(ttf|otf|woff2?)$/i.test(uri)) throw new Error('不支持 DRM 或加密 EPUB 内容')
+        const references = elements(data, 'CipherReference').map((item) => item.getAttribute('URI') ?? '')
+        if (['http://www.idpf.org/2008/embedding','http://ns.adobe.com/pdf/enc#RC'].includes(algorithm ?? '') && /\.(ttf|otf|woff2?)$/i.test(references[0] ?? '')) continue
+        // 声明加密但包内并不存在所指条目时，是剥离重打包后残留的无效标记（多见于自多看等 DRM 平台流出的书源），正文并未加密，忽略即可。
+        if (!references.some((uri) => inside(uri))) continue
+        throw new Error('不支持 DRM 或加密 EPUB 内容')
       }
     }
     const items = new Map(elements(packageDoc, 'item').map((item) => [item.getAttribute('id'), item]))
