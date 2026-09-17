@@ -1,7 +1,7 @@
 {
   "id": "cinema",
   "name": "影视",
-  "version": "1.1.2",
+  "version": "1.2.3",
   "api_version": 2,
   "min_host_version": "0.1.0",
   "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",

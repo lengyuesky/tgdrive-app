@@ -368,6 +368,44 @@ export async function startApp(options: AppOptions) {
     }
   }
 
+  // —— 宿主事件：跨设备进度、来源与文件树变化时去抖刷新阅读馆 ——
+  let hostEventTimer: ReturnType<typeof setTimeout> | undefined
+  const reading = () => !get('reader').hidden
+  const rerenderCurrentView = async () => {
+    // 面板或对话框打开时不重绘，避免打断当前操作；数据已在后台刷新，下次切换视图生效。
+    if (document.querySelector('[role="dialog"]')) return
+    if (currentView === 'detail' && detailView) {
+      const item = detailView['currentItem']
+      const unit = detailView['currentUnit']
+      if (item) await detailView.render(item)
+      else if (unit) await detailView.render({ unit, work: detailView['currentWork'] })
+    } else if (currentView === 'library') {
+      await libraryView?.render(true)
+    } else if (currentView === 'home') {
+      await homeView?.render()
+    }
+  }
+  /** 后台刷数据；只有文件树/范围变化才重绘当前视图，避免自身写入的回声扰动交互。 */
+  const scheduleLibraryRefresh = (rerender: boolean) => {
+    if (hostEventTimer) clearTimeout(hostEventTimer)
+    hostEventTimer = setTimeout(() => {
+      hostEventTimer = undefined
+      if (reading()) return // 阅读中不打扰；退出正文时既有流程会刷新
+      void library.refresh()
+        .then(() => (rerender ? rerenderCurrentView() : undefined))
+        .catch(() => { /* 静默：下一次用户操作仍会刷新 */ })
+    }, 600)
+  }
+  const offStorageEvents = drive.on('storage.changed', (value) => {
+    const key = typeof (value as { key?: string })?.key === 'string' ? (value as { key: string }).key : ''
+    // 只响应对用户可见的状态（进度/标记/来源/阅读态）；扫描缓存分片（works/cache）不触发重拉。
+    const visible = key === 'library:sources' || key.startsWith('library:flags:') || key.startsWith('library:reading:') || key.startsWith('progress:')
+    if (visible && !drive.storage.wroteRecently?.(key)) scheduleLibraryRefresh(false)
+  })
+  const offFileEvents = drive.on('files.changed', () => scheduleLibraryRefresh(true))
+  const offSyncEvents = drive.on('sync.hint', () => scheduleLibraryRefresh(true))
+  const offScopeEvents = drive.on('scope.changed', () => scheduleLibraryRefresh(true))
+
   const openDetail = async (
     itemOrUnit: CatalogItem | { unit: ReadingUnit; work?: Work }
   ) => {

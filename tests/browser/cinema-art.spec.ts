@@ -8,7 +8,7 @@ test('影视封面在手机和桌面滚出视口再返回，不重建图片或�
     const match = /\/api\/apps\/media\/([^/?]+)/.exec(request.url())
     if (!match) return
     const claim = JSON.parse(Buffer.from(match[1]!.split('.')[0]!, 'base64url').toString())
-    if (claim.purpose === 'preview') reads.push(claim.node_id)
+    if (claim.purpose === 'preview' || claim.purpose === 'bytes') reads.push(claim.node_id)
   })
   // 安装辅助函数先校验隔离网盘身份，后续只复制和清理合成夹具。
   await installCinema(page, null)

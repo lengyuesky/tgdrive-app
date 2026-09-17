@@ -571,6 +571,30 @@ player.addEventListener('keydown', event => {
 })
 document.addEventListener('visibilitychange', () => { if (document.hidden && !document.pictureInPictureElement) { video.pause(); persist(true) } })
 drive.on('beforeClose', async () => { persist(true); const pending = store?.flush(); restored = false; session?.stop(); session = undefined; pageController.abort(); detailController.abort(); playController.abort(); await Promise.all([pending, manager.flush(), prefSaving]) })
+
+// —— 宿主事件：跨设备进度、媒体库与文件树变化时去抖刷新列表 ——
+let hostEventTimer: ReturnType<typeof setTimeout> | undefined
+const inPlayback = () => !!session || !$('player').hidden
+const dialogOpen = () => !!document.querySelector('dialog[open]')
+function refreshLists() {
+  if (hostEventTimer) clearTimeout(hostEventTimer)
+  hostEventTimer = setTimeout(() => {
+    hostEventTimer = undefined
+    // 播放、详情、编辑或确认弹窗打开时不打扰，关闭后既有流程会刷新。
+    if (inPlayback() || dialogOpen()) return
+    handle(loadPage())
+  }, 800)
+}
+drive.on('storage.changed', (value) => {
+  const key = typeof (value as { key?: string })?.key === 'string' ? (value as { key: string }).key : ''
+  if (key !== 'media-libraries' && !key.startsWith('progress:') && !key.startsWith('favorite:')) return
+  // 自身写入经服务端回流时不重拉，避免打断当前操作。
+  if (drive.storage.wroteRecently?.(key)) return
+  refreshLists()
+})
+drive.on('files.changed', refreshLists)
+drive.on('sync.hint', refreshLists)
+drive.on('scope.changed', refreshLists)
 window.addEventListener('pagehide', () => { pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
 async function boot() {
   await drive.ready

@@ -6,21 +6,31 @@ export interface CallOptions { signal?: AbortSignal }
 export interface RecordValue<T = unknown> { key: string; value: T; revision: string; updated_at: number }
 export interface Search { under?: string; q?: string; kind?: 'file' | 'dir' | 'all'; extensions?: string[]; limit?: number; cursor?: string | null }
 export interface ReadyContext { id: string; name: string; version: string; api_version: number; dark: boolean; capabilities?: string[] }
+export interface ByteGrant { url: string; expires_at: number }
 export interface Drive {
   ready: Promise<ReadyContext>
+  /** 能力探测：宿主未声明的功能需降级到消息通道。 */
+  can(capability: string): boolean
   files: {
     list(params: { path: string; cursor?: string | null; limit?: number }, options?: CallOptions): Promise<Page & { entries: FileEntry[]; path: string; total?: number }>
     searchPage(params?: Search, options?: CallOptions): Promise<Page & { results: FileEntry[] }>
     stat(ref: { id: number; content_version?: string } | { path: string }, options?: CallOptions): Promise<FileEntry>
     readRange(ref: Ref, offset: number, length: number, options?: CallOptions): Promise<Uint8Array<ArrayBuffer>>
+    readRanges(ref: Ref, ranges: Array<{ offset: number; length: number }>, options?: CallOptions): Promise<Uint8Array<ArrayBuffer>[]>
   }
   assets: { read(path: string, options?: CallOptions): Promise<Uint8Array<ArrayBuffer>> }
-  media: { url(pathOrRef: string | Ref, kind?: 'preview' | 'thumbnail' | 'download'): Promise<string> }
+  media: {
+    url(pathOrRef: string | Ref, kind?: 'preview' | 'thumbnail' | 'download' | 'bytes'): Promise<string>
+    /** 字节数据面票据：插件可凭它直接 fetch + Range，需 media.bytes 能力。 */
+    bytes(ref: Ref, options?: CallOptions): Promise<ByteGrant>
+  }
   storage: {
     get<T = unknown>(key: string, options?: CallOptions): Promise<RecordValue<T> | null>
     set<T>(key: string, value: T, expectedRevision?: string | null, options?: CallOptions): Promise<RecordValue<T>>
     delete(key: string, expectedRevision: string, options?: CallOptions): Promise<{ ok: true }>
     list<T = unknown>(params?: { prefix?: string; cursor?: string | null; limit?: number }, options?: CallOptions): Promise<Page & { records: RecordValue<T>[] }>
+    /** 近期内本页是否写入过该键；用于抑制自身写入经服务端事件回流。 */
+    wroteRecently(key: string, windowMs?: number): boolean
   }
   settings: { get(): Promise<Record<string, string | boolean | number>>; patch(values: object): Promise<object>; open(): Promise<void> }
   ui: { pickDirectory(initial?: string): Promise<string | null>; download(path: string): Promise<void>; close(): Promise<void>; setImmersive(active: boolean, options?: { background: string }): Promise<void> }

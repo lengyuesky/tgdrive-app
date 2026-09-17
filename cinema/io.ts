@@ -1,4 +1,5 @@
 import type { Drive, FileEntry } from '../sdk/types'
+import { createTransport } from '../reader/io'
 
 export const MiB = 1024 * 1024
 export function abortError() { return new DOMException('读取已取消', 'AbortError') }
@@ -34,7 +35,10 @@ export class RangeFile {
   private pending = new Map<number, Promise<Uint8Array<ArrayBuffer>>>()
   private readBytes = 0
   private allowance = 16 * MiB
-  constructor(readonly drive: Drive, readonly file: FileEntry, readonly signal: AbortSignal, readonly scheduler: ReadScheduler) {}
+  private readonly transport
+  constructor(readonly drive: Drive, readonly file: FileEntry, readonly signal: AbortSignal, readonly scheduler: ReadScheduler) {
+    this.transport = createTransport(drive)
+  }
   setBudget(bytes: number = Infinity) { this.readBytes = 0; this.allowance = bytes }
   clear() { this.cache.clear(); this.pending.clear() }
   private async block(index: number): Promise<Uint8Array<ArrayBuffer>> {
@@ -46,7 +50,7 @@ export class RangeFile {
     const offset = index * MiB, length = Math.min(MiB, this.file.size - offset)
     if (length <= 0 || this.readBytes + length > this.allowance) throw new Error('容器头或索引读取超过 16 MiB，已停止扫描；请下载原文件播放')
     this.readBytes += length
-    const task = this.scheduler.run(() => this.drive.files.readRange(this.file, offset, length, { signal: this.signal }), this.signal).then(bytes => {
+    const task = this.scheduler.run(() => this.transport.read({ id: this.file.id, content_version: this.file.content_version }, offset, length, this.signal), this.signal).then(bytes => {
       this.signal.throwIfAborted()
       if (bytes.length !== length) throw new Error('视频范围响应不完整，请重试')
       if (this.cache.size >= 24) this.cache.delete(this.cache.keys().next().value!)

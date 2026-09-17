@@ -134,3 +134,61 @@ describe('页面 SDK 的可交互就绪时序', () => {
     app.window.emit('pagehide')
   })
 })
+
+describe('SDK v2 新增能力', () => {
+  it('能力探测按宿主声明返回，未声明的能力为 false', async () => {
+    const app = boot('hidden')
+    Object.assign(app.context, { capabilities: ['media.bytes', 'files.readRanges'] })
+    app.connect(); await app.drive.ready
+    expect(app.drive.can('media.bytes')).toBe(true)
+    expect(app.drive.can('files.readRanges')).toBe(true)
+    expect(app.drive.can('storage.events')).toBe(false)
+    app.window.emit('pagehide')
+  })
+  it('批量段读一次请求带回所有分块', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const ref = { id: 3, content_version: 'a'.repeat(64) }
+    const ranges = [{ offset: 0, length: 4 }, { offset: 9, length: 2 }]
+    const request = app.drive.files.readRanges(ref, ranges)
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenCalledWith({ type: 'request', id: 1, method: 'files.readRanges', params: { ref, ranges } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: [new Uint8Array([1, 2, 3, 4]), new Uint8Array([5, 6])] } })
+    const blocks = await request
+    expect(blocks.map((part) => [...part])).toEqual([[1, 2, 3, 4], [5, 6]])
+    app.window.emit('pagehide')
+  })
+  it('media.bytes 返回完整票据（含过期时间），media.url 保持只返回地址', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const ref = { id: 4, content_version: 'b'.repeat(64) }
+    const grant = app.drive.media.bytes(ref)
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 1, method: 'media.url', params: { id: 4, content_version: 'b'.repeat(64), kind: 'bytes' } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: { url: '/api/apps/media/grant', expires_at: 123 } } })
+    await expect(grant).resolves.toEqual({ url: '/api/apps/media/grant', expires_at: 123 })
+    const legacy = app.drive.media.url(ref)
+    await Promise.resolve()
+    app.port.onmessage!({ data: { type: 'response', id: 2, result: { url: '/api/apps/media/legacy', expires_at: 123 } } })
+    await expect(legacy).resolves.toBe('/api/apps/media/legacy')
+    app.window.emit('pagehide')
+  })
+
+  it('storage.wroteRecently 标记本页写入，供事件回声抑制', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const write = app.drive.storage.set('progress:1', { page: 2 })
+    await Promise.resolve()
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: { key: 'progress:1', value: { page: 2 }, revision: 'r1', updated_at: 1 } } })
+    await write
+    expect(app.drive.storage.wroteRecently('progress:1')).toBe(true)
+    expect(app.drive.storage.wroteRecently('progress:2')).toBe(false)
+    // 窗口可自定义：零窗口立即过期，长窗口仍算近期。
+    expect(app.drive.storage.wroteRecently('progress:1', 0)).toBe(false)
+    expect(app.drive.storage.wroteRecently('progress:1', 60_000)).toBe(true)
+    // 失败的写入不标记（409 冲突等）。
+    const failed = app.drive.storage.set('progress:3', {})
+    await Promise.resolve()
+    app.port.onmessage!({ data: { type: 'response', id: 2, error: '冲突', code: 'storage_conflict' } })
+    await expect(failed).rejects.toThrow('冲突')
+    expect(app.drive.storage.wroteRecently('progress:3')).toBe(false)
+    app.window.emit('pagehide')
+  })
+})

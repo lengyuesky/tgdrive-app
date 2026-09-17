@@ -13,6 +13,9 @@ async function install(page: Page, id: string, directory: string) {
   expect((await page.request.patch(`/api/apps/${id}/settings`, { data: { source_dir: directory } })).ok()).toBe(true)
   await page.goto(`/apps/${id}`)
   await expect(page.locator('.host-status')).toHaveCount(0)
+  // 阅读馆重构后应用先落在首页；先进入「书库」视图再等待完整列表。
+  await expect(page.frameLocator('iframe').locator('#btn-home-view-all')).toBeVisible()
+  await page.frameLocator('iframe').locator('#btn-home-view-all').click()
   await expect(page.frameLocator('iframe').locator('#items button').first()).toBeVisible()
 }
 test.beforeEach(async ({ page }) => {

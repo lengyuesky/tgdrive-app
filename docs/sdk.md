@@ -36,7 +36,7 @@
      version: string         // 插件版本，例如 "1.1.4"
      api_version: number     // 声明的 API 版本，当前为 2
      dark: boolean           // 宿主当前是否为深色模式
-     capabilities?: string[] // 宿主支持的可选能力列表，如 ["ui.setImmersive"]
+     capabilities?: string[] // 宿主支持的可选能力列表，探测方式见「能力探测」一节
    }
    ```
 4. **清理与卸载**：当插件页面被关闭、切换或收到 `pagehide` 事件时，SDK 自动关闭 `MessagePort` 并拒绝未完成的异步调用。
@@ -69,6 +69,11 @@
   const bytes = await tgdrive.files.readRange(file, 0, 65536, { signal });
   // 返回 Uint8Array；file 同时携带稳定节点 ID 与 content_version
   ```
+- **批量分段读取**（需宿主声明 `files.readRanges` 能力，用于消息通道的降级优化）：
+  ```ts
+  // 一次 RPC 拉回多段：1～8 段、每段 ≤1 MiB、总量 ≤4 MiB
+  const blocks = await tgdrive.files.readRanges(file, [{ offset: 0, length: 4096 }, { offset: 9, length: 512 }], { signal });
+  ```
 
 ### 2. 媒体直链与缩略图 (`drive.media`)
 
@@ -81,6 +86,20 @@
   const previewUrl = await tgdrive.media.url({ id: 42, content_version: '...' }, 'preview');
   ```
   返回带有有效时限和签名凭证的 URL，可直接赋予 `<img>` 或 `<video>` 元素。
+
+- **字节数据面票据**（需宿主声明 `media.bytes` 能力）：
+  ```ts
+  const grant = await tgdrive.media.bytes(file, { signal });
+  // grant: { url: '/api/apps/media/…', expires_at: Unix 秒 }
+  const response = await fetch(grant.url, {
+    signal, credentials: 'omit', redirect: 'error',
+    headers: { Range: `bytes=${offset}-${offset + length - 1}` },
+  });
+  // 必须校验 status === 206、Content-Range 与 Content-Length 与请求一致
+  ```
+  票据绑定单个文件与内容版本，可缓存复用；返回 `403` 表示票据过期或失效，
+  应丢弃缓存重签一次重试。相比 `files.readRange`，数据不再经宿主页面二次缓冲，
+  也不受消息通道的限流约束。共享的传输实现见 `reader/io.ts` 的 `createTransport`。
 
 ### 3. 插件私有存储 (`drive.storage`)
 
@@ -130,17 +149,50 @@ await tgdrive.ui.setImmersive(false);
 
 ### 6. 事件监听 (`drive.on`)
 
-监听宿主推送的状态变化，例如深色模式切换：
+监听宿主推送的状态变化。事件只携带标识不携带内容，插件应自行按需重拉。
 
 ```ts
-const unbind = tgdrive.on('theme', ({ dark }) => {
+// 深色模式切换（本地即时转发）
+const unbindTheme = tgdrive.on('theme.changed', ({ dark }) => {
   document.documentElement.classList.toggle('dark', dark);
 });
-// 页面卸载时取消监听：unbind();
+
+// 另一设备写入本应用私有数据（需 storage.events 能力，事件值 { key }）
+const unbindStorage = tgdrive.on('storage.changed', ({ key }) => {
+  if (key.startsWith('progress:')) void reloadProgress(key);
+});
+
+// 文件树变更（需 storage.events 能力）：Bot 收件、上传、改名、清理等粗粒度通知
+const unbindFiles = tgdrive.on('files.changed', () => void refreshLists());
+
+// 用户在宿主端修改了目录范围：越界访问将从下一次请求起被拒绝
+tgdrive.on('scope.changed', () => void refreshLists());
+
+// SSE 断线重连后的提示：断档期间可能错过事件，应全量校对一次
+tgdrive.on('sync.hint', () => void refreshLists());
+// 页面卸载时取消监听：unbindTheme();
+```
+
+### 7. 能力探测 (`drive.can`)
+
+宿主按自身支持的能力在就绪上下文里声明 `capabilities`，插件用 `tgdrive.can(name)` 探测，
+未声明的功能必须降级到消息通道或忽略。当前定义：
+
+| 能力名 | 含义 |
+|---|---|
+| `media.bytes` | 字节数据面票据可用（`media.bytes` RPC + 票据 URL 直连 Range 读取） |
+| `files.readRanges` | `files.readRanges` 批量段读可用 |
+| `storage.events` | `storage.changed` / `settings.changed` / `scope.changed` / `files.changed` / `sync.hint` 事件可用 |
+| `files.scope` | 宿主支持按应用配置目录范围 |
+| `ui.setImmersive` / `ui.immersiveBackground` | 沉浸模式 |
+
+```ts
+const transport = tgdrive.can('media.bytes') ? new ByteTicketTransport(tgdrive) : new MessageChannelTransport(tgdrive);
 ```
 
 ## 安全设计原则
 
-1. **同源隔离与沙箱约束**：插件在沙箱内运行，无法访问宿主页面的 Cookies、Local Storage 或 DOM 结构。
-2. **最小权限原则**：插件必须在 `app.json` 中显式声明所需权限（如 `files.read`、`media.read`），未声明的接口调用将被宿主网关直接拦截。
-3. **取消与资源释放**：支持标准 `AbortSignal`。当页面发起分段网络读取但在完成前销毁时，SDK 会向宿主发送取消控制帧，确保服务端立即关闭传输句柄。
+1. **同源隔离与沙箱约束**：插件在沙箱内运行，无法访问宿主页面的 Cookies、Local Storage 或 DOM 结构。CSP 允许插件向同源发起 `fetch`，但宿主接口需要登录凭据（沙箱源不携带 Cookie），唯一可用通道仍是宿主签发的单文件票据。
+2. **最小权限原则**：插件必须在 `app.json` 中显式声明所需权限（如 `files.read`、`media.read`），未声明的接口调用将被宿主网关直接拦截。用户可在宿主端为每个应用配置「目录范围」，把文件访问收窄到指定目录子树；范围立即生效，不打断运行中的页面。
+3. **票据即能力**：媒体票据只授权单个文件、单一用途并绑定内容版本；文件被覆盖后旧票据立即失效。
+4. **取消与资源释放**：支持标准 `AbortSignal`。当页面发起分段网络读取但在完成前销毁时，SDK 会向宿主发送取消控制帧，确保服务端立即关闭传输句柄。

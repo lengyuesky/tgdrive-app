@@ -6,12 +6,12 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 
 | 插件 ID | 名称 | 版本 | API 版本 | 说明 |
 |---|---|---|---|---|
-| `shorts` | 短视频 | `1.0.3` | 2 | 随机播放网盘文件夹里的视频，支持滑动切换、收藏与下载 |
-| `books` | 图书 | `1.1.6` | 2 | 阅读 TXT、EPUB 2/3 与中文字体 PDF，支持排版偏好、书签与跨设备进度 |
-| `comics` | 漫画 | `1.0.13` | 2 | 连续滚动或左右单页翻阅图片目录与 CBZ/ZIP 漫画包 |
-| `cinema` | 影视 | `1.1.2` | 2 | 命名媒体库、封面缓存优化、文本字幕、音轨切换与客户端 MKV 流式解封装 |
+| `shorts` | 短视频 | `1.1.1` | 2 | 随机播放网盘文件夹里的视频，支持滑动切换、收藏与下载 |
+| `books` | 图书 | `1.3.2` | 2 | 阅读 TXT、EPUB 2/3 与中文字体 PDF，支持排版偏好、书签与跨设备进度 |
+| `comics` | 漫画 | `1.2.2` | 2 | 连续滚动或左右单页翻阅图片目录与 CBZ/ZIP 漫画包 |
+| `cinema` | 影视 | `1.2.3` | 2 | 命名媒体库、封面缓存优化、文本字幕、音轨切换与客户端 MKV 流式解封装 |
 
-所有插件遵循统一沙箱规范，使用沙箱内 iframe 隔离运行，无服务器转码或外部 CDN 依赖。
+所有插件遵循统一沙箱规范，使用沙箱内 iframe 隔离运行，无服务器转码或外部 CDN 依赖。宿主声明 `media.bytes` 能力时，阅读器走票据直连的字节数据面（Range 读取不经宿主页面二次缓冲）；旧宿主自动降级到消息通道。
 
 ## 目录结构
 
@@ -86,7 +86,7 @@ sha256sum -c SHA256SUMS
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.0.3.tgapp`、`books-1.1.6.tgapp`、`comics-1.0.13.tgapp`、`cinema-1.1.2.tgapp`）
+- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.1.1.tgapp`、`books-1.3.2.tgapp`、`comics-1.2.1.tgapp`、`cinema-1.2.3.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 

@@ -6,7 +6,7 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.2.1",
+        "version": "1.3.2",
         "api_version": 2,
         "min_host_version": "0.1.0",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
@@ -26,15 +26,15 @@
           }
         ]
       },
-      "sha256": "904b43aea616ffcf33cb4c6d3d93df853e00ab80320cd3d6f878abc2762e18c7",
-      "size": 2240077,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.2.1.tgapp"
+      "sha256": "1b9fd1b83f942134f27fedcdf6cd307385dcd3909da4dd0325c50d778ac1a1db",
+      "size": 2231825,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.3.2.tgapp"
     },
     {
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.1.2",
+        "version": "1.2.3",
         "api_version": 2,
         "min_host_version": "0.1.0",
         "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",
@@ -46,15 +46,15 @@
         ],
         "settings": []
       },
-      "sha256": "ad837a71a642f95500f13be34b947c8c7c66bd18619700c0afca11d010ce0d19",
-      "size": 115934,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.1.2.tgapp"
+      "sha256": "c7902cecc4b1e2ef9e504acbdc4dc319cbd9d64650d1adca31ee57fa03149608",
+      "size": 116825,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.2.3.tgapp"
     },
     {
       "manifest": {
         "id": "comics",
         "name": "漫画",
-        "version": "1.1.1",
+        "version": "1.2.2",
         "api_version": 2,
         "min_host_version": "0.1.0",
         "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
@@ -74,15 +74,15 @@
           }
         ]
       },
-      "sha256": "eab3203770e88f481e2ab27153669fd56fa1f7d33c508d880b26d9a29b872c9b",
-      "size": 125173,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.1.1.tgapp"
+      "sha256": "fe482162b6779e3df46554d29eac4b76cb33e2e8495cc113d20e7f5d6771588b",
+      "size": 126025,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.2.2.tgapp"
     },
     {
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "1.0.3",
+        "version": "1.1.1",
         "api_version": 2,
         "min_host_version": "0.1.0",
         "description": "随机播放网盘文件夹里的视频，支持滑动切换、收藏和下载。",
@@ -110,9 +110,9 @@
           }
         ]
       },
-      "sha256": "bc76c4e8cb8a6b5749c8cab25bdc8b133e3245df06c99520f03f4ac3b5d50412",
-      "size": 9149,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.0.3.tgapp"
+      "sha256": "b2402d62d5ab90474864582d246edb12fafcd1d4593d5a0e54af727fb08bc500",
+      "size": 9647,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.1.1.tgapp"
     }
   ]
 }
