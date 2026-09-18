@@ -20,7 +20,7 @@ const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((
 const MAX_SEMVER_COMPONENT = (1n << 64n) - 1n
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u
 const PERMISSIONS = ['files.read', 'media.read', 'favorites.write']
-const MANIFEST_FIELDS = ['id', 'name', 'version', 'api_version', 'min_host_version', 'description', 'author', 'entry', 'permissions', 'settings']
+const MANIFEST_FIELDS = ['id', 'name', 'version', 'api_version', 'min_host_version', 'description', 'author', 'entry', 'icon', 'permissions', 'settings']
 
 function matches(pattern, value) {
   return typeof value === 'string' && pattern.exec(value)?.[0] === value
@@ -71,7 +71,7 @@ export function compareStableVersions(left, right) {
 
 /** 只校验 schema，不按本机 API/宿主版本过滤未来兼容性条目。 */
 export function validateManifest(manifest) {
-  validateObject(manifest, 'manifest', MANIFEST_FIELDS)
+  validateObject(manifest, 'manifest', MANIFEST_FIELDS, MANIFEST_FIELDS.filter((key) => key !== 'icon'))
   if (!matches(APP_ID_PATTERN, manifest.id)) throw new Error('应用 ID 无效')
   for (const [key, limit] of [['name', 120], ['description', 1600], ['author', 160]]) {
     const text = manifest[key]
@@ -82,6 +82,9 @@ export function validateManifest(manifest) {
   if (!Number.isInteger(manifest.api_version) || manifest.api_version < 1 || manifest.api_version > 0xffffffff) throw new Error('api_version 必须为正整数 u32')
   if (!validText(manifest.entry, 240) || !manifest.entry.endsWith('.html') || !manifest.entry.split('/').every(part => matches(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/, part))) {
     throw new Error('entry 必须为包内合法 HTML 资源路径')
+  }
+  if (manifest.icon !== undefined && (!validText(manifest.icon, 240) || !manifest.icon.endsWith('.svg') || !manifest.icon.split('/').every(part => matches(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/, part)))) {
+    throw new Error('icon 必须为包内合法 SVG 资源路径')
   }
   if (!Array.isArray(manifest.permissions) || manifest.permissions.length > PERMISSIONS.length || new Set(manifest.permissions).size !== manifest.permissions.length || manifest.permissions.some(permission => !PERMISSIONS.includes(permission))) {
     throw new Error('permissions 包含重复或不受支持的权限')

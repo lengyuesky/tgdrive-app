@@ -10,18 +10,18 @@
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
-  - `apps/shorts-1.1.1.tgapp`
-  - `apps/books-1.3.3.tgapp`
-  - `apps/comics-1.2.3.tgapp`
-  - `apps/cinema-1.2.3.tgapp`
+  - `apps/shorts-1.1.2.tgapp`
+  - `apps/books-1.3.4.tgapp`
+  - `apps/comics-1.2.4.tgapp`
+  - `apps/cinema-1.2.4.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/books-1.3.3.tgapp
-<sha256>  apps/cinema-1.2.3.tgapp
-<sha256>  apps/comics-1.2.3.tgapp
-<sha256>  apps/shorts-1.1.1.tgapp
+<sha256>  apps/books-1.3.4.tgapp
+<sha256>  apps/cinema-1.2.4.tgapp
+<sha256>  apps/comics-1.2.4.tgapp
+<sha256>  apps/shorts-1.1.2.tgapp
 <sha256>  catalog.json
 ```
 
@@ -43,12 +43,13 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.3.3",
+        "version": "1.3.4",
         "api_version": 2,
-        "min_host_version": "0.1.0",
+        "min_host_version": "0.2.0",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
+        "icon": "icon.svg",
         "permissions": ["files.read", "media.read"],
         "settings": [
           {
@@ -62,7 +63,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.3.3.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.3.4.tgapp"
     }
   ]
 }
@@ -74,7 +75,7 @@
 - **条目字段**：每个 entry 仅允许 `manifest`、`sha256`、`size`、`url` 四个字段，严禁多余字段。
 - **单版本限制**：**每个应用 ID 最多一条最新记录**。禁止同一 ID 出现多个版本条目。
 - **URL 规范**：条目 `url` 必须精确为 `https://raw.githubusercontent.com/<repository>/main/apps/<id>-<version>.tgapp`。拒绝任何其他域名、IP、端口、凭据、协议混淆（如 `http://`）或路径变体。
-- **清单要求**：保留完整的 `AppManifest` 字段（`id`, `name`, `version`, `api_version`, `min_host_version`, `description`, `author`, `entry`, `permissions`, `settings`）。版本使用无前导零的合法稳定 SemVer `X.Y.Z`。
+- **清单要求**：保留完整的 `AppManifest` 字段（`id`, `name`, `version`, `api_version`, `min_host_version`, `description`, `author`, `entry`, 可选 `icon`, `permissions`, `settings`）；`icon` 必须是包内以 `.svg` 结尾的合法资源路径。版本使用无前导零的合法稳定 SemVer `X.Y.Z`。
 - **数值与安全**：`number` 默认值必须在 JavaScript 安全整数范围（绝对值不超过 `9007199254740991`）。
 - **容量上限**：`entries` 最多 512 条；目录序列化后大小不得超过 1 MiB。单个插件包不超过 16 MiB（解压后不超过 32 MiB，单文件不超过 8 MiB，总文件数不超过 256）。
 

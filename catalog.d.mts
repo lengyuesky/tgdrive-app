@@ -21,6 +21,8 @@ export interface AppManifest {
   description: string
   author: string
   entry: string
+  /** 包内可选 SVG 图标路径；仅安装后由宿主展示。 */
+  icon?: string
   permissions: AppPermission[]
   settings: AppSetting[]
 }

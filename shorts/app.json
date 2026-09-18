@@ -1,13 +1,18 @@
 {
   "id": "shorts",
   "name": "短视频",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "api_version": 2,
-  "min_host_version": "0.1.0",
+  "min_host_version": "0.2.0",
   "description": "随机播放网盘文件夹里的视频，支持滑动切换、收藏和下载。",
   "author": "tgdrive",
   "entry": "index.html",
-  "permissions": ["files.read", "media.read", "favorites.write"],
+  "icon": "icon.svg",
+  "permissions": [
+    "files.read",
+    "media.read",
+    "favorites.write"
+  ],
   "settings": [
     {
       "key": "source_dir",

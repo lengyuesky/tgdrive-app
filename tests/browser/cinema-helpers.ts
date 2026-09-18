@@ -58,7 +58,7 @@ export async function installCinema(page: Page, source: string | null = '/测试
   const index = await (await page.request.get('/api/apps')).json()
   if (index.installed.some((app: any) => app.manifest.id === 'cinema')) expect((await page.request.delete('/api/apps/cinema?purge_data=true')).ok()).toBe(true)
   const app = index.available.find((app: any) => app.manifest.id === 'cinema')
-  expect(app?.manifest.version).toBe('1.2.3')
+  expect(app?.manifest.version).toBe('1.2.4')
   expect((await page.request.post('/api/apps/catalog/cinema/install', { data: { digest: app.digest } })).ok()).toBe(true)
   await page.goto('/apps/cinema')
   await expect(page.frameLocator('iframe').locator('#empty-title')).toHaveText('尚未创建媒体库')

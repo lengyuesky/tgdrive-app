@@ -56,6 +56,7 @@ async function buildReader(name, destination) {
   })
 
   await copyFile(`${root}/${name}/app.json`, `${output}/app.json`)
+  await copyFile(`${root}/${name}/icon.svg`, `${output}/icon.svg`)
   await mkdir(`${output}/licenses`, { recursive: true })
 
   if (name === 'cinema') {
