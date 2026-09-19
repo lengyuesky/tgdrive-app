@@ -185,7 +185,8 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 
 /* ==================== 阅读馆模块化界面样式 ==================== */
 .app-ui-layout { display: flex; flex-direction: row; height: 100%; width: 100%; overflow: hidden; background: var(--bg); }
-.ui-content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; overscroll-behavior: contain; }
+/* overflow-y 为 auto 时未声明的 overflow-x 会被计算成 auto，整个内容区就变成双向滚动容器，手机上能被左右拖动；显式 hidden 后首页/书库/详情/我的只能上下滚动。 */
+.ui-content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; overscroll-behavior: contain; }
 .ui-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* 桌面端侧边栏 */
@@ -213,9 +214,12 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 
 @media (max-width: 767px) {
   .app-ui-layout { flex-direction: column; }
+  /* 手机端让顶栏、内容区、标签栏成为同一纵向 flex 的直接成员：顶栏在顶、内容居中滚动、标签栏贴底。 */
+  #nav-container { display: contents; }
   .desktop-sidebar { display: none; }
   .mobile-header { display: flex; }
-  .mobile-bottom-nav { display: flex; }
+  .mobile-bottom-nav { display: flex; order: 10; }
+  .toolbar-search-row input[type="search"] { min-width: 120px; }
 }
 
 /* 首页样式 */
@@ -248,10 +252,11 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .toggle-btn { border: none; border-radius: 0; padding: 6px 12px; background: var(--surface); font-size: 13px; }
 .toggle-btn.active { background: var(--accent); color: #fff; }
 .toolbar-filters-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.scan-status-bar, .scope-notice { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--soft); border-radius: 8px; font-size: 13px; border: 1px solid var(--line); }
+.scan-status-bar, .scope-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 10px 16px; background: var(--soft); border-radius: 8px; font-size: 13px; border: 1px solid var(--line); }
+.scan-status-bar > span, .scope-notice > span { min-width: 0; overflow-wrap: anywhere; }
 .library-status-msg { text-align: center; color: var(--muted); padding: 12px 0; font-size: 14px; }
 .library-status-msg:empty { display: none; }
-.library-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 16px 0; }
+.library-pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 16px; padding: 16px 0; }
 
 /* 徽标样式 */
 .badge-status { position: absolute; bottom: 8px; right: 8px; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
@@ -269,7 +274,7 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .detail-header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .detail-back-btn { border: none; background: transparent; font-size: 14px; font-weight: 600; color: var(--accent); cursor: pointer; padding: 4px 8px; display: inline-flex; align-items: center; gap: 4px; }
 .detail-header-title { font-size: 16px; margin: 0; font-weight: 700; }
-.detail-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 24px; }
+.detail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px; display: flex; flex-direction: column; gap: 24px; }
 .detail-hero { display: flex; gap: 20px; align-items: flex-start; }
 .detail-cover-wrapper { width: 120px; aspect-ratio: 1 / 1.42; flex-shrink: 0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .detail-cover-art { width: 100%; height: 100%; background-color: var(--soft); background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 700; color: var(--accent); }
@@ -285,7 +290,7 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .detail-section { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
 .section-heading-row { display: flex; align-items: center; justify-content: space-between; }
 .section-heading { font-size: 15px; font-weight: 700; margin: 0; }
-.toc-tree-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.toc-tree-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
 .toc-item-btn { text-align: left; border: none; background: transparent; padding: 8px 10px; font-size: 13px; border-radius: 6px; width: 100%; cursor: pointer; }
 .toc-item-btn:hover { background: var(--soft); color: var(--accent); }
 .comic-review-notice { padding: 10px 14px; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; color: #92400e; font-size: 13px; }
@@ -293,7 +298,10 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .manage-title { font-size: 13px; font-weight: 600; color: var(--muted); }
 .chapters-group-title { font-size: 14px; margin: 0 0 8px; color: var(--muted); }
 .chapters-list { display: flex; flex-direction: column; gap: 6px; }
-.chapter-item-btn { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 14px; cursor: pointer; }
+.chapter-item-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 14px; cursor: pointer; }
+/* 长英文文件名没有断行机会，不允许撑破详情页宽度。 */
+.chapter-title { min-width: 0; overflow-wrap: anywhere; text-align: left; }
+.chapter-arrow { flex-shrink: 0; }
 .chapter-item-btn:hover { border-color: var(--accent); color: var(--accent); }
 .file-info-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; }
 .info-label { color: var(--muted); }
@@ -337,10 +345,10 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .modal-form { display: flex; flex-direction: column; gap: 14px; }
 .modal-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
 .modal-form input, .modal-form textarea { width: 100%; }
-.modal-checkbox-list { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; padding: 4px; }
+.modal-checkbox-list { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; overflow-x: hidden; padding: 4px; }
 .modal-checkbox-label { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
 .contract-notice { padding: 12px 14px; background: var(--soft); border-left: 4px solid var(--accent); border-radius: 4px; font-size: 13px; line-height: 1.5; color: var(--text); font-weight: 600; }
-.reorder-list, .split-member-list { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
+.reorder-list, .split-member-list { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; overflow-x: hidden; }
 .reorder-item, .split-member-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
 .reorder-item-actions { display: flex; gap: 6px; }
 .btn-role-main { background: var(--soft); color: var(--accent); border-color: var(--accent); }

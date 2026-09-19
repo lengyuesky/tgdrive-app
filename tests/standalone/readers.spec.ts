@@ -354,20 +354,14 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       })
       expect(isOverflow, `${vp.label} 下书库页面不应发生水平溢出`).toBe(false)
 
-      // 进入长篇正文详情
+      // 单卷作品点击直达阅读器
       await page.locator('#items .library-card', { hasText: '长篇' }).first().click()
-      await expect(page.locator('#detail-title')).toBeVisible()
+      await expect(page.locator('#reader')).toBeVisible()
+      await expect(page.locator('#viewport')).toContainText('这是第一章的内容')
 
-      const isDetailOverflow = await page.evaluate(() => {
-        return document.documentElement.scrollWidth > window.innerWidth
-      })
-      expect(isDetailOverflow, `${vp.label} 下详情页面不应发生水平溢出`).toBe(false)
-
-      // 在桌面端视口下进入正文阅读，验证设置面板步进按钮触控尺寸满足 >= 44px
+      // 手机/平板窄屏下阅读器自进入沉浸模式：先唤出工具栏再操作菜单。
+      // 桌面端视口下验证设置面板步进按钮触控尺寸满足 >= 44px
       if (vp.width >= 1000) {
-        await page.locator('#btn-primary-read').click()
-        await expect(page.locator('#reader')).toBeVisible()
-
         const prefBtn = page.locator('#preferences-toggle')
         await prefBtn.click()
         const stepBtn = page.locator('.step-btn').first()
@@ -375,34 +369,48 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
         const box = await stepBtn.boundingBox()
         expect(box!.width, `${vp.label} 下步进按钮宽度需 >= 44px`).toBeGreaterThanOrEqual(44)
         expect(box!.height, `${vp.label} 下步进按钮高度需 >= 44px`).toBeGreaterThanOrEqual(44)
-
-        // 关闭阅读器返回
-        await page.locator('#back').click()
-        await expect(page.locator('#app-ui')).toBeVisible()
+        await prefBtn.click()
+      } else if (vp.width <= 768) {
+        await expect(page.locator('#app.immersive')).toHaveCount(1)
+        await page.locator('#viewport').focus()
+        await page.keyboard.press('Escape')
+        await expect(page.locator('#back')).toBeVisible()
       }
+
+      // 从阅读器更多菜单进入作品详情，详情页同样不得水平溢出
+      await page.locator('#reader-more-toggle').click()
+      await page.locator('#btn-reader-detail').click()
+      await expect(page.locator('#detail-title')).toBeVisible()
+      const isDetailOverflow = await page.evaluate(() => {
+        return document.documentElement.scrollWidth > window.innerWidth
+      })
+      expect(isDetailOverflow, `${vp.label} 下详情页面不应发生水平溢出`).toBe(false)
+
+      // 返回内容库
+      await page.locator('#btn-detail-back').click()
+      await expect(page.locator('#app-ui')).toBeVisible()
 
       // 验证全程绝无外部网络请求
       expect(outsideRequests).toEqual([])
     }
   })
 
-  test('2. 真实长篇 TXT 阅读、独立章节定位与书签记录', async ({ page }) => {
+  test('2. 真实长篇 TXT 阅读、阅读目录定位与书签记录', async ({ page }) => {
     const { outsideRequests } = await setupApp(page, { kind: 'books' })
     const libBtn = page.locator('#nav-library, #tab-library').filter({ visible: true }).first()
     await libBtn.click()
 
-    // 点击进入长篇 TXT 详情
+    // 单卷作品点击直达阅读器
     await page.locator('#items .library-card', { hasText: '长篇' }).first().click()
-    await expect(page.locator('#detail-title')).toContainText('长篇')
+    await expect(page.locator('#reader')).toBeVisible()
+    await expect(page.locator('#viewport')).toContainText('这是第一章的内容')
 
-    // 按需加载独立目录（验证不写阅读进度）
-    await page.locator('#btn-load-toc').click()
-    await expect(page.locator('.toc-item-btn')).toHaveCount(3)
+    // 按需加载阅读目录（验证不写阅读进度）
+    await page.locator('#toc-toggle').click()
+    await expect(page.locator('#navigation .toc-item-btn')).toHaveCount(3)
 
     // 点击第2章直接阅读
-    await page.locator('.toc-item-btn', { hasText: '第2章' }).click()
-    await expect(page.locator('#reader')).toBeVisible()
-    await expect(page.locator('#reading-status')).toHaveText('')
+    await page.locator('#navigation .toc-item-btn', { hasText: '第2章' }).click()
     await expect(page.locator('#viewport')).toContainText('这是第二章的内容')
 
     // 添加书签
@@ -422,11 +430,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
     const libBtn = page.locator('#nav-library, #tab-library').filter({ visible: true }).first()
     await libBtn.click()
 
-    // 打开示例 EPUB
+    // 单卷作品点击直达阅读器
     await page.locator('#items .library-card', { hasText: '示例' }).first().click()
-    await expect(page.locator('#detail-title')).toContainText('EPUB')
-    await page.locator('#btn-primary-read').click()
-
     await expect(page.locator('#reader')).toBeVisible()
     await expect(page.locator('#reading-status')).toHaveText('')
 
@@ -446,11 +451,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
     const libBtn = page.locator('#nav-library, #tab-library').filter({ visible: true }).first()
     await libBtn.click()
 
-    // 打开标准 PDF
+    // 单卷作品点击直达阅读器
     await page.locator('#items .library-card', { hasText: '标准' }).first().click()
-    await expect(page.locator('#detail-title')).toContainText('标准')
-    await page.locator('#btn-primary-read').click()
-
     await expect(page.locator('#reader')).toBeVisible()
     await expect(page.locator('#reading-status')).toHaveText('', { timeout: 20000 })
 
@@ -477,11 +479,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
     const libBtn = page.locator('#nav-library, #tab-library').filter({ visible: true }).first()
     await libBtn.click()
 
-    // 打开漫画
+    // 单卷作品点击直达阅读器
     await page.locator('#items .library-card', { hasText: '漫画01' }).first().click()
-    await expect(page.locator('#detail-title')).toContainText('漫画01')
-    await page.locator('#btn-primary-read').click()
-
     await expect(page.locator('#reader')).toBeVisible()
     await expect(page.locator('#reading-status')).toHaveText('')
 
@@ -498,5 +497,109 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
 
     expect(outsideRequests).toEqual([])
     await page.locator('#back').click()
+  })
+
+  test('6. 手机端书库只能上下滚动且底部导航贴底，长文件名不撑破宽度', async ({ browser }) => {
+    // 超长不可断行英文文件名：下划线无断行机会，是历史上把内容区变成双向滚动容器的典型内容。
+    const longName = (index: number) =>
+      `A_Very_Long_Unbreakable_Comic_Name_v000123456789012345_${index}.cbz`
+    const unindexedFiles: FileEntry[] = Array.from({ length: 30 }, (_, i) => ({
+      id: 300 + i,
+      name: longName(i),
+      path: `/书库/${longName(i)}`,
+      is_dir: false,
+      size: 1000,
+      content_version: 'v1',
+      created_at: 3000 + i,
+      modified_at: 3000 + i,
+      favorite: false,
+    }))
+
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    })
+    const page = await context.newPage()
+    try {
+      const { outsideRequests } = await setupApp(page, {
+        kind: 'comics',
+        viewport: { width: 390, height: 844 },
+        unindexedFiles,
+      })
+
+      // 手机端从底部标签栏进入书库
+      await page.locator('#tab-library').click()
+      await expect(page.locator('#items .library-card').first()).toBeVisible()
+      expect(await page.locator('#items .library-card').count()).toBeGreaterThanOrEqual(30)
+
+      // 内容区必须锁定竖向：overflow-x 显式 hidden，且没有任何横向溢出。
+      const metrics = await page.evaluate(() => {
+        const ui = document.querySelector('.ui-content') as HTMLElement
+        return {
+          overflowX: getComputedStyle(ui).overflowX,
+          scrollWidth: ui.scrollWidth,
+          clientWidth: ui.clientWidth,
+          scrollHeight: ui.scrollHeight,
+          clientHeight: ui.clientHeight,
+          docOverflow: document.documentElement.scrollWidth > window.innerWidth,
+        }
+      })
+      expect(metrics.overflowX, '手机书库内容区 overflow-x 必须为 hidden，防止被左右拖动').toBe('hidden')
+      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
+      expect(metrics.docOverflow).toBe(false)
+      expect(metrics.scrollHeight, '书库内容必须足够高以验证竖向滚动').toBeGreaterThan(metrics.clientHeight)
+
+      // 真实触摸拖动：横向带不动内容，纵向能滚屏。
+      const swipe = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+        const session = await page.context().newCDPSession(page)
+        try {
+          await session.send('Input.dispatchTouchEvent', {
+            type: 'touchStart',
+            touchPoints: [{ x: from.x, y: from.y, id: 1 }],
+          })
+          for (let i = 1; i <= 8; i++) {
+            await session.send('Input.dispatchTouchEvent', {
+              type: 'touchMove',
+              touchPoints: [
+                {
+                  x: from.x + ((to.x - from.x) * i) / 8,
+                  y: from.y + ((to.y - from.y) * i) / 8,
+                  id: 1,
+                },
+              ],
+            })
+          }
+          await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        } finally {
+          await session.detach()
+        }
+      }
+      await swipe({ x: 320, y: 500 }, { x: 40, y: 500 })
+      expect(
+        await page.locator('.ui-content').evaluate((el) => el.scrollLeft),
+        '横向触摸拖动不允许带动书库内容'
+      ).toBe(0)
+
+      await swipe({ x: 195, y: 700 }, { x: 195, y: 450 })
+      expect(
+        await page.locator('.ui-content').evaluate((el) => el.scrollTop),
+        '纵向触摸拖动必须正常滚动书库'
+      ).toBeGreaterThan(0)
+
+      // 手机操作页面骨架：顶栏在顶、标签栏贴底、内容区夹在中间滚动。
+      const header = (await page.locator('.mobile-header').boundingBox())!
+      const nav = (await page.locator('.mobile-bottom-nav').boundingBox())!
+      const ui = (await page.locator('.ui-content').boundingBox())!
+      expect(header.y).toBe(0)
+      expect(nav.y + nav.height, '底部导航栏必须贴住屏幕底边').toBe(844)
+      expect(ui.y).toBeGreaterThanOrEqual(header.y + header.height - 1)
+      expect(ui.y + ui.height).toBeLessThanOrEqual(nav.y + 1)
+      expect(ui.height).toBeGreaterThan(0)
+
+      expect(outsideRequests).toEqual([])
+    } finally {
+      await context.close()
+    }
   })
 })
