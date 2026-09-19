@@ -483,8 +483,9 @@ describe('阅读馆 UI 模块', () => {
     )
     expect(unindexedCard).toBeDefined()
     unindexedCard!.click()
-    expect(openedDetailItem).toBeDefined()
-    expect(openedDetailItem.units[0].nodeId).toBe(unindexedFile3.id)
+    // 单元直读：openReader 内部同样经 openUnit 核验身份与来源范围。
+    await vi.waitFor(() => expect(openedReaderNodeId).toBe(unindexedFile3.id))
+    expect(openedDetailItem).toBeUndefined()
 
     // 4. 越界结果拒绝：当驱动返回不在来源范围内的节点（如 path 在 /私密/ 下），openUnit 必须抛出 outside_sources 并拒绝
     const outsideFile: FileEntry = {

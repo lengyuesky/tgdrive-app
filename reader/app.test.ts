@@ -178,8 +178,6 @@ it('图书阅读设置中的字号与行距支持加减按钮精确调控与边�
 
     // 打开图书详情并点击开始阅读，等待阅读就绪
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const fontSizeInput = document.getElementById('font-size') as HTMLInputElement
@@ -311,8 +309,6 @@ it('目录按钮通过 ReaderChrome 正确打开导航面板，支持关闭按�
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const navPanel = document.getElementById('navigation') as HTMLElement
@@ -407,7 +403,7 @@ it('真实末端出现读完并下一卷按钮，点击后使用正确节点标�
       }),
     })
 
-    // 切换到书库并打开作品详情，进入第1卷阅读
+    // 多卷作品点击仍进入详情，从「开始阅读」进入第 1 卷；单卷作品则直接开读。
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
@@ -507,8 +503,6 @@ it('快捷跳转在有效提交后复位脏标记以同步翻页，未提交时�
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const jumpInput = document.getElementById('jump') as HTMLInputElement
@@ -603,8 +597,6 @@ it('桌面端更多操作入口真实可见，支持下载与从头重读入口�
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const moreToggle = document.getElementById('reader-more-toggle') as HTMLButtonElement

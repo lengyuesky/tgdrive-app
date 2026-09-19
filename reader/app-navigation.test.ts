@@ -135,8 +135,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const navPanel = document.getElementById('navigation') as HTMLElement
@@ -217,8 +215,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const navPanel = document.getElementById('navigation') as HTMLElement
@@ -314,8 +310,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const navPanel = document.getElementById('navigation') as HTMLElement
@@ -415,8 +409,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     // 1. 目录未打开时：0 请求！
@@ -533,8 +525,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     // 打开面板并使第 0 与第 1 项相交
@@ -632,8 +622,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
       document.getElementById('nav-library')?.click()
       await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
       document.querySelector<HTMLButtonElement>('#items button')!.click()
-      await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-      document.getElementById('btn-primary-read')!.click()
       await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
       const navPanel = document.getElementById('navigation') as HTMLElement
@@ -739,8 +727,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(2))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     // 打开目录面板并触发两项相交
@@ -801,8 +787,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     // 打开面板
@@ -897,8 +881,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     const tocToggle = document.getElementById('toc-toggle') as HTMLButtonElement
@@ -1028,8 +1010,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     document.getElementById('nav-library')?.click()
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(1))
     document.querySelector<HTMLButtonElement>('#items button')!.click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     document.getElementById('toc-toggle')!.click()
@@ -1169,8 +1149,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     // 1. 打开书 1
     const buttons = document.querySelectorAll<HTMLButtonElement>('#items button')
     buttons[0].click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     // 打开面板，捕获书 1 的 Observer 与旧 DOM 元素
@@ -1186,8 +1164,6 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     await vi.waitFor(() => expect(document.querySelectorAll('#items button')).toHaveLength(2))
     const buttonsAfter = document.querySelectorAll<HTMLButtonElement>('#items button')
     buttonsAfter[1].click()
-    await vi.waitFor(() => expect(document.getElementById('btn-primary-read')).not.toBeNull())
-    document.getElementById('btn-primary-read')!.click()
     await vi.waitFor(() => expect(document.getElementById('reading-status')?.textContent).toBe(''))
 
     // 打开书 2 目录

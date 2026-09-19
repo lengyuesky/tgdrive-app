@@ -294,9 +294,13 @@ export class HomeView {
     info.append(titleEl, metaEl)
     card.append(coverWrapper, info)
 
-    // 普通封面点击进详情
+    // 点击直接进入阅读器：单卷作品一步开读，多卷作品仍进详情选择卷话。
     card.addEventListener('click', () => {
-      this.context.openDetail(item)
+      if (item.units.length === 1) {
+        void this.context.openReader(firstUnit.nodeId).catch(this.context.reportError)
+      } else {
+        this.context.openDetail(item)
+      }
     })
 
     return card

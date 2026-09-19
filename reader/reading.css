@@ -1,4 +1,11 @@
 /* 阅读器增量样式：由阅读馆集成入口在 style.css 之后引入，不改变书库布局。 */
+/* 沉浸漫画贴边无留白：宿主已预留安全区，不再叠加阅读内边距。 */
+#app.immersive[data-kind="comics"] .reading-viewport[data-format="comic"] { padding: 0; }
+/* 单/双页未放大时禁止滚动残留，消除 iOS 橡皮筋回弹与误触发拖动；放大后仍保留平移滚动。 */
+#app.immersive[data-kind="comics"] .reading-viewport[data-format="comic"][data-swipe="true"]:is([data-comic-mode="single"], [data-comic-mode="double"]) { overflow: hidden; }
+/* iOS 长按页面不弹文本选择放大镜；图片不可拖拽出阅读层。 */
+#app[data-kind="comics"] .reading-viewport[data-format="comic"] { -webkit-user-select: none; user-select: none; }
+#app[data-kind="comics"] .reading-viewport[data-format="comic"] img { -webkit-user-drag: none; }
 #app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) { display:block; overflow:auto; }
 #app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) .comic-track { width:var(--comic-track-width) !important; height:var(--comic-track-height); display:flex; align-items:flex-start; justify-content:center; max-width:none; }
 #app[data-kind="comics"] .reading-viewport[data-format="comic"]:is([data-comic-mode="single"], [data-comic-mode="double"]) .comic-track > div { display:none; }

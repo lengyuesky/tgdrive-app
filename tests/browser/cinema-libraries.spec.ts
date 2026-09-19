@@ -157,9 +157,10 @@ test('根目录按节点 ID 跟随移动，删除后不误绑定同路径新目�
     expect((await readConfig(page)).libraries[0].directoryId).not.toBe(originalId)
     await frame.getByRole('button', { name: '删除媒体库：重新绑定', exact: true }).click()
     await frame.locator('#confirm-ok').click()
-    await expect(frame.locator('#empty-title')).toHaveText('尚未创建媒体库')
+    await expect(frame.getByRole('button', { name: '进入媒体库：重新绑定', exact: true })).toHaveCount(0)
+    await expect(frame.locator('#empty')).toBeVisible()
     expect((await (await page.request.get('/api/fs/list', { params: { path: oldPath } })).json()).path).toBe(oldPath)
-    expect((await readConfig(page)).libraries).toEqual([])
+    await expect.poll(async () => (await readConfig(page)).libraries).toEqual([])
   } finally {
     await page.request.post('/api/fs/delete', { data: { paths: [oldPath, newPath], permanent: true } })
   }

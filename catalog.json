@@ -6,7 +6,7 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.3.4",
+        "version": "1.3.5",
         "api_version": 2,
         "min_host_version": "0.2.0",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
@@ -27,9 +27,9 @@
           }
         ]
       },
-      "sha256": "68530a3eb52fb958d71152ced3bfecadea68b16df5757d27d0b919f5ce59c19c",
-      "size": 2232365,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.3.4.tgapp"
+      "sha256": "1794b4ecb6341b41137bbfb99ff0aabe24d19af800887f957298c1cc321a6e00",
+      "size": 2232588,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.3.5.tgapp"
     },
     {
       "manifest": {
@@ -56,7 +56,7 @@
       "manifest": {
         "id": "comics",
         "name": "漫画",
-        "version": "1.2.4",
+        "version": "1.2.5",
         "api_version": 2,
         "min_host_version": "0.2.0",
         "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
@@ -77,9 +77,9 @@
           }
         ]
       },
-      "sha256": "daa5eebb5c77669e79422780cf88d5ca6a714a789143d4d874ef28b718bf618e",
-      "size": 126455,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.2.4.tgapp"
+      "sha256": "3a2673c24002c872337890ebd56798ee1ef3e0782400ba7c464fb8823aa7cccf",
+      "size": 126687,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.2.5.tgapp"
     },
     {
       "manifest": {

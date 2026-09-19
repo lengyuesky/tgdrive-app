@@ -157,7 +157,10 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .immersive[data-controls="hidden"] .reader-toolbar, .immersive[data-controls="hidden"] .reader-footer { display:none; }
 .immersive .reader-panel { position:fixed; top:auto; bottom:0; left:0; right:0; z-index:8; width:100%; max-height:min(75dvh,var(--panel-height,75vh)); overflow:auto; overscroll-behavior:contain; background:var(--surface); padding:16px; border:1px solid var(--line); border-radius:16px 16px 0 0; box-shadow:0 -5px 30px #0003; }
 .immersive .reader-panel .panel-heading { position:sticky; top:-16px; width:100%; align-items:center; justify-content:space-between; background:var(--surface); padding:0 0 8px; margin:0 0 8px; gap:12px; z-index:1; }
-.immersive .preferences, .immersive .reader-navigation, .immersive .reader-more { display:flex; flex-direction:column; align-items:stretch; gap:12px; }
+.immersive .preferences, .immersive .reader-navigation { display:flex; flex-direction:column; align-items:stretch; gap:12px; }
+/* 更多菜单在横屏/小屏也要一屏内完整可点：两列网格避免纵向溢出被裁剪。 */
+.immersive .reader-more { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px 12px; }
+.immersive .reader-more .panel-heading, .immersive .reader-more #reader-close { grid-column:1 / -1; }
 .immersive .reader-panel label { display:flex; align-items:center; justify-content:space-between; width:100%; gap:12px; font-size:14px; }
 .immersive .reader-panel input[type="range"] { width:60%; }
 .immersive .reader-panel .range-stepper { display:flex; align-items:center; gap:8px; width:65%; justify-content:flex-end; }

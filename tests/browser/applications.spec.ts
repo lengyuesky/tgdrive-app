@@ -41,7 +41,7 @@ async function installShorts(page: Page) {
   await expect(dialog).toContainText('读取文件内容')
   await dialog.getByRole('button', { name: '同意并安装' }).click()
   await expect(dialog).not.toBeVisible()
-  await expect(page.locator('[data-app-id="shorts"]')).toContainText('已启用')
+  await expect(page.locator('[data-app-id="shorts"] .tile-launch')).toHaveAttribute('aria-label', /打开/)
   // 测试库还包含横屏影视与故意损坏的文件；短视频用例只随机选取自己的竖屏夹具。
   expect((await page.request.patch('/api/apps/shorts/settings', { data: { source_dir: '/测试视频' } })).ok()).toBe(true)
 }
@@ -55,7 +55,7 @@ test('短视频安装、实际播放、收藏、设置与移动端布局', async
   })
   await installShorts(page)
   await page.screenshot({ path: testInfo.outputPath('应用中心.png'), fullPage: true })
-  await page.getByRole('button', { name: '打开', exact: true }).click()
+  await page.locator('[data-app-id="shorts"] .tile-launch').click()
   const frame = page.frameLocator('iframe')
   await expect(frame.locator('#video')).toBeVisible()
   await expect.poll(() => frame.locator('#video').evaluate((node) => (node as HTMLVideoElement).currentTime)).toBeGreaterThan(0.1)
@@ -108,7 +108,7 @@ test('短视频安装、实际播放、收藏、设置与移动端布局', async
 test('退出短视频会在文件传输完成前释放服务端读取', async ({ page }) => {
   await installShorts(page)
   await page.request.post('/__apps_fixture/media', { data: { enabled: true } })
-  await page.getByRole('button', { name: '打开', exact: true }).click()
+  await page.locator('[data-app-id="shorts"] .tile-launch').click()
   const stats = async () => (await page.request.get('/__apps_fixture/media')).json()
   await expect.poll(async () => (await stats()).active).toBeGreaterThan(0)
   await expect.poll(async () => (await stats()).bytes_sent).toBeGreaterThan(0)

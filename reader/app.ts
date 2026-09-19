@@ -99,7 +99,9 @@ export async function startApp(options: AppOptions) {
         <div id="reader-more" class="reader-more" aria-label="更多操作" hidden>
           <div class="panel-heading mobile-only"><strong>更多操作</strong><button data-close-panel>关闭</button></div>
           <button id="download">下载原文件</button>
+          <button id="btn-reader-detail">作品详情</button>
           <button id="btn-reader-restart">从头重读</button>
+          <button id="btn-reader-settings">目录设置</button>
           <button id="reader-close" class="mobile-only">返回网盘</button>
         </div>
       </div>
@@ -443,6 +445,7 @@ export async function startApp(options: AppOptions) {
   let bookController = new AbortController()
   let bookGeneration = 0
   let currentFile: FileEntry | undefined
+  let currentUnit: ReadingUnit | undefined
   let currentUnitNodeId: number | undefined
   let currentUnitState: ValueSnapshot<UnitState> | undefined
   let view: ReaderView | undefined
@@ -730,6 +733,7 @@ export async function startApp(options: AppOptions) {
     view = undefined
     store = undefined
     currentFile = undefined
+    currentUnit = undefined
     currentUnitNodeId = undefined
     currentUnitState = undefined
     activeWork = undefined
@@ -812,6 +816,8 @@ export async function startApp(options: AppOptions) {
 
       // 通过 ReadingLibrary 校验文件身份并获取单位
       const unit = await library.openUnit(nodeId, signal)
+      currentUnit = library.snapshot.units.find((candidate) => candidate.nodeId === nodeId)
+        ?? { nodeId, file: unit.file, format: unit.format, sourceIds: unit.sourceIds, firstIndexedAt: 0 }
       signal.throwIfAborted()
       currentFile = unit.file
       text('book-title', unit.file.name)
@@ -855,6 +861,7 @@ export async function startApp(options: AppOptions) {
       const readingSnap = await library.reading.load(unit.file, signal)
       signal.throwIfAborted()
       currentUnitState = readingSnap.state
+      activeStore.seed(readingSnap.progress)
 
       const reading: ViewContext = {
         drive,
@@ -1026,6 +1033,15 @@ export async function startApp(options: AppOptions) {
   })
   bind('download', () => {
     if (currentFile && !currentFile.is_dir) return drive.ui.download(currentFile.path)
+  })
+  // 更多菜单：移动端可在阅读中直达目录设置、作品详情与退出；返回网盘复用宿主退出流程。
+  bind('reader-close', () => closeApp())
+  bind('btn-reader-settings', () => drive.settings.open())
+  bind('btn-reader-detail', async () => {
+    const unit = currentUnit, work = activeWork
+    if (!unit) return
+    await closeReader()
+    await openDetail({ unit, work })
   })
   bind('preferences-toggle', () => chrome?.togglePanel('preferences'))
   // toc-toggle 由 ReaderChrome 构造函数统一绑定到 navigation 面板，此处不重复监听避免快速重置

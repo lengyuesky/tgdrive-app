@@ -185,6 +185,9 @@ export class ProgressStore {
   private stopped = false
   readonly key: string
   constructor(private drive: Drive, file: FileEntry, private status: (message: string, conflict: boolean) => void) { this.key = `progress:${file.id}` }
+  seed(record: RecordValue<Progress> | null) {
+    this.record = record
+  }
   async load() {
     this.record = await this.drive.storage.get<Progress>(this.key)
     const value = this.record?.value

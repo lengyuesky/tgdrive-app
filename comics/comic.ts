@@ -116,7 +116,7 @@ export class ComicReader implements ReaderView {
     if (this.restoreTarget && Math.abs(scroll - this.scrollPosition) < .5) return { ...this.restoreTarget, entry: this.pages[this.restoreTarget.index]?.entry }
     let index = this.trackFirst, top = 0
     if (this.continuous) {
-      while (index < this.trackEnd - 1 && top + this.heights[index]! <= scroll) {
+      while (index < this.trackEnd - 1 && top + this.heights[index]! <= scroll + 1) {
         top += this.heights[index]!
         index++
       }
