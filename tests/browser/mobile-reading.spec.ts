@@ -68,7 +68,7 @@ test.beforeEach(async ({ page }) => {
   const index = await (await page.request.get('/api/apps')).json()
   for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
   const book = index.available.find((item: any) => item.manifest.id === 'books')
-  expect(book.manifest.version).toBe('1.3.6')
+  expect(book.manifest.version).toBe('1.3.7')
   expect((await page.request.post('/api/apps/catalog/books/install', { data: { digest: book.digest } })).ok()).toBe(true)
   expect((await page.request.patch('/api/apps/books/settings', { data: { source_dir: '/测试图书' } })).ok()).toBe(true)
 })

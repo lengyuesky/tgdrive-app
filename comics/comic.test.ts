@@ -5,11 +5,15 @@ import type { ViewContext } from '../reader/view'
 import type { Drive, FileEntry } from '../sdk/types'
 
 // 只隔离资源下载与解码，使用真实阅读器处理滚动、换窗和尺寸变化。
-vi.mock('./preload', () => ({ ComicPreloader: class { setCenter() {} destroy() {} } }))
+vi.mock('./preload', () => ({ ComicPreloader: class {
+  constructor(options: { probe?: { onDimensions?: (index: number, size: { width: number; height: number } | null) => void } }) { preloaderHooks.options = options }
+  setCenter() {} destroy() {}
+} }))
 const pictureHooks = vi.hoisted(() => ({
   update: (_root: HTMLElement) => {},
   layout: (_mutate: () => void) => {},
 }))
+const preloaderHooks = vi.hoisted(() => ({ options: null as { probe?: { onDimensions?: (index: number, size: { width: number; height: number } | null) => void } } | null }))
 vi.mock('../reader/pictures', async importOriginal => ({ ...await importOriginal<typeof import('../reader/pictures')>(), PictureWindow: class {
   constructor(_viewport: HTMLElement, root: HTMLElement, _signal: AbortSignal, _read: unknown, _error: unknown, layout: (mutate: () => void) => void) {
     pictureHooks.layout = layout; pictureHooks.update(root)
@@ -92,6 +96,12 @@ function fixture(count = 1500, initialHeight = 1450, autoLoad = true) {
         if (image) setDimensions(image, index)
       }
     }),
+    // 头部探测：同步告知未加载页的真实尺寸（图片宽固定 1000）。
+    probe: (sizes: [number, number][]) => {
+      for (const [index, height] of sizes) pageHeights.set(index, height)
+      for (const [index, height] of sizes) preloaderHooks.options?.probe?.onDimensions?.(index, { width: 1000, height })
+      draw()
+    },
     measure: () => observers.forEach((notify) => notify()),
     resize: (nextWidth: number, nextHeight: number) => { width = nextWidth; height = nextHeight; observers.forEach((notify) => notify()) },
   }
@@ -352,5 +362,32 @@ describe('长漫画滚动定位', () => {
       expect(loc.index).toBeGreaterThanOrEqual(449)
       expect(loc.index).toBeLessThan(460)
     }
+  })
+
+  it('头部探测让后续未加载页的占位高与真实一致，快滚穿越不再跳几十页', async () => {
+    const { reader, viewport, finish, scrollBy, loadPages, probe } = fixture(150, 2000, false)
+    await finish(reader.open())
+    // 前几页短图真实加载：学习估高收敛到 2000，而后续页真实高 12000。
+    loadPages([[0, 2000], [1, 2000], [2, 2000]])
+    probe(Array.from({ length: 28 }, (_, i) => [i + 3, 12_000]))
+    // 一次 24000px 的快滚：按真实页高应落在第 2～4 页；
+    // 修复前估高 2000 会把它虚报成 +12 页，阅读位置莫名前跳十几页。
+    await scrollBy(24_000)
+    expect(reader.current().index).toBeGreaterThanOrEqual(2)
+    expect(reader.current().index).toBeLessThanOrEqual(4)
+    // 换窗后新挂载页直接使用探测到的精确尺寸，不再退回骨架占位。
+    const node3 = viewport.querySelector<HTMLElement>('.comic-page[data-index="3"]')!
+    expect(node3.querySelector('img')!.getAttribute('width')).toBe('1000')
+    expect(parseFloat(node3.querySelector('img')!.style.height)).toBe(12_000)
+  })
+
+  it('探测尺寸批量到达时不改变当前页和页内位置', async () => {
+    const { reader, finish, probe, loadPages } = fixture(150, 1450, false)
+    await finish(reader.open({ format: 'comic', index: 50, ratio: .4 }))
+    loadPages([[50, 6000]])
+    const before = reader.current()
+    // 邻近页探测结果大幅改变上方/下方占位高，阅读锚点必须保持不变。
+    probe([[45, 400], [46, 9000], [47, 300], [53, 7000], [54, 11_000]])
+    expect(reader.current()).toEqual(before)
   })
 })

@@ -190,12 +190,14 @@ describe('漫画固定物理双页', () => {
   })
   it('候选尺寸迟到与横屏请求被取消时，竖屏回退不等待旧请求也不改写目标', async () => {
     const { mock, reader, context, resize, mounted } = fixture({ prefs: { mode: 'single' } })
-    await reader.open({ format: 'comic', index: 10 })
+    // 在打开前就挂起第 2 页（id 3）的读取：头部探测与整图读取都会被卡住，
+    // 模拟双页候选尺寸迟到的原始场景（探测通常会让尺寸提前到位）。
     const original = mock.readRange.getMockImplementation()!, delayed = deferred(), started = deferred()
     mock.readRange.mockImplementation(async (ref, offset, length, options) => {
       if (ref.id === 3) { started.resolve(); await delayed.promise }
       return original(ref, offset, length, options)
     })
+    await reader.open({ format: 'comic', index: 10 })
     await reader.configure({ ...context.prefs, mode: 'double' })
     const pending = reader.restore({ format: 'comic', index: 2, ratio: .65 }), rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     await started.promise

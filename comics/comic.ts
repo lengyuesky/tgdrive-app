@@ -4,7 +4,7 @@ import { LIMITS, RangeFile, isAbort, isImage, natural } from '../reader/io'
 import { imageBlob, imageInfo } from '../reader/image'
 import { coverTasks } from '../reader/library/cache'
 import { PictureWindow, PICTURE_COST_LIMIT, pictureCost } from '../reader/pictures'
-import { ComicPreloader } from './preload'
+import { ComicPreloader, type ProbeDimensions } from './preload'
 import { boundedIndex, canvasThumbnail, contentSize, frame, sectionState, type ReaderView, type ReaderThumbnail, type Section, type ViewContext } from '../reader/view'
 import { zoomLevels, type Location, type Preferences } from '../reader/state'
 import type { FileEntry } from '../sdk/types'
@@ -57,6 +57,8 @@ export class ComicReader implements ReaderView {
   private restoreTarget?: Location
   private scrollPosition = 0
   private scrollFrame?: number
+  private probePending?: Map<number, Dimensions>
+  private probeFrame?: number
   private progressTimer?: ReturnType<typeof setTimeout>
   private renderedMode: ComicMode = 'scroll'
   private spread: number[] = []
@@ -105,16 +107,55 @@ export class ComicReader implements ReaderView {
     this.pages.sort((a, b) => natural(a.name, b.name) || natural(a.entry, b.entry))
     if (!this.pages.length) throw new Error('此目录或压缩包中没有支持的漫画图片')
     this.sections = this.pages.map((page, i) => ({ label: `${i + 1} · ${page.name}`, entry: page.entry }))
-    this.heights = this.pages.map(() => Math.min(1500, Math.max(240, this.context.viewport.clientWidth * 1.45)))
+    // 初始估高：至少 2.2 个视口高。条漫真实页高常达数千至万级像素，固定 1.45 比例
+    // 估高会把一次快滚的动量换算成几十个虚高页码；宁可先估高再随真实尺寸收敛。
+    this.heights = this.pages.map(() => Math.min(196_640, Math.max(240, this.context.viewport.clientWidth * 1.45, this.context.viewport.clientHeight * 2.2)))
     this.preloader = new ComicPreloader({
       pages: this.pages, archive: this.archive, drive: this.context.drive,
       signal: this.signal, ahead: 3, behind: 2, maxCache: 12, concurrency: 2,
       error: this.context.error,
+      // 头部探测让未加载页的占位高与真实内容一致：快滚穿越时页码映射不再虚高。
+      probe: { headBytes: 64 * 1024, ring: 12, concurrency: 2, onDimensions: (index, size) => this.applyProbe(index, size) },
     })
     this.context.viewport.replaceChildren(this.root)
     await this.restore(location?.format === 'comic' ? location : { format: 'comic', index: 0 })
   }
   private sum(from: number, to: number) { let value = 0; for (let i = from; i < to; i++) value += this.heights[i] ?? 0; return value }
+  /** 探测结果批量落地：同一帧内全部应用，只捕获一次锚点、只重排一次。 */
+  private applyProbe(index: number, size: ProbeDimensions | null): void {
+    if (this.stopped || !size || !this.pages[index] || this.dimensions.has(index)) return
+    this.probePending ??= new Map<number, Dimensions>()
+    this.probePending.set(index, size)
+    if (this.probeFrame !== undefined) return
+    this.probeFrame = requestAnimationFrame(() => {
+      this.probeFrame = undefined
+      const pending = this.probePending
+      this.probePending = undefined
+      if (this.stopped || !pending?.size) return
+      // 视口尺寸变动期间浏览器可能截断 scrollTop（如桌面目录面板收起）：
+      // 探测落地必须沿上次已知好锚点重排，不能把被截断的坐标当成阅读位置。
+      const resized = this.context.viewport.clientWidth !== this.width || this.context.viewport.clientHeight !== this.height
+      const anchor = this.capture(resized)
+      for (const [index, size] of pending) this.installProbe(index, size)
+      this.measure(anchor)
+    })
+  }
+  private installProbe(index: number, size: Dimensions): void {
+    this.dimensions.set(index, size)
+    const node = this.nodes.get(index)
+    if (node) {
+      const image = node.querySelector('img')!
+      if (!(Number(image.getAttribute('width')) > 0)) {
+        image.width = size.width; image.height = size.height
+        image.style.aspectRatio = `${size.width} / ${size.height}`
+        image.style.minHeight = '0'
+      }
+    } else {
+      const width = this.layoutWidth || this.availableWidth()
+      const height = this.layoutHeight || contentSize(this.context.viewport).height
+      this.heights[index] = this.scaledSize(size, width / this.zoom, height).height
+    }
+  }
   private bottomPadding() { return this.continuous && this.trackEnd === this.pages.length ? Math.max(0, this.context.viewport.clientHeight - (this.heights.at(-1) ?? 0)) : 0 }
   current(): Location {
     const scroll = this.context.viewport.scrollTop
@@ -490,6 +531,8 @@ export class ComicReader implements ReaderView {
     this.context.viewport.removeEventListener('scroll', this.onScroll); this.context.signal.removeEventListener('abort', this.onAbort)
     this.root.removeEventListener('load', this.publish, true)
     if (this.scrollFrame !== undefined) cancelAnimationFrame(this.scrollFrame)
+    if (this.probeFrame !== undefined) cancelAnimationFrame(this.probeFrame)
+    this.probePending?.clear()
     clearTimeout(this.progressTimer)
     this.nodes.clear(); this.dimensions.clear(); this.root.replaceChildren()
   }

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ComicPreloader, type PreloadPage } from './preload'
 import { deferred } from '../reader/library/test-fixtures'
 import type { Archive } from '../reader/archive'
-import type { Drive } from '../sdk/types'
+import type { Drive, FileEntry } from '../sdk/types'
 
 describe('ComicPreloader', () => {
   const mockPages: PreloadPage[] = Array.from({ length: 20 }, (_, i) => ({
@@ -192,5 +192,109 @@ describe('ComicPreloader', () => {
     expect(read).toHaveBeenCalledTimes(3)
     waits[2]!.resolve(new Uint8Array([99])); expect(await current).toEqual(new Uint8Array([99]))
     expect(preloader.has(0)).toBe(true); preloader.destroy()
+  })
+})
+
+// —— 头部尺寸探测：只读页首小段字节解析真实宽高，跟随阅读中心 ——
+const pngHead = (width: number, height: number) => {
+  const head = new Uint8Array(24)
+  head.set([137, 80, 78, 71, 13, 10, 26, 10], 0)
+  head.set([0, 0, 0, 13, 73, 72, 68, 82], 8)
+  new DataView(head.buffer).setUint32(16, width)
+  new DataView(head.buffer).setUint32(20, height)
+  return head
+}
+
+describe('ComicPreloader 头部尺寸探测', () => {
+  const pages: PreloadPage[] = Array.from({ length: 40 }, (_, i) => ({ name: `${i + 1}.png`, entry: `p/${i}.png` }))
+
+  it('压缩包页只从整图缓存解析尺寸，不为头部探测拉取共享分块', async () => {
+    const results: [number, { width: number; height: number } | null][] = []
+    // 整图读取：只为预读窗口内的页面提供字节；探测不得触发任何额外读取。
+    const read = vi.fn(async (entry: string) => pngHead(400, 1000 + Number(/\d+/.exec(entry)![0])))
+    const archive = { read } as unknown as Archive
+    const preloader = new ComicPreloader({
+      pages, archive, drive: {} as Drive, signal: new AbortController().signal,
+      ahead: 2, behind: 2, concurrency: 1,
+      probe: { ring: 12, concurrency: 2, onDimensions: (index, size) => results.push([index, size]) },
+    })
+    preloader.setCenter(0)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    // 首次调度时整图仍在途：缓存就绪后再次调度，探测只解析缓存并回调真实尺寸。
+    preloader.setCenter(0)
+    await new Promise(resolve => setTimeout(resolve, 80))
+    const reported = new Map(results)
+    for (const index of [0, 1, 2]) expect(reported.get(index)).toEqual({ width: 400, height: 1000 + index })
+    // 压缩包页不发起探测读取：整图读取次数与预读窗口一致，环内其余页不产生任何请求。
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(new Set(read.mock.calls.map(([entry]) => entry))).toEqual(new Set(['p/0.png', 'p/1.png', 'p/2.png']))
+    // 中心移动到 12：预读窗口 [10, 14] 外的页（环内但未加载）仍不触发读取。
+    results.length = 0
+    preloader.setCenter(12)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    preloader.setCenter(12)
+    await new Promise(resolve => setTimeout(resolve, 120))
+    expect(new Set(read.mock.calls.map(([entry]) => entry))).toEqual(
+      new Set(['p/0.png', 'p/1.png', 'p/2.png', 'p/10.png', 'p/11.png', 'p/12.png', 'p/13.png', 'p/14.png']))
+    const late = new Map(results)
+    for (const index of [10, 11, 12, 13, 14]) expect(late.get(index)).toEqual({ width: 400, height: 1000 + index })
+    preloader.destroy()
+  })
+
+  it('目录页探测只请求每页开头少量字节，已缓存页直接从缓存解析尺寸', async () => {
+    const results: [number, { width: number; height: number } | null][] = []
+    const filePages: PreloadPage[] = Array.from({ length: 20 }, (_, i) => ({
+      name: `${i + 1}.png`, entry: String(i), file: { id: i + 1, content_version: 'a'.repeat(64), size: 1024 * 1024 } as FileEntry,
+    }))
+    const full = new Uint8Array(1024 * 1024); full.set(pngHead(400, 2010), 0)
+    const readRange = vi.fn(async (ref: { id: number }, offset: number, length: number) => {
+      expect(offset).toBe(0)
+      // 整图读取（1 MiB）立即返回可解析图片；头部探测（64 KiB）稍有延迟，给缓存留出光争窗口。
+      if (length > 64 * 1024) return full
+      await new Promise(resolve => setTimeout(resolve, 5))
+      return pngHead(400, 3000 + (ref.id - 1))
+    })
+    const drive = { files: { readRange } } as unknown as Drive
+    const preloader = new ComicPreloader({
+      pages: filePages, drive, signal: new AbortController().signal,
+      ahead: 2, behind: 2, concurrency: 2,
+      probe: { ring: 3, concurrency: 1, onDimensions: (index, size) => results.push([index, size]) },
+    })
+    preloader.setCenter(10)
+    await new Promise(resolve => setTimeout(resolve, 80))
+    const heads = readRange.mock.calls.filter(([, , length]) => length <= 64 * 1024)
+    // 环 [7, 13]：中心页探测先于整图完成，走 64 KiB 头部；已被整图预读缓存的
+    // 页（8～12）直接从缓存字节解析，不再重复发头部请求；环外两页走头部。
+    expect(new Set(heads.map(([ref]) => String((ref as { id: number }).id - 1)))).toEqual(new Set(['7', '10', '13']))
+    expect(heads.every(([, , length]) => length === 64 * 1024)).toBe(true)
+    const reported = new Map(results)
+    expect(reported.get(10)).toEqual({ width: 400, height: 3010 })
+    expect(reported.get(13)).toEqual({ width: 400, height: 3013 })
+    for (const index of [8, 9, 11, 12]) expect(reported.get(index)).toEqual({ width: 400, height: 2010 })
+    preloader.destroy()
+  })
+
+  it('目录页探测失败有限重试后回退为无尺寸，中止的任务不缓存可再探测', async () => {
+    const results: [number, { width: number; height: number } | null][] = []
+    let attempts = 0
+    const filePages: PreloadPage[] = Array.from({ length: 6 }, (_, i) => ({
+      name: `${i + 1}.png`, entry: String(i), file: { id: i + 1, content_version: 'a'.repeat(64), size: 1024 * 1024 } as FileEntry,
+    }))
+    const readRange = vi.fn(async (_ref: unknown, _offset: number, length: number) => {
+      if (length <= 64 * 1024) attempts++
+      throw new Error('网络抖动')
+    })
+    const drive = { files: { readRange } } as unknown as Drive
+    const preloader = new ComicPreloader({
+      pages: filePages, drive, signal: new AbortController().signal,
+      ahead: 0, behind: 0, concurrency: 1,
+      probe: { ring: 2, concurrency: 1, onDimensions: (index, size) => results.push([index, size]) },
+    })
+    preloader.setCenter(0)
+    await new Promise(resolve => setTimeout(resolve, 700))
+    // 每页最多 3 次尝试，仍失败则记 null；不会无限重试。
+    expect(attempts).toBe(9)
+    expect(results).toEqual([[0, null], [1, null], [2, null]])
+    preloader.destroy()
   })
 })

@@ -32,6 +32,11 @@ const stripPng = png(240, 4800, [40, 120, 200])
 const sampleStrip = zip(
   Array.from({ length: 40 }, (_, i) => [`${String(i + 1).padStart(2, '0')}.png`, stripPng])
 )
+// 参差条漫：短页与超长页交替的图片目录，中位数估高无法代表任何一页，
+// 用于回归“滑动一段时间后页码映射虚高、视图被带跳几十页”。
+// 图宽 1200 大于阅读视口，适宽只会缩小——与真实条漫一致。
+const raggedHeights = Array.from({ length: 40 }, (_, i) => (i < 3 ? 2000 : 12_000))
+const raggedPages = raggedHeights.map((height, i) => png(1200, height, [90, 60, 160]))
 
 test.beforeAll(async () => {
   stagingTmp = await mkdtemp(join(tmpdir(), 'tgdrive-readers-build-'))
@@ -96,9 +101,11 @@ async function setupApp(
     viewport?: { width: number; height: number }
     unindexedFiles?: FileEntry[]
     readDelay?: number
+    /** 延迟随请求字节数增长：头部探测远快于整图/整块读取，模拟真实网络。 */
+    proportionalRead?: boolean
   }
 ) {
-  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [], readDelay = 0 } = options
+  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [], readDelay = 0, proportionalRead = false } = options
   await page.setViewportSize(viewport)
 
   const outsideRequests: string[] = []
@@ -196,6 +203,34 @@ async function setupApp(
       },
       data: sampleStrip,
     },
+    {
+      entry: {
+        id: 204,
+        name: '参差条漫',
+        path: '/书库/参差条漫',
+        is_dir: true,
+        size: 0,
+        content_version: 'v1',
+        created_at: 2003,
+        modified_at: 2003,
+        favorite: false,
+      },
+      data: Buffer.alloc(0),
+    },
+    ...raggedPages.map((data, i) => ({
+      entry: {
+        id: 300 + i,
+        name: `${String(i + 1).padStart(2, '0')}.png`,
+        path: `/书库/参差条漫/${String(i + 1).padStart(2, '0')}.png`,
+        is_dir: false,
+        size: data.length,
+        content_version: 'v1',
+        created_at: 2010 + i,
+        modified_at: 2010 + i,
+        favorite: false,
+      } satisfies FileEntry,
+      data,
+    })),
   ]
 
   const activeFiles = kind === 'books' ? bookFiles : comicFiles
@@ -240,7 +275,7 @@ async function setupApp(
   }))
 
   await page.addInitScript(
-    ({ kind, entries, serializedList, readDelay }) => {
+    ({ kind, entries, serializedList, readDelay, proportionalRead }) => {
       const storageStore = new Map<string, { key: string; value: any; revision: string; updated_at: number }>()
       let revCount = 0
 
@@ -305,9 +340,14 @@ async function setupApp(
             const id = typeof ref === 'number' ? ref : ref.id
             const full = dataEntries.get(id)
             if (!full) throw new Error('No data for file ' + id)
-            if (readDelay > 0) await new Promise((resolve) => setTimeout(resolve, readDelay))
-            const slice = full.slice(offset, offset + length)
-            return slice
+            if (readDelay > 0) {
+              // 比例模式：延迟 ≈ rtt + (readDelay - rtt) × 字节占比；64 KiB 头部探测快，整块慢。
+              const delay = proportionalRead
+                ? Math.min(readDelay, 60 + Math.round((readDelay - 60) * Math.min(1, length / (2 * 1024 * 1024))))
+                : readDelay
+              await new Promise((resolve) => setTimeout(resolve, delay))
+            }
+            return full.slice(offset, offset + length)
           },
           searchPage: async () => ({ results: [], has_more: false, next_cursor: null }),
         },
@@ -340,6 +380,7 @@ async function setupApp(
       entries: allEntries,
       serializedList,
       readDelay,
+      proportionalRead,
     }
   )
 
@@ -677,5 +718,42 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
     })
     expect(settled.visible, `加载后视图应与页码一致：${JSON.stringify(settled)}`).not.toBeNull()
     expect(Math.abs((settled.visible ?? 0) - (mapped - 1)), `加载后不应向前跳页：${JSON.stringify(settled)}`).toBeLessThanOrEqual(2)
+  })
+
+  test('8. 参差条漫阅读中快滚不再被估高带跳几十页，页码与真实内容一致', async ({ page }) => {
+    // 比例延迟：64 KiB 头部探测远快于整图读取，模拟真实网络。
+    await setupApp(page, { kind: 'comics', readDelay: 800, proportionalRead: true })
+    const libBtn = page.locator('#nav-library, #tab-library').filter({ visible: true }).first()
+    await libBtn.click()
+    await page.locator('#items .library-card', { hasText: '参差条漫' }).first().click()
+    await expect(page.locator('#reading-status')).toHaveText('', { timeout: 15_000 })
+    const viewport = page.locator('#viewport')
+
+    // 等首页与头部探测就位：轨道高度达到真实内容量级（探测环内的页已精确）。
+    await expect
+      .poll(() => viewport.evaluate((node) => Math.round(node.scrollHeight)), { timeout: 12_000 })
+      .toBeGreaterThan(80_000)
+
+    // 一次大幅快滚。真实内容落在第 8 页（1 基）附近；修复前首页短图让学习估高收敛到
+    // 2000，同一位置会被虚报到 30 页上下，阅读位置被带跳几十页且永久丢失中间内容。
+    await viewport.evaluate((node) => { node.scrollTop = 50_000 })
+    await page.waitForTimeout(1_200)
+    const result = await viewport.evaluate((node, heights) => {
+      const image = node.querySelector<HTMLElement>('figure.comic-page img')
+      const width = image ? image.getBoundingClientRect().width : node.clientWidth
+      const cum = [0]
+      for (const height of heights) cum.push(cum[cum.length - 1]! + (height * width) / 1200)
+      let expected = 0
+      while (expected + 1 < cum.length && cum[expected + 1]! <= node.scrollTop) expected++
+      return {
+        scrollTop: Math.round(node.scrollTop),
+        expected,
+        reported: Number(((document.querySelector('#position')?.textContent) ?? '').split(' / ')[0]) - 1,
+      }
+    }, raggedHeights)
+    expect(
+      Math.abs(result.reported - result.expected),
+      `页码应与真实内容一致：${JSON.stringify(result)}`
+    ).toBeLessThanOrEqual(1)
   })
 })
