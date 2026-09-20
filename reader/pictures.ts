@@ -7,6 +7,8 @@ export interface PictureWindowOptions {
   maxVisible?: number
   verticalMargin?: number
   costLimit?: number
+  /** 已解码样本未满该值前，按 DOM 顺序把可见图之后的未知图也纳入加载，供占位估高自举（0 为关闭）。 */
+  sampleTarget?: number
 }
 export class PictureWindow {
   private records = new Map<HTMLImageElement, { url: string; cost: number }>()
@@ -60,6 +62,20 @@ export class PictureWindow {
       const info = this.info.get(image), pixels = info ? pictureCost(info.width, info.height) : 0
       if (cost + pixels > limit) continue
       this.desired.add(image); cost += pixels
+    }
+    // 自举采样：真实长页会把后续占位页顶出可见余量，样本永远凑不齐、占位估高无法收敛。
+    // 样本未满前按 DOM 顺序补载紧随可见图之后的未知图；未知像素成本暂按 0 计，下一轮刷新重新核算。
+    const sampleTarget = this.options?.sampleTarget ?? 0
+    if (sampleTarget > 0 && this.info.size < sampleTarget) {
+      let last = -1
+      for (const image of this.desired) last = Math.max(last, this.images.indexOf(image))
+      for (let i = last + 1; i < this.images.length && this.info.size < sampleTarget; i++) {
+        const image = this.images[i]!
+        // 已知尺寸的图无需再采样；在途加载必须重新纳入 desired，避免下一轮刷新被当作滚离而中断。
+        if (this.desired.has(image) || this.info.has(image) || this.failed.has(image)
+          || Number(image.getAttribute('width')) > 0) continue
+        this.desired.add(image)
+      }
     }
     for (const image of this.records.keys()) if (!this.desired.has(image)) this.release(image)
     for (const [image, controller] of this.active) if (!this.desired.has(image)) controller.abort()

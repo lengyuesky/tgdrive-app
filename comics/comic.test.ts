@@ -319,10 +319,24 @@ describe('长漫画滚动定位', () => {
     unloaded.add(11)
     await finish(reader.open({ format: 'comic', index: 10, ratio: 0 }))
     measure()
-    // 该节点不应被当作有效测量高度，应保留预估 minHeight 占位。
+    // 该节点不应被当作有效测量高度，应保留预估 minHeight 占位；
+    // 占位值已从固定 1.45 比例升级为已加载邻页学习到的真实页高。
     const node11 = viewport.querySelector<HTMLElement>('.comic-page[data-index="11"]')!
-    expect(parseFloat(node11.style.minHeight)).toBe(1450)
+    expect(parseFloat(node11.style.minHeight)).toBe(1200)
     expect(reader.current().index).toBe(10)
+  })
+
+  it('已加载页学习到长图页高后，未知页占位与页码映射不再依赖固定估高', async () => {
+    const { reader, viewport, finish, scrollBy, loadPages } = fixture(100, 12_000, false)
+    await finish(reader.open())
+    loadPages([[0, 12_000], [1, 12_000], [2, 12_000]])
+    // 三页一致采样后估高已学习（12000px）。一次跨越约 4 个真实页高的快速滚动：
+    // 页码映射按学习页高换算应落在第 5 页；固定 1.45 估高会把 48500px 虚报到第 12 页左右。
+    await scrollBy(48_500)
+    expect(reader.current().index).toBe(4)
+    // 换窗后新挂载的未知页节点应用学习到的页高占位，而不是 1.45 比例骨架。
+    const node3 = viewport.querySelector<HTMLElement>('.comic-page[data-index="3"]')!
+    expect(parseFloat(node3.style.minHeight)).toBe(12_000)
   })
 
   it('从第0页打开后跳转到第450页并向下滑动不会跳到430几页', async () => {

@@ -34,6 +34,12 @@ export class ComicReader implements ReaderView {
   private index = 0
   private trackFirst = 0
   private trackEnd = 0
+  // 已学习页高采样（figure 高 / 可用宽，布局无关）与图注等固定附加高度：
+  // 未知页占位不再依赖固定 1.45 比例猜测，快速滚动穿越未加载区时页码映射不会虚高。
+  private learnedRatios: number[] = []
+  private learnedExtrasSamples: number[] = []
+  private learnedHeight = 0
+  private learnedExtras = 0
   private root = document.createElement('div')
   private before = document.createElement('div')
   private after = document.createElement('div')
@@ -266,7 +272,7 @@ export class ComicReader implements ReaderView {
       const anchor = this.capture()
       mutate()
       this.measure(anchor)
-    }, { maxVisible: 5, verticalMargin: 2 })
+    }, { maxVisible: 5, verticalMargin: 2, sampleTarget: 3 })
     else this.pictures.update(this.root)
     this.rendering = false
     if (!continuous && programmatic) { this.context.viewport.scrollLeft = 0; this.syncScroll(0) }
@@ -334,6 +340,7 @@ export class ComicReader implements ReaderView {
     const resized = width !== this.width || height !== this.height || layoutWidth !== this.layoutWidth || this.fit !== this.layoutFit || this.zoom !== this.layoutZoom
     const anchor = forced ?? this.capture(resized)
     let changed = resized
+    const fresh: number[] = []
     if (layoutWidth !== this.layoutWidth || this.fit !== this.layoutFit || this.zoom !== this.layoutZoom || this.fit === 'page' && layoutHeight !== this.layoutHeight) {
       if (this.layoutWidth) this.heights = this.heights.map((h, index) => {
         const size = this.dimensions.get(index)
@@ -349,8 +356,9 @@ export class ComicReader implements ReaderView {
       const image = node.querySelector('img')!
       const width = Number(image.getAttribute('width')), height = Number(image.getAttribute('height'))
       const known = width > 0 && height > 0
+      if (known && !this.dimensions.has(index)) fresh.push(index)
       node.style.width = ''; node.style.height = ''; node.style.flex = ''
-      const size = known ? this.scaledSize({ width, height }, layoutWidth / this.zoom, layoutHeight) : { width: layoutWidth, height: Math.min(196605, layoutWidth * 1.45, this.fit === 'page' ? layoutHeight * this.zoom : Infinity) }
+      const size = known ? this.scaledSize({ width, height }, layoutWidth / this.zoom, layoutHeight) : { width: layoutWidth, height: Math.min(196605, this.learnedHeight > 0 ? Math.max(120, this.learnedHeight - this.learnedExtras) : layoutWidth * 1.45, this.fit === 'page' ? layoutHeight * this.zoom : Infinity) }
       // 无 src 的 img 在部分浏览器中忽略 aspect-ratio；显式高度保证解码前后和回收后几何一致。
       if (image.style.height !== `${size.height}px`) image.style.height = `${size.height}px`
       if (known) {
@@ -366,7 +374,37 @@ export class ComicReader implements ReaderView {
       const h = node.getBoundingClientRect().height
       if (h > 0 && Math.abs(h - this.heights[index]!) >= .5) { this.heights[index] = h; changed = true }
     }
-    // 未知页不跟随某一张图片的高度全量改写，混排长短图时占位也保持稳定。
+    // 从新完成的页面学习真实页高：长条漫等页高远超 1.45 比例猜测时，快速滚动穿越未加载区不会被估成虚高页码，修正后也不再把视图钉到十几页之外。
+    const median = (values: number[]) => {
+      if (!values.length) return 0
+      const sorted = [...values].sort((a, b) => a - b), middle = sorted.length >> 1
+      return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2
+    }
+    for (const index of fresh) {
+      const figure = this.heights[index] ?? 0
+      if (figure <= 0) continue
+      // 以宽比记录采样，换布局后重新换算仍有效；中位数避免个别超长图拉偏整体估高。
+      this.learnedRatios.push(figure / Math.max(1, layoutWidth))
+      if (this.learnedRatios.length > 9) this.learnedRatios.shift()
+      const image = this.nodes.get(index)?.querySelector('img')
+      const imageHeight = image ? image.getBoundingClientRect().height : 0
+      this.learnedExtrasSamples.push(Math.max(0, figure - imageHeight))
+      if (this.learnedExtrasSamples.length > 9) this.learnedExtrasSamples.shift()
+    }
+    this.learnedHeight = this.learnedRatios.length >= 3 ? Math.min(196605, median(this.learnedRatios) * layoutWidth) : 0
+    this.learnedExtras = median(this.learnedExtrasSamples)
+    if (this.learnedHeight > 0) {
+      for (let j = 0; j < this.pages.length; j++) {
+        if (this.dimensions.has(j) || Math.abs((this.heights[j] ?? 0) - this.learnedHeight) < 1) continue
+        this.heights[j] = this.learnedHeight
+        const node = this.nodes.get(j)
+        if (node) {
+          const minHeight = `${this.learnedHeight}px`
+          if (node.style.minHeight !== minHeight) node.style.minHeight = minHeight
+        }
+        changed = true
+      }
+    }
     this.updateSpacers()
     const { location, offset, proportional } = anchor
     const pageHeight = this.heights[location.index] ?? 0

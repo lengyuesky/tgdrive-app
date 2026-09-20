@@ -27,6 +27,11 @@ const sampleCbz = zip([
   ['02.png', png(400, 600, [50, 180, 50])],
   ['03.png', png(400, 600, [50, 50, 180])],
 ])
+// 长条漫：真实页高远大于 1.45 比例估高，用于验证快速滚动的页码映射。
+const stripPng = png(240, 4800, [40, 120, 200])
+const sampleStrip = zip(
+  Array.from({ length: 40 }, (_, i) => [`${String(i + 1).padStart(2, '0')}.png`, stripPng])
+)
 
 test.beforeAll(async () => {
   stagingTmp = await mkdtemp(join(tmpdir(), 'tgdrive-readers-build-'))
@@ -90,9 +95,10 @@ async function setupApp(
     kind: 'books' | 'comics'
     viewport?: { width: number; height: number }
     unindexedFiles?: FileEntry[]
+    readDelay?: number
   }
 ) {
-  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [] } = options
+  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [], readDelay = 0 } = options
   await page.setViewportSize(viewport)
 
   const outsideRequests: string[] = []
@@ -176,6 +182,20 @@ async function setupApp(
       },
       data: sampleCbz,
     },
+    {
+      entry: {
+        id: 202,
+        name: '长条漫.cbz',
+        path: '/书库/长条漫.cbz',
+        is_dir: false,
+        size: sampleStrip.length,
+        content_version: 'v1',
+        created_at: 2001,
+        modified_at: 2001,
+        favorite: false,
+      },
+      data: sampleStrip,
+    },
   ]
 
   const activeFiles = kind === 'books' ? bookFiles : comicFiles
@@ -220,7 +240,7 @@ async function setupApp(
   }))
 
   await page.addInitScript(
-    ({ kind, entries, serializedList }) => {
+    ({ kind, entries, serializedList, readDelay }) => {
       const storageStore = new Map<string, { key: string; value: any; revision: string; updated_at: number }>()
       let revCount = 0
 
@@ -285,6 +305,7 @@ async function setupApp(
             const id = typeof ref === 'number' ? ref : ref.id
             const full = dataEntries.get(id)
             if (!full) throw new Error('No data for file ' + id)
+            if (readDelay > 0) await new Promise((resolve) => setTimeout(resolve, readDelay))
             const slice = full.slice(offset, offset + length)
             return slice
           },
@@ -318,6 +339,7 @@ async function setupApp(
       kind,
       entries: allEntries,
       serializedList,
+      readDelay,
     }
   )
 
@@ -372,9 +394,15 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
         await prefBtn.click()
       } else if (vp.width <= 768) {
         await expect(page.locator('#app.immersive')).toHaveCount(1)
-        await page.locator('#viewport').focus()
-        await page.keyboard.press('Escape')
-        await expect(page.locator('#back')).toBeVisible()
+        // 唤出沉浸工具栏存在轻微竞态：仅在工具栏未显示时按键，避免无效重复触发；
+        // 若面板恰好打开首键仅关面板，下一轮再补一键即可唤出。
+        await expect(async () => {
+          if (!(await page.locator('#back').isVisible())) {
+            await page.locator('#viewport').focus()
+            await page.keyboard.press('Escape')
+          }
+          await expect(page.locator('#back')).toBeVisible({ timeout: 1_500 })
+        }).toPass({ timeout: 15_000 })
       }
 
       // 从阅读器更多菜单进入作品详情，详情页同样不得水平溢出
@@ -601,5 +629,53 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
     } finally {
       await context.close()
     }
+  })
+
+  test('7. 长条漫快速滚动不虚报页码，真实页高修正后不向前跳页', async ({ page }) => {
+    // 读取延迟 800ms：确保跳跃后未知页来不及加载，页码映射只能依赖占位估高。
+    await setupApp(page, { kind: 'comics', readDelay: 800 })
+    const libBtn = page.locator('#nav-library, #tab-library').filter({ visible: true }).first()
+    await libBtn.click()
+    await page.locator('#items .library-card', { hasText: '长条漫' }).first().click()
+    await expect(page.locator('#reading-status')).toHaveText('')
+    const viewport = page.locator('#viewport')
+
+    // 等首页真实加载完成，并等至少三页采样让未知页占位学习到真实页高（轨道显著变高即生效）。
+    await expect.poll(() => viewport.evaluate((node) => {
+      const figure = node.querySelector('figure.comic-page') as HTMLElement | null
+      return figure ? Math.round(figure.getBoundingClientRect().height) : 0
+    }), { timeout: 5000 }).toBeGreaterThan(4000)
+    await expect.poll(() => viewport.evaluate((node) => Math.round(node.scrollHeight)), { timeout: 8000 }).toBeGreaterThan(80_000)
+    const realHeight = await viewport.evaluate(
+      () => document.querySelector('figure.comic-page')!.getBoundingClientRect().height
+    )
+
+    // 模拟快速惯性甩动：一次跨越约 4.2 个真实页高，途经多个未加载占位页。
+    await viewport.evaluate((node, target) => { node.scrollTop = target }, Math.round(realHeight * 4.2))
+    await page.waitForTimeout(250)
+    const positionText = (await page.locator('#position').textContent()) ?? ''
+    const mapped = Number(positionText.split(' / ')[0])
+    // 物理位置落在第 5 页（1 基）；修复前固定估高会把它虚报到 12 页左右。
+    expect(Number.isFinite(mapped) && mapped > 0, `页码指示异常：${positionText}`).toBe(true)
+    expect(mapped, `快速滚动后页码不应虚报：${positionText}`).toBeLessThanOrEqual(7)
+    expect(mapped).toBeGreaterThanOrEqual(3)
+
+    // 加载完成后视图与页码保持一致，不出现向前跳页。
+    await page.waitForTimeout(3500)
+    const settled = await viewport.evaluate((node) => {
+      const box = node.getBoundingClientRect()
+      let visible: number | null = null
+      for (const figure of [...node.querySelectorAll('figure.comic-page')] as HTMLElement[]) {
+        const rect = figure.getBoundingClientRect()
+        if (rect.top <= box.top + 80 && rect.bottom > box.top + 80) visible = Number(figure.dataset.index)
+      }
+      return {
+        scrollTop: Math.round(node.scrollTop),
+        visible,
+        position: document.querySelector('#position')?.textContent ?? '',
+      }
+    })
+    expect(settled.visible, `加载后视图应与页码一致：${JSON.stringify(settled)}`).not.toBeNull()
+    expect(Math.abs((settled.visible ?? 0) - (mapped - 1)), `加载后不应向前跳页：${JSON.stringify(settled)}`).toBeLessThanOrEqual(2)
   })
 })
