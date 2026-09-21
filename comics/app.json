@@ -1,7 +1,7 @@
 {
   "id": "comics",
   "name": "漫画",
-  "version": "1.2.10",
+  "version": "1.2.11",
   "api_version": 2,
   "min_host_version": "0.2.0",
   "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",

@@ -12,9 +12,12 @@ import type { FileEntry } from '../sdk/types'
 interface ComicPage { name: string; entry: string; file?: FileEntry; bytes?: number }
 interface Dimensions { width: number; height: number }
 /** 滚动锚：location/offset 为页相对位置；distance 非零时为像素锚——以 location 为基准、
- *  保留自该基准起的像素距离（用户停在占位页时，穿越区估高修正只改落点页码）。 */
-interface ScrollAnchor { location: Location; offset: number; proportional: boolean; distance?: number }
+ *  保留自该基准起的像素距离（用户停在占位页时，穿越区估高修正只改落点页码）。
+ *  scrollTop 为捕获锚点时的 DOM 滚动坐标；settle 表示定位时必须结清滚动债并改写坐标。 */
+interface ScrollAnchor { location: Location; offset: number; proportional: boolean; distance?: number; scrollTop?: number; settle?: boolean }
 type ComicMode = 'scroll' | 'single' | 'double'
+/** 最后一个滚动事件之后多久视为停稳：iOS 惯性滚动每帧派发 scroll 事件，静默期超过该值即已结束。 */
+const SETTLE_DELAY = 180
 const spreadCandidates = (index: number, count: number, prefs: Pick<Preferences, 'coverAlone' | 'spreadOffset'>) => {
   const selected = boundedIndex(index, count), start = (prefs.coverAlone !== false ? 1 : 0) + (prefs.spreadOffset === 1 ? 1 : 0)
   const first = selected < start ? selected : start + Math.floor((selected - start) / 2) * 2
@@ -54,6 +57,15 @@ export class ComicReader implements ReaderView {
   // 为基准保留像素距离，快滚穿越区的估高修正只改变落点页码，不把虚高页码钉死。
   private landmark?: Location
   private relocating = false
+  // 滚动债：真实布局（heights 求和）与 DOM 布局在锚点上方的差值，DOM 坐标 = 真实坐标 − debt。
+  // 手指拖动或惯性滚动进行中，锚点上方的高度修正（探测、估高学习、整图到达、换段）全部
+  // 吸收进上方占位：DOM 里锚点位置不变、不改写 scrollTop——iOS 在惯性中改写 scrollTop 会
+  // 打断惯性，且主线程读到的坐标落后于合成器，按旧坐标回写就是“滑动时往回跳一点”。停稳后
+  // 一次性结清：占位恢复真实高度并同步补偿坐标，同一任务内完成、画面不动。
+  private debt = 0
+  private touching = false
+  private scrollingUntil = 0
+  private settleTimer?: ReturnType<typeof setTimeout>
   private root = document.createElement('div')
   private before = document.createElement('div')
   private after = document.createElement('div')
@@ -92,6 +104,11 @@ export class ComicReader implements ReaderView {
     this.root.addEventListener('load', this.publish, true)
     context.signal.addEventListener('abort', this.onAbort, { once: true })
     context.viewport.addEventListener('scroll', this.onScroll, { passive: true })
+    // 手指仍在屏幕上时不结清滚动债；scrollend 可用时惯性一结束立刻结清，否则靠静默计时。
+    context.viewport.addEventListener('touchstart', this.onTouch, { passive: true })
+    context.viewport.addEventListener('touchend', this.onTouch, { passive: true })
+    context.viewport.addEventListener('touchcancel', this.onTouch, { passive: true })
+    context.viewport.addEventListener('scrollend', this.onScrollEnd, { passive: true })
     this.width = context.viewport.clientWidth; this.height = context.viewport.clientHeight
     this.observer = new ResizeObserver(() => this.measure())
     this.observer.observe(context.viewport)
@@ -137,6 +154,10 @@ export class ComicReader implements ReaderView {
   private sum(from: number, to: number) { let value = 0; for (let i = from; i < to; i++) value += this.heights[i] ?? 0; return value }
   /** 带符号的页高累加：from 在 to 之后时为负，像素锚基准可以位于局部轨道之外。 */
   private span(from: number, to: number) { return from <= to ? this.sum(from, to) : -this.sum(to, from) }
+  /** 当前滚动位置的真实坐标（局部轨道起点为 0）：DOM 坐标加上尚未结清的滚动债。 */
+  private trueScroll() { return this.context.viewport.scrollTop + this.debt }
+  /** 是否正处于用户滑动或惯性滚动之中：此时锚点上方的布局修正只能吸收、不能改写坐标。 */
+  private scrolling() { return this.touching || performance.now() < this.scrollingUntil }
   /** 记录新知道的真实尺寸并排队为估高样本；同页只采样一次。 */
   private know(index: number, size: Dimensions): void {
     if (this.dimensions.has(index)) return
@@ -188,9 +209,9 @@ export class ComicReader implements ReaderView {
   }
   private bottomPadding() { return this.continuous && this.trackEnd === this.pages.length ? Math.max(0, this.context.viewport.clientHeight - (this.heights.at(-1) ?? 0)) : 0 }
   current(): Location {
-    const scroll = this.context.viewport.scrollTop
     // 未知尺寸的末页可能暂时无法滚到目标比例，不能用占位布局覆盖已保存的进度。
-    if (this.restoreTarget && Math.abs(scroll - this.scrollPosition) < .5) return { ...this.restoreTarget, entry: this.pages[this.restoreTarget.index]?.entry }
+    if (this.restoreTarget && Math.abs(this.context.viewport.scrollTop - this.scrollPosition) < .5) return { ...this.restoreTarget, entry: this.pages[this.restoreTarget.index]?.entry }
+    const scroll = this.continuous ? this.trueScroll() : this.context.viewport.scrollTop
     let index = this.trackFirst, top = 0
     if (this.continuous) {
       while (index < this.trackEnd - 1 && top + this.heights[index]! <= scroll + 1) {
@@ -232,7 +253,7 @@ export class ComicReader implements ReaderView {
     this.anchor = position
     if (this.continuous && !this.restoreTarget && this.dimensions.has(position.index)) this.landmark = { format: 'comic', index: position.index, ratio: position.ratio ?? 0 }
   }
-  /** 把局部轨道坐标（可为负或越过轨道末端）换算成全书页码与页内比例。 */
+  /** 把局部轨道的真实坐标（可为负或越过轨道末端）换算成全书页码与页内比例。 */
   private locate(target: number): { index: number; ratio: number } {
     let index = this.trackFirst, top = 0
     if (target < 0) { while (index > 0 && top > target) { index--; top -= this.heights[index] ?? 0 } }
@@ -240,16 +261,58 @@ export class ComicReader implements ReaderView {
     return { index, ratio: Math.min(1, Math.max(0, (target - top) / Math.max(1, this.heights[index] ?? 1))) }
   }
   private capture(resized = false): ScrollAnchor {
-    if (!resized && Math.abs(this.context.viewport.scrollTop - this.scrollPosition) >= .5) this.restoreTarget = undefined
-    if (this.restoreTarget) return this.snapshot(this.restoreTarget, true)
-    if (resized) return this.snapshot(this.anchor, true)
-    return this.anchorFor(this.current())
+    const scrollTop = this.context.viewport.scrollTop
+    if (!resized && Math.abs(scrollTop - this.scrollPosition) >= .5) this.restoreTarget = undefined
+    // 恢复目标与视口尺寸变化都必须改写坐标：前者是程序化定位，后者整张布局都已变化。
+    if (this.restoreTarget) return { ...this.snapshot(this.restoreTarget, true), scrollTop, settle: true }
+    if (resized) return { ...this.snapshot(this.anchor, true), scrollTop, settle: true }
+    return { ...this.anchorFor(this.current()), scrollTop }
   }
+  /** 把真实坐标同步到视口：DOM 坐标 = 真实坐标 − 滚动债。 */
   private syncScroll(top: number) {
-    const viewport = this.context.viewport
+    const viewport = this.context.viewport, dom = top - this.debt
     // 相同坐标也不能重复赋值：部分浏览器会因此中断触摸惯性滚动。
-    if (Math.abs(viewport.scrollTop - top) >= .5) viewport.scrollTop = top
+    if (Math.abs(viewport.scrollTop - dom) >= .5) viewport.scrollTop = dom
     this.scrollPosition = viewport.scrollTop
+  }
+  /** 定位到真实坐标 target。滑动中且允许吸收时，把锚点上方的布局变化量记入滚动债，
+   *  DOM 里锚点纹丝不动、不改写 scrollTop；否则结清滚动债并按常规改写坐标。
+   *  上方 DOM 占位不能为负：吸收不下的余量仍改写坐标。 */
+  private settleTo(target: number, anchor: ScrollAnchor) {
+    const viewport = this.context.viewport
+    const absorb = this.continuous && !anchor.settle && !this.restoreTarget && this.scrolling()
+    if (absorb) {
+      const origin = anchor.scrollTop ?? viewport.scrollTop
+      const delta = target - this.debt - origin
+      const keys = [...this.nodes.keys()], room = keys.length ? this.sum(this.trackFirst, Math.min(...keys)) : 0
+      // 本次差值记入滚动债；上方占位放不下的部分（占位不能为负，向上换窗后占位也会变短）退还给坐标改写。
+      this.debt = Math.min(this.debt + delta, room)
+    } else this.debt = 0
+    this.updateSpacers()
+    // 完全吸收时 DOM 目标就是捕获锚点时的坐标：只有浏览器在中途截断过 scrollTop 才会真正改写。
+    this.syncScroll(target)
+  }
+  /** 停稳后结清滚动债：上方占位恢复真实高度并同步补偿坐标，同一任务内完成、画面不动。 */
+  private settle = () => {
+    clearTimeout(this.settleTimer); this.settleTimer = undefined
+    this.scrollingUntil = 0
+    if (this.stopped || this.touching || this.rendering || !this.continuous || this.debt === 0) return
+    const target = this.trueScroll()
+    this.debt = 0
+    this.updateSpacers()
+    this.syncScroll(target)
+  }
+  private onTouch = (event: Event) => {
+    // 多指时以仍留在屏幕上的触点为准；合成事件可能没有 touches 列表。
+    this.touching = event.type === 'touchstart' || ((event as TouchEvent).touches?.length ?? 0) > 0
+    if (!this.touching) this.scheduleSettle()
+  }
+  private onScrollEnd = () => { if (!this.touching) this.settle() }
+  private scheduleSettle() {
+    if (this.stopped) return
+    this.scrollingUntil = performance.now() + SETTLE_DELAY
+    clearTimeout(this.settleTimer)
+    this.settleTimer = setTimeout(this.settle, SETTLE_DELAY)
   }
   private publish = () => {
     clearTimeout(this.progressTimer); this.progressTimer = undefined
@@ -281,7 +344,8 @@ export class ComicReader implements ReaderView {
     signal.throwIfAborted()
     return comicSpread(index, this.pages.length, this.context.prefs, this.dimensions)
   }
-  private async window(index: number, ratio: number, programmatic = false) {
+  /** origin：像素锚落点重定位时沿用的原锚（捕获时的 DOM 坐标与是否必须改写坐标）。 */
+  private async window(index: number, ratio: number, programmatic = false, origin?: ScrollAnchor) {
     if (this.stopped) return
     const active = ++this.generation, selected = boundedIndex(index, this.pages.length), mode = this.effectiveMode
     this.navigationController.abort(); this.navigationController = new AbortController()
@@ -300,7 +364,7 @@ export class ComicReader implements ReaderView {
       ? '当前双页图片超过内存预算，暂按单页显示' : undefined
     this.index = selected; this.spread = spread; this.renderedMode = mode
     this.pageRatio = location.ratio!
-    const anchor = programmatic ? this.snapshot(location, true) : this.anchorFor(location)
+    const anchor: ScrollAnchor = programmatic ? { ...this.snapshot(location, true), settle: true } : { ...this.anchorFor(location), scrollTop: origin?.scrollTop ?? this.context.viewport.scrollTop, settle: origin?.settle }
     // 程序化跳转：目标页即新的像素锚基准，之前的基准与本次跳转无关，不能跨越整本书算像素距离。
     if (programmatic) { this.restoreTarget = location; this.landmark = location }
     const continuous = this.continuous
@@ -317,9 +381,13 @@ export class ComicReader implements ReaderView {
     const nearEnd = this.trackEnd < this.pages.length && (this.index >= this.trackEnd - 4 || this.sum(this.index, this.trackEnd) < this.context.viewport.clientHeight * 2)
     if (!continuous) {
       this.trackFirst = spread[0]!; this.trackEnd = spread.at(-1)! + 1
+      this.debt = 0
     } else if (programmatic || nearStart || nearEnd) {
+      const previousFirst = this.trackFirst
       this.trackFirst = Math.max(0, this.index - 20)
       this.trackEnd = Math.min(this.pages.length, this.index + 21)
+      // 向上换段是为了在上方腾出继续回看的空间，吸收进滚动债腾不出空间，只能改写坐标。
+      if (this.trackFirst < previousFirst) anchor.settle = true
     }
     const first = continuous ? Math.max(0, this.index - 2) : spread[0]!
     const last = continuous ? Math.min(this.pages.length, this.index + 3) : spread.at(-1)! + 1
@@ -390,7 +458,8 @@ export class ComicReader implements ReaderView {
   }
   private updateSpacers() {
     const keys = [...this.nodes.keys()], continuous = this.continuous
-    const before = continuous && keys.length ? this.sum(this.trackFirst, Math.min(...keys)) : 0
+    // 上方占位按 DOM 坐标：真实高度扣除尚未结清的滚动债。
+    const before = continuous && keys.length ? Math.max(0, this.sum(this.trackFirst, Math.min(...keys)) - this.debt) : 0
     const after = continuous && keys.length ? this.sum(Math.max(...keys) + 1, this.trackEnd) + this.bottomPadding() : 0
     if (this.before.style.height !== `${before}px`) this.before.style.height = `${before}px`
     if (this.after.style.height !== `${after}px`) this.after.style.height = `${after}px`
@@ -446,6 +515,10 @@ export class ComicReader implements ReaderView {
     }
     if (this.root.style.width !== `${layoutWidth}px`) this.root.style.width = `${layoutWidth}px`
     this.width = width; this.height = height; this.layoutWidth = layoutWidth; this.layoutHeight = layoutHeight; this.layoutFit = this.fit; this.layoutZoom = this.zoom
+    // 下方占位先临时加长到两个轨道的高度：接下来的同步测量会触发布局，若图片或占位在此刻缩短，
+    // 浏览器会当场把 scrollTop 截断到新的滚动上限——那是一次无法吸收、只能改写坐标的跳动。
+    // 最终高度由随后的 updateSpacers 写回，中间状态不会被绘制。
+    this.after.style.height = `${Math.min(196_640 * 82, this.sum(this.trackFirst, this.trackEnd) * 2)}px`
     // 先完成所有样式写入，再统一测量，避免逐页交替写样式和强制同步布局。
     const styled = new Map<number, number>()
     for (const [index, node] of this.nodes) {
@@ -510,11 +583,13 @@ export class ComicReader implements ReaderView {
         if (node) {
           const minHeight = `${estimate}px`
           if (node.style.minHeight !== minHeight) node.style.minHeight = minHeight
+          // 占位图的显式高度同步跟随新估高，否则 figure 实测高与 heights 不一致，下一轮测量又要修正一次。
+          const image = node.querySelector('img')!, imageHeight = `${Math.min(196605, Math.max(120, estimate - this.learnedExtras))}px`
+          if (image.style.height !== imageHeight) image.style.height = imageHeight
         }
         changed = true
       }
     }
-    this.updateSpacers()
     const { location, offset, proportional, distance = 0 } = anchor
     const pageHeight = this.heights[location.index] ?? 0
     const withinPage = proportional ? (location.ratio ?? 0) * pageHeight : Math.min(offset, Math.max(0, pageHeight - 1))
@@ -525,17 +600,20 @@ export class ComicReader implements ReaderView {
       const landing = this.locate(target)
       if (landing.index !== this.index) {
         this.relocating = true
-        try { void this.window(landing.index, landing.ratio).catch(error => this.report(error)) } finally { this.relocating = false }
+        try { void this.window(landing.index, landing.ratio, false, anchor).catch(error => this.report(error)) } finally { this.relocating = false }
         return
       }
     }
-    this.syncScroll(target)
+    this.settleTo(target, anchor)
     if (this.restoreTarget && this.dimensions.has(this.restoreTarget.index)) this.restoreTarget = undefined
     this.remember(this.current())
     if (changed) this.scheduleProgress()
   }
   private onScroll = () => {
-    if (this.stopped || this.rendering) return
+    if (this.stopped) return
+    // 用户滑动或惯性进行中：锚点上方的布局修正先吸收进滚动债，静默 SETTLE_DELAY 后结清。
+    if (this.continuous) this.scheduleSettle()
+    if (this.rendering) return
     if (Math.abs(this.context.viewport.scrollTop - this.scrollPosition) >= .5) {
       this.restoreTarget = undefined
       if (!this.continuous) this.pageRatio = Math.min(1, Math.max(0, this.context.viewport.scrollTop / Math.max(1, parseFloat(this.nodes.get(this.index)?.querySelector('img')?.style.height ?? '') || 1)))
@@ -608,11 +686,13 @@ export class ComicReader implements ReaderView {
     this.stopped = true; this.generation++; this.lifetime.abort(); this.navigationController.abort()
     this.pictures?.destroy(); this.preloader?.destroy(); this.archive?.destroy(); this.observer.disconnect()
     this.context.viewport.removeEventListener('scroll', this.onScroll); this.context.signal.removeEventListener('abort', this.onAbort)
+    this.context.viewport.removeEventListener('touchstart', this.onTouch); this.context.viewport.removeEventListener('touchend', this.onTouch)
+    this.context.viewport.removeEventListener('touchcancel', this.onTouch); this.context.viewport.removeEventListener('scrollend', this.onScrollEnd)
     this.root.removeEventListener('load', this.publish, true)
     if (this.scrollFrame !== undefined) cancelAnimationFrame(this.scrollFrame)
     if (this.probeFrame !== undefined) cancelAnimationFrame(this.probeFrame)
     this.probePending?.clear()
-    clearTimeout(this.progressTimer)
+    clearTimeout(this.progressTimer); clearTimeout(this.settleTimer); this.settleTimer = undefined
     this.nodes.clear(); this.dimensions.clear(); this.fresh.length = 0; this.landmark = undefined; this.root.replaceChildren()
   }
 }

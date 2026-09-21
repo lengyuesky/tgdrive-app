@@ -13,8 +13,11 @@ interface ComicFixture {
   viewport: HTMLElement
   errors: string[]
   writes: number[]
+  /** 每次程序化改写 scrollTop 时距最近一次 scroll / scrollend 事件的毫秒数。 */
+  writeTimes: { sinceScroll: number; sinceEnd: number }[]
   release: (index: number) => void
   samples: number[]
+  mismatch: number[]
   released?: number
 }
 declare global {
@@ -60,25 +63,36 @@ test.afterEach(async ({ page }) => {
   await page.evaluate(() => window.comicFixture?.reader.destroy())
 })
 
-async function open(page: Page, options: { count?: number; location?: Location; image?: number[]; overrides?: [number, number[]][]; blocked?: number[]; delays?: { head: number; full: number } } = {}) {
+async function open(page: Page, options: { count?: number; location?: Location; image?: number[]; odd?: number[]; overrides?: [number, number[]][]; blocked?: number[]; delays?: { head: number; full: number } } = {}) {
   // 直接注入打包脚本与内存 SDK；任何意外网络访问都阻断，测试不依赖宿主或外部资源。
   await page.route('**/*', (route) => route.abort())
   await page.setContent('<meta name="viewport" content="width=device-width,initial-scale=1"><div id="app" class="immersive" data-kind="comics"><main id="viewport" class="reading-viewport" data-mode="scroll"></main></div>')
   await page.addStyleTag({ content: style })
   await page.addScriptTag({ content: bundle })
-  await page.evaluate(async ({ count, location, image, overrides, blocked, delays }) => {
+  await page.evaluate(async ({ count, location, image, odd, overrides, blocked, delays }) => {
     const viewport = document.getElementById('viewport')!
     const errors: string[] = [], writes: number[] = []
     const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!
+    const writeTimes: { sinceScroll: number; sinceEnd: number }[] = []
+    let lastScrollAt = -Infinity, lastEndAt = -Infinity
+    // 夹具监听先于阅读器注册：阅读器在 scrollend 里同步结清时，sinceEnd 已经归零。
+    viewport.addEventListener('scroll', () => { lastScrollAt = performance.now() }, { passive: true })
+    viewport.addEventListener('scrollend', () => { lastEndAt = performance.now() }, { passive: true })
     Object.defineProperty(viewport, 'scrollTop', {
       get() { return descriptor.get!.call(this) },
-      set(value: number) { writes.push(value); descriptor.set!.call(this, value) },
+      set(value: number) {
+        writes.push(value); writeTimes.push({ sinceScroll: performance.now() - lastScrollAt, sinceEnd: performance.now() - lastEndAt })
+        descriptor.set!.call(this, value)
+      },
     })
     const controller = new AbortController()
-    const bytes = new Uint8Array(image), resources = new Map(overrides.map(([index, data]) => [index, new Uint8Array(data)]))
+    const bytes = new Uint8Array(image), oddBytes = odd ? new Uint8Array(odd) : undefined
+    const resources = new Map(overrides.map(([index, data]) => [index, new Uint8Array(data)]))
+    // 奇数页可使用另一张图：长短交替的参差条漫，任何估高都不可能同时命中两种页高。
+    const bytesAt = (index: number) => resources.get(index) ?? (oddBytes && index % 2 ? oddBytes : bytes)
     const blockedPages = new Set(blocked), waiting = new Map<number, Set<() => void>>()
     const file: FileEntry = { id: 1, name: '合成长漫画', path: '/合成长漫画', is_dir: true, size: 0, content_version: 'a'.repeat(64), created_at: 1, modified_at: 1, favorite: false }
-    const entries = Array.from({ length: count }, (_, index) => ({ ...file, id: index + 2, name: `${index + 1}.png`, is_dir: false, size: (resources.get(index) ?? bytes).length }))
+    const entries = Array.from({ length: count }, (_, index) => ({ ...file, id: index + 2, name: `${index + 1}.png`, is_dir: false, size: bytesAt(index).length }))
     const drive = { files: {
       list: async () => ({ entries, next_cursor: null }),
       readRange: async (ref: { id: number }, start: number, length: number, { signal }: { signal: AbortSignal }) => {
@@ -98,7 +112,7 @@ async function open(page: Page, options: { count?: number; location?: Location; 
           signal.addEventListener('abort', cancel, { once: true })
         })
         signal.throwIfAborted()
-        return (resources.get(index) ?? bytes).slice(start, start + length)
+        return bytesAt(index).slice(start, start + length)
       },
     } } as unknown as Drive
     const reader = new window.ComicModule.ComicReader({
@@ -107,11 +121,11 @@ async function open(page: Page, options: { count?: number; location?: Location; 
       changed: () => {}, error: (error) => errors.push(String(error)),
     })
     window.comicFixture = {
-      reader, viewport, errors, writes, samples: [],
+      reader, viewport, errors, writes, writeTimes, samples: [], mismatch: [],
       release: (index) => { blockedPages.delete(index); waiting.get(index)?.forEach((finish) => finish()) },
     }
     await reader.open(location)
-  }, { count: options.count ?? 1000, location: options.location ?? { format: 'comic', index: 449, ratio: .4 }, image: options.image ?? normal, overrides: options.overrides ?? [], blocked: options.blocked ?? [], delays: options.delays ?? null })
+  }, { count: options.count ?? 1000, location: options.location ?? { format: 'comic', index: 449, ratio: .4 }, image: options.image ?? normal, odd: options.odd ?? null, overrides: options.overrides ?? [], blocked: options.blocked ?? [], delays: options.delays ?? null })
 }
 const current = (page: Page) => page.evaluate(() => window.comicFixture.reader.current())
 const imageAt = (page: Page, index: number) => page.locator(`img[data-resource="${index}"]`)
@@ -236,5 +250,66 @@ test.describe('手机触摸滚动', () => {
     expect(await page.evaluate(() => Math.round(window.comicFixture.viewport.scrollTop))).toBe(30_000)
     await loaded(page, 6)
     expect((await current(page)).index).toBe(6)
+  })
+
+  test('惯性滚动中锚点上方页面陆续探测出真实尺寸时不改写 scrollTop、画面不往回跳，停稳后才一次结清', async ({ page }) => {
+    // 长短交替的参差条漫（3000/7000，字节几乎相同）：估高只能落在中间，每一页探测到达都会修正锚点上方高度。
+    // 真实网络形态：探测 300ms 先到、整图 1200ms 后到。
+    const short = padded(390, 3000, [88, 120, 200], 200_000), long = padded(390, 7000, [200, 120, 88], 200_000)
+    await open(page, { count: 300, location: { format: 'comic', index: 40 }, image: short, odd: long, delays: { head: 300, full: 1200 } })
+    // 从保存的进度打开：第 40 页是像素锚基准，其上方十几页仍是估高占位，探测环会在接下来几秒内逐页修正。
+    await loaded(page, 40)
+    await page.evaluate(() => {
+      const fixture = window.comicFixture
+      fixture.writes.length = 0; fixture.writeTimes.length = 0
+      // 逐帧记录真实阅读位置（只能单调前进），以及当前页节点在视口里的实际位置与页码/页内比例的偏差。
+      const record = () => {
+        const location = fixture.reader.current(), height = location.index % 2 ? 7000 : 3000
+        const node = document.querySelector(`.comic-page[data-index="${location.index}"]`)
+        const rect = node?.getBoundingClientRect(), box = fixture.viewport.getBoundingClientRect()
+        fixture.samples.push(Math.floor(location.index / 2) * 10_000 + (location.index % 2 ? 3000 : 0) + (location.ratio ?? 0) * height)
+        fixture.mismatch.push(rect ? Math.abs(box.top - rect.top - (location.ratio ?? 0) * rect.height) : 0)
+        if (fixture.samples.length < 180) requestAnimationFrame(record)
+      }
+      requestAnimationFrame(record)
+    })
+    const session = await page.context().newCDPSession(page)
+    try {
+      // 强力甩动：松手后的浏览器惯性持续数秒，上方 33～39 页的探测结果在惯性进行中陆续到达。
+      const timestamp = Date.now() / 1000
+      await session.send('Input.dispatchTouchEvent', { type: 'touchStart', timestamp, touchPoints: [{ x: 195, y: 800, id: 1 }] })
+      for (let step = 1; step <= 8; step++) {
+        await session.send('Input.dispatchTouchEvent', { type: 'touchMove', timestamp: timestamp + step * .016, touchPoints: [{ x: 195, y: 800 - step * 90, id: 1 }] })
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+      }
+      await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', timestamp: timestamp + .13, touchPoints: [] })
+    } finally { await session.detach() }
+    await expect.poll(() => page.evaluate(() => window.comicFixture.samples.length), { timeout: 15_000 }).toBe(180)
+    const { samples, mismatch, writeTimes, probed } = await page.evaluate(() => ({
+      samples: window.comicFixture.samples, mismatch: window.comicFixture.mismatch, writeTimes: window.comicFixture.writeTimes,
+      probed: [...(window.comicFixture.reader as unknown as { dimensions: Map<number, unknown> }).dimensions.keys()].filter((index) => index < 40).length,
+    }))
+    // 惯性确实跨过了多页，且锚点上方确有页面在此期间探测出真实尺寸。
+    expect(samples.at(-1)! - samples[0]!).toBeGreaterThan(2500)
+    expect(probed).toBeGreaterThanOrEqual(3)
+    // 阅读位置单调前进：任何一次“往回跳一点”都会在逐帧样本里留下回退。
+    for (let i = 1; i < samples.length; i++) expect(samples[i]!).toBeGreaterThanOrEqual(samples[i - 1]! - 1)
+    // 每一帧当前页节点在视口中的位置都与页码/页内比例一致：吸收进占位的修正没有让画面与页码脱节。
+    expect(Math.max(...mismatch)).toBeLessThanOrEqual(2)
+    // 惯性进行中不得程序化改写 scrollTop（旧代码每批探测到达都改写一次，Chromium 里每次改写紧跟着上一帧的
+    // scroll 事件）：每一次改写都只能发生在 scrollend 的同步处理里，或最后一个 scroll 事件静默 150ms 之后。
+    await page.waitForTimeout(600)
+    const late = await page.evaluate(() => window.comicFixture.writeTimes)
+    expect(late.length).toBeGreaterThanOrEqual(writeTimes.length)
+    expect(late.length).toBeGreaterThanOrEqual(1)
+    for (const write of late) expect(write.sinceEnd <= 5 || write.sinceScroll >= 150).toBe(true)
+    // 结清后画面所在页与 DOM 位置一致。
+    const location = await current(page)
+    const box = await page.locator(`.comic-page[data-index="${location.index}"]`).evaluate((node) => {
+      const rect = node.getBoundingClientRect(), viewport = node.closest('#viewport')!.getBoundingClientRect()
+      return { top: rect.top - viewport.top, bottom: rect.bottom - viewport.top }
+    })
+    expect(box.top).toBeLessThanOrEqual(1)
+    expect(box.bottom).toBeGreaterThan(0)
   })
 })

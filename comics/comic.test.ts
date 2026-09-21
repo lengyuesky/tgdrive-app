@@ -88,7 +88,21 @@ function fixture(count = 1500, initialHeight = 1450, autoLoad = true, entrySizes
     viewport.scrollTop += delta; viewport.dispatchEvent(new Event('scroll'))
     draw(); await Promise.resolve(); draw(); await Promise.resolve()
   }
-  return { reader, viewport, context, finish, scrollBy, pageHeights, scrollWrites, unloaded, draw, frames,
+  // 挂载页在 DOM 中的顶部坐标：上方占位 + 之前挂载节点的实测高。滚动债存在时它与 heights 求和不同，
+  // 但“落点页顶部 − scrollTop”这个画面位置必须始终成立。
+  const domTop = (index: number) => {
+    let top = 0
+    for (const child of viewport.firstElementChild?.children ?? []) {
+      const node = child as HTMLElement
+      if (node.classList.contains('comic-page') && Number(node.dataset.index) === index) return top
+      top += node.classList.contains('comic-page') ? figureHeight(node) : parseFloat(node.style.height) || 0
+    }
+    return NaN
+  }
+  return { reader, viewport, context, finish, scrollBy, pageHeights, scrollWrites, unloaded, draw, frames, domTop,
+    // 惯性结束：浏览器派发 scrollend，阅读器结清滚动债。
+    settle: () => viewport.dispatchEvent(new Event('scrollend')),
+    touch: (down: boolean) => viewport.dispatchEvent(new Event(down ? 'touchstart' : 'touchend')),
     loadPages: (sizes: [number, number][]) => pictureHooks.layout(() => {
       for (const [index, height] of sizes) {
         pageHeights.set(index, height)
@@ -432,22 +446,31 @@ describe('长漫画滚动定位', () => {
   })
 
   it('快滚穿越占位页后估高才收敛时，落点按物理滚动距离回落到真实页码，不钉死虚高页码', async () => {
-    const { reader, viewport, finish, scrollBy, probe } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
+    const { reader, viewport, finish, scrollBy, probe, scrollWrites, domTop, settle } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
     await finish(reader.open({ format: 'comic', index: 40 }))
     // 打开后立即连续甩动 4 次共 24000px，全程都是初始估高 1450 的占位页：索引被虚报到第 56 页。
     for (let i = 0; i < 4; i++) await scrollBy(6000)
     expect(reader.current().index).toBe(40 + Math.floor(24_000 / 1450))
     // 探测结果在落点附近到达，真实页高 6000：物理只滚了 4 个真实页，落点回落到第 44 页，
     // 而不是保留虚高的第 56 页、把中间十几页内容永久跳过。
+    scrollWrites.length = 0
     probe([[54, 6000], [55, 6000], [56, 6000], [57, 6000], [58, 6000]])
     expect(reader.current().index).toBe(44)
     expect(reader.current().ratio ?? 0).toBeLessThan(.01)
     expect(viewport.querySelector('.comic-page[data-index="44"]')).not.toBeNull()
+    // 惯性仍在进行：不改写 scrollTop，落点页在 DOM 里恰好位于视口顶部——差值吸收进上方占位。
+    expect(scrollWrites).toEqual([])
+    expect(domTop(44)).toBe(viewport.scrollTop)
+    // 停稳后结清：上方占位恢复真实高度并一次性补偿坐标，画面不动。
+    settle()
+    expect(scrollWrites).toHaveLength(1)
     expect(viewport.scrollTop).toBe(24 * 6000)
+    expect(domTop(44)).toBe(viewport.scrollTop)
+    expect(reader.current().index).toBe(44)
   })
 
-  it('停在已加载页上时，穿越区的估高修正只补偿坐标、不移动画面', async () => {
-    const { reader, finish, scrollBy, probe, loadPages, scrollWrites } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
+  it('停在已加载页上时，穿越区的估高修正滑动中吸收进上方占位、停稳后一次结清，画面始终不动', async () => {
+    const { reader, viewport, finish, scrollBy, probe, loadPages, scrollWrites, domTop, settle } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
     await finish(reader.open({ format: 'comic', index: 40 }))
     for (let i = 0; i < 4; i++) await scrollBy(6000)
     // 落点页已经整图加载（已知尺寸）：用户正在看真实内容，画面不能动。
@@ -455,9 +478,69 @@ describe('长漫画滚动定位', () => {
     const before = reader.current()
     expect(before.index).toBe(56)
     scrollWrites.length = 0
+    const view = domTop(56) - viewport.scrollTop
     probe([[50, 6000], [51, 6000], [52, 6000]])
     expect(reader.current()).toEqual(before)
-    expect(scrollWrites.length).toBe(1)
+    // 惯性进行中：首个样本让上方 36 页全部学成 6000，163800px 的修正全部吸收进上方占位，
+    // 不改写 scrollTop（iOS 在惯性中改写会打断惯性，且按落后于合成器的旧坐标回写就是往回跳一点）。
+    expect(scrollWrites).toEqual([])
+    expect(domTop(56) - viewport.scrollTop).toBe(view)
+    // 停稳：一次补偿写入，占位恢复真实高度，画面位置不变。
+    settle()
+    expect(scrollWrites).toHaveLength(1)
+    expect(reader.current()).toEqual(before)
+    expect(domTop(56) - viewport.scrollTop).toBe(view)
+    expect(viewport.scrollTop).toBe(36 * 6000 + 800)
+  })
+
+  it('手指未离开屏幕时不结清滚动债；松手且静默后由计时器结清', async () => {
+    const { reader, viewport, finish, scrollBy, probe, loadPages, scrollWrites, domTop, touch } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
+    await finish(reader.open({ format: 'comic', index: 40 }))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    touch(true)
+    for (let i = 0; i < 4; i++) await scrollBy(6000)
+    loadPages([[56, 1450]])
+    const before = reader.current(), view = domTop(56) - viewport.scrollTop
+    scrollWrites.length = 0
+    probe([[50, 6000], [51, 6000], [52, 6000]])
+    // 手指按住不动超过静默期：仍不能改写坐标。
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(scrollWrites).toEqual([])
+    expect(domTop(56) - viewport.scrollTop).toBe(view)
+    // 松手后静默 180ms 结清。
+    touch(false)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(scrollWrites).toEqual([])
+    await vi.advanceTimersByTimeAsync(100)
+    expect(scrollWrites).toHaveLength(1)
+    expect(reader.current()).toEqual(before)
+    expect(domTop(56) - viewport.scrollTop).toBe(view)
+  })
+
+  it('惯性滚动中向下换段不改写坐标；向上换段为腾出回看空间才改写坐标', async () => {
+    const { reader, viewport, finish, scrollBy, scrollWrites, domTop, settle } = fixture(1500, 1000)
+    await finish(reader.open({ format: 'comic', index: 449, ratio: .4 }))
+    scrollWrites.length = 0
+    for (let index = 450; index <= 470; index++) {
+      await scrollBy(1000)
+      expect(reader.current()).toMatchObject({ index, ratio: .4 })
+    }
+    // 途经一次向下换段（第 466 页）：除 21 次用户滚动外没有任何程序化改写，换段位移吸收进滚动债。
+    expect(scrollWrites).toHaveLength(21)
+    expect(domTop(470) + 400).toBe(viewport.scrollTop)
+    settle()
+    expect(scrollWrites).toHaveLength(22)
+    expect(reader.current()).toMatchObject({ index: 470, ratio: .4 })
+    expect(domTop(470) + 400).toBe(viewport.scrollTop)
+    // 向上回看到轨道起点（446）附近的第 449 页触发向上换段：必须改写坐标才能在上方腾出空间，
+    // 否则惯性会撞到 DOM 顶部；22 次用户滚动之外恰好只有这一次改写。
+    scrollWrites.length = 0
+    for (let index = 469; index >= 448; index--) {
+      await scrollBy(-1000)
+      expect(reader.current()).toMatchObject({ index, ratio: .4 })
+    }
+    expect(scrollWrites.length).toBe(23)
+    expect(domTop(448) + 400).toBe(viewport.scrollTop)
   })
 
   it('像素锚落点越出局部轨道时自动换段定位，不困在旧轨道边界', async () => {
