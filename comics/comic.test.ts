@@ -167,7 +167,8 @@ describe('长漫画滚动定位', () => {
     loadPages([[5, 12_000]])
     expect(reader.current().index).toBe(5)
     expect((reader.current().ratio ?? 0) * 12_000).toBeCloseTo(500)
-    expect(scrollWrites).toHaveLength(0)
+    // 首个样本让上方未知页学到长图页高，只需一次坐标补偿把当前页留在原处；页内像素偏移不能按比例放大。
+    expect(scrollWrites).toEqual([5 * 12_000 + 500])
   })
 
   it('滑动时上方图片缩短造成浏览器截断坐标，仍恢复修改前的当前页像素位置', async () => {
@@ -414,5 +415,61 @@ describe('长漫画滚动定位', () => {
     // 邻近页探测结果大幅改变上方/下方占位高，阅读锚点必须保持不变。
     probe([[45, 400], [46, 9000], [47, 300], [53, 7000], [54, 11_000]])
     expect(reader.current()).toEqual(before)
+  })
+
+  it('头部探测的尺寸直接参与估高学习，不必等整图加载', async () => {
+    const { reader, finish, probe } = fixture(150, 1450, false, Array.from({ length: 150 }, () => 500_000))
+    await finish(reader.open())
+    const heights = (reader as unknown as { heights: number[] }).heights
+    expect(heights[100]).toBe(1450)
+    // 真实网络里 64 KiB 头部探测总是先于整图到达，整图到达时已不是“新”页：
+    // 只有探测、没有任何整图时也必须学到真实页高，否则探测环外永远停留在初始估高。
+    probe([[0, 12_000], [1, 12_000], [2, 12_000], [3, 12_000]])
+    expect(heights[3]).toBe(12_000)
+    // 各页字节相同：探测环外的未知页按字节比例估到同样的真实页高。
+    expect(heights[100]).toBe(12_000)
+    expect(reader.current().index).toBe(0)
+  })
+
+  it('快滚穿越占位页后估高才收敛时，落点按物理滚动距离回落到真实页码，不钉死虚高页码', async () => {
+    const { reader, viewport, finish, scrollBy, probe } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
+    await finish(reader.open({ format: 'comic', index: 40 }))
+    // 打开后立即连续甩动 4 次共 24000px，全程都是初始估高 1450 的占位页：索引被虚报到第 56 页。
+    for (let i = 0; i < 4; i++) await scrollBy(6000)
+    expect(reader.current().index).toBe(40 + Math.floor(24_000 / 1450))
+    // 探测结果在落点附近到达，真实页高 6000：物理只滚了 4 个真实页，落点回落到第 44 页，
+    // 而不是保留虚高的第 56 页、把中间十几页内容永久跳过。
+    probe([[54, 6000], [55, 6000], [56, 6000], [57, 6000], [58, 6000]])
+    expect(reader.current().index).toBe(44)
+    expect(reader.current().ratio ?? 0).toBeLessThan(.01)
+    expect(viewport.querySelector('.comic-page[data-index="44"]')).not.toBeNull()
+    expect(viewport.scrollTop).toBe(24 * 6000)
+  })
+
+  it('停在已加载页上时，穿越区的估高修正只补偿坐标、不移动画面', async () => {
+    const { reader, finish, scrollBy, probe, loadPages, scrollWrites } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
+    await finish(reader.open({ format: 'comic', index: 40 }))
+    for (let i = 0; i < 4; i++) await scrollBy(6000)
+    // 落点页已经整图加载（已知尺寸）：用户正在看真实内容，画面不能动。
+    loadPages([[56, 1450]])
+    const before = reader.current()
+    expect(before.index).toBe(56)
+    scrollWrites.length = 0
+    probe([[50, 6000], [51, 6000], [52, 6000]])
+    expect(reader.current()).toEqual(before)
+    expect(scrollWrites.length).toBe(1)
+  })
+
+  it('像素锚落点越出局部轨道时自动换段定位，不困在旧轨道边界', async () => {
+    const { reader, viewport, finish, scrollBy, probe } = fixture(500, 1450, false, Array.from({ length: 500 }, () => 500_000))
+    await finish(reader.open({ format: 'comic', index: 100 }))
+    // 甩到以 100 为中心的轨道末端（估高 1450 × 20 页），换段后轨道以 120 为中心。
+    await scrollBy(29_000)
+    expect(reader.current().index).toBe(120)
+    // 真实页高只有 300：同样的物理距离对应 96 个真实页，落点在第 196 页，已越出当前轨道。
+    probe([[118, 300], [119, 300], [120, 300], [121, 300], [122, 300]])
+    expect(reader.current().index).toBe(196)
+    expect(viewport.querySelector('.comic-page[data-index="196"]')).not.toBeNull()
+    expect((reader as unknown as { trackFirst: number }).trackFirst).toBe(176)
   })
 })

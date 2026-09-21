@@ -1,4 +1,5 @@
-/** 漫画只挂载相邻五页，滚动轨道限定在相邻四十一页以避免超长 CSS 溢出。 */
+/** 漫画只挂载相邻五页，滚动轨道限定在相邻四十一页以避免超长 CSS 溢出。
+ *  未知页占位高由头部探测与估高学习提供；停在占位页上的位置以像素锚保留物理滚动距离。 */
 import { Archive } from '../reader/archive'
 import { LIMITS, RangeFile, isAbort, isImage, natural } from '../reader/io'
 import { imageBlob, imageInfo } from '../reader/image'
@@ -10,7 +11,9 @@ import { zoomLevels, type Location, type Preferences } from '../reader/state'
 import type { FileEntry } from '../sdk/types'
 interface ComicPage { name: string; entry: string; file?: FileEntry; bytes?: number }
 interface Dimensions { width: number; height: number }
-interface ScrollAnchor { location: Location; offset: number; proportional: boolean }
+/** 滚动锚：location/offset 为页相对位置；distance 非零时为像素锚——以 location 为基准、
+ *  保留自该基准起的像素距离（用户停在占位页时，穿越区估高修正只改落点页码）。 */
+interface ScrollAnchor { location: Location; offset: number; proportional: boolean; distance?: number }
 type ComicMode = 'scroll' | 'single' | 'double'
 const spreadCandidates = (index: number, count: number, prefs: Pick<Preferences, 'coverAlone' | 'spreadOffset'>) => {
   const selected = boundedIndex(index, count), start = (prefs.coverAlone !== false ? 1 : 0) + (prefs.spreadOffset === 1 ? 1 : 0)
@@ -34,17 +37,23 @@ export class ComicReader implements ReaderView {
   private index = 0
   private trackFirst = 0
   private trackEnd = 0
-  // 已学习页高采样（figure 高 / 可用宽，布局无关）与图注等固定附加高度：
-  // 未知页占位不再依赖固定 1.45 比例猜测，快速滚动穿越未加载区时页码映射不会虚高。
-  private learnedRatios: number[] = []
-  private learnedExtrasSamples: number[] = []
-  private learnedHeight = 0
-  // 每字节比例采样（figure 高 / 布局宽 / 页字节）与其中位数：未加载页高度按
-  // “图高 ∝ 每页字节”估算。zip 中央目录/文件大小在打开时免费可得，条漫合集
-  // 里短卡与长条页字节差 7 倍以上，平面中位数估高会把长条页估成短卡造成跳页。
-  private byteRatios: number[] = []
+  // 估高学习：任何新知道尺寸的页（头部探测或整图）都是样本——探测先于整图到达时整图
+  // 已不是“新”页，若只采整图样本，真实网络下估高几乎永远学不到、探测环外全靠初始估高。
+  // 样本以“图高 / 布局宽”记录（布局无关）；有每页字节数时另记“图高 / 布局宽 / 字节”：
+  // zip 中央目录与目录文件大小打开时免费可得，按“图高 ∝ 每页字节”估未加载页，
+  // 条漫合集里短卡与长条页字节差 7 倍以上，平面中位数会把长条页估成短卡造成跳页。
+  private ratioSamples: number[] = []
+  private byteSamples: number[] = []
+  private extrasSamples: number[] = []
+  private extrasSampled = new Set<number>()
+  private fresh: number[] = []
+  private learnedImage = 0
   private byteHeight = 0
   private learnedExtras = 0
+  // 像素锚基准：最近一次停留的已知尺寸页（或程序化跳转目标）。停在占位页上时的位置以它
+  // 为基准保留像素距离，快滚穿越区的估高修正只改变落点页码，不把虚高页码钉死。
+  private landmark?: Location
+  private relocating = false
   private root = document.createElement('div')
   private before = document.createElement('div')
   private after = document.createElement('div')
@@ -126,6 +135,14 @@ export class ComicReader implements ReaderView {
     await this.restore(location?.format === 'comic' ? location : { format: 'comic', index: 0 })
   }
   private sum(from: number, to: number) { let value = 0; for (let i = from; i < to; i++) value += this.heights[i] ?? 0; return value }
+  /** 带符号的页高累加：from 在 to 之后时为负，像素锚基准可以位于局部轨道之外。 */
+  private span(from: number, to: number) { return from <= to ? this.sum(from, to) : -this.sum(to, from) }
+  /** 记录新知道的真实尺寸并排队为估高样本；同页只采样一次。 */
+  private know(index: number, size: Dimensions): void {
+    if (this.dimensions.has(index)) return
+    this.dimensions.set(index, size)
+    this.fresh.push(index)
+  }
   /** 探测结果批量落地：同一帧内全部应用，只捕获一次锚点、只重排一次。 */
   private applyProbe(index: number, size: ProbeDimensions | null): void {
     if (this.stopped || !size || !this.pages[index] || this.dimensions.has(index)) return
@@ -146,7 +163,7 @@ export class ComicReader implements ReaderView {
     })
   }
   private installProbe(index: number, size: Dimensions): void {
-    this.dimensions.set(index, size)
+    this.know(index, size)
     const node = this.nodes.get(index)
     if (node) {
       const image = node.querySelector('img')!
@@ -158,16 +175,16 @@ export class ComicReader implements ReaderView {
     } else {
       const width = this.layoutWidth || this.availableWidth()
       const height = this.layoutHeight || contentSize(this.context.viewport).height
-      this.heights[index] = this.scaledSize(size, width / this.zoom, height).height
+      this.heights[index] = Math.min(196_640, this.scaledSize(size, width / this.zoom, height).height + this.learnedExtras)
     }
   }
-  /** 未加载页占位高：有每页字节数时按“图高 ∝ 每页字节”估算（中央目录免费可得），
-   *  换段重锚的 spacer 求和不再被平面估高带偏；无字节数时回退学习估高。 */
+  /** 未加载页占位高：有每页字节数时按“图高 ∝ 每页字节”估算，否则用已知页图高中位数；
+   *  两者都加上图注等固定附加高度。尚无任何样本时回退到不低于 2.2 个视口高的初始估高。 */
   private estimateHeight(index: number, layoutWidth: number): number {
     const bytes = this.pages[index]?.bytes ?? 0
-    if (this.byteHeight > 0 && bytes > 0) return Math.min(196_640, Math.max(240, this.byteHeight * bytes * layoutWidth))
-    const floor = Math.min(196_640, Math.max(240, layoutWidth * 1.45, this.context.viewport.clientHeight * 2.2))
-    return Math.min(196_640, Math.max(240, this.learnedHeight > 0 ? this.learnedHeight : floor))
+    const image = this.byteHeight > 0 && bytes > 0 ? this.byteHeight * bytes * layoutWidth : this.learnedImage
+    if (image > 0) return Math.min(196_640, Math.max(240, image + this.learnedExtras))
+    return Math.min(196_640, Math.max(240, layoutWidth * 1.45, this.context.viewport.clientHeight * 2.2))
   }
   private bottomPadding() { return this.continuous && this.trackEnd === this.pages.length ? Math.max(0, this.context.viewport.clientHeight - (this.heights.at(-1) ?? 0)) : 0 }
   current(): Location {
@@ -200,9 +217,33 @@ export class ComicReader implements ReaderView {
   private snapshot(location: Location, proportional: boolean): ScrollAnchor {
     return { location, proportional, offset: (location.ratio ?? 0) * (this.heights[location.index] ?? 0) }
   }
-  private capture(resized = false) {
+  /** 实时阅读位置的锚：停在已知尺寸页上时按该页像素偏移锚定（画面不动）；停在占位页上时
+   *  以像素锚基准保留像素距离——穿越区占位估高被修正后，落点按真实高度反推，不钉死虚高页码。 */
+  private anchorFor(location: Location): ScrollAnchor {
+    const offset = (location.ratio ?? 0) * (this.heights[location.index] ?? 0)
+    if (this.continuous && this.dimensions.has(location.index)) this.landmark = { format: 'comic', index: location.index, ratio: location.ratio ?? 0 }
+    const landmark = this.landmark
+    if (!this.continuous || !landmark || landmark.index === location.index && this.dimensions.has(location.index)) return { location, proportional: false, offset }
+    const within = (landmark.ratio ?? 0) * (this.heights[landmark.index] ?? 0)
+    return { location: landmark, proportional: true, offset: within, distance: this.span(landmark.index, location.index) + offset - within }
+  }
+  /** 记录最新阅读位置；停在已知尺寸页上时同时更新像素锚基准。 */
+  private remember(position: Location) {
+    this.anchor = position
+    if (this.continuous && !this.restoreTarget && this.dimensions.has(position.index)) this.landmark = { format: 'comic', index: position.index, ratio: position.ratio ?? 0 }
+  }
+  /** 把局部轨道坐标（可为负或越过轨道末端）换算成全书页码与页内比例。 */
+  private locate(target: number): { index: number; ratio: number } {
+    let index = this.trackFirst, top = 0
+    if (target < 0) { while (index > 0 && top > target) { index--; top -= this.heights[index] ?? 0 } }
+    else while (index < this.pages.length - 1 && top + (this.heights[index] ?? 0) <= target + 1) { top += this.heights[index] ?? 0; index++ }
+    return { index, ratio: Math.min(1, Math.max(0, (target - top) / Math.max(1, this.heights[index] ?? 1))) }
+  }
+  private capture(resized = false): ScrollAnchor {
     if (!resized && Math.abs(this.context.viewport.scrollTop - this.scrollPosition) >= .5) this.restoreTarget = undefined
-    return this.snapshot(this.restoreTarget ?? (resized ? this.anchor : this.current()), resized || !!this.restoreTarget)
+    if (this.restoreTarget) return this.snapshot(this.restoreTarget, true)
+    if (resized) return this.snapshot(this.anchor, true)
+    return this.anchorFor(this.current())
   }
   private syncScroll(top: number) {
     const viewport = this.context.viewport
@@ -230,7 +271,7 @@ export class ComicReader implements ReaderView {
       try {
         const bytes = await this.preloader!.get(selected, signal)
         signal.throwIfAborted()
-        this.dimensions.set(selected, imageInfo(bytes))
+        this.know(selected, imageInfo(bytes))
       } catch (error) {
         if (signal.aborted || isAbort(error)) throw error
         // 损坏或未知尺寸先单页显示，不跳过相邻物理页；下载失败由预加载器报告。
@@ -259,8 +300,9 @@ export class ComicReader implements ReaderView {
       ? '当前双页图片超过内存预算，暂按单页显示' : undefined
     this.index = selected; this.spread = spread; this.renderedMode = mode
     this.pageRatio = location.ratio!
-    const anchor = this.snapshot(location, programmatic)
-    if (programmatic) this.restoreTarget = location
+    const anchor = programmatic ? this.snapshot(location, true) : this.anchorFor(location)
+    // 程序化跳转：目标页即新的像素锚基准，之前的基准与本次跳转无关，不能跨越整本书算像素距离。
+    if (programmatic) { this.restoreTarget = location; this.landmark = location }
     const continuous = this.continuous
     this.context.viewport.dataset.format = 'comic'; this.context.viewport.dataset.comicMode = mode
     this.context.viewport.dataset.mode = this.context.prefs.mode; this.context.viewport.dataset.fit = this.fit
@@ -362,7 +404,7 @@ export class ComicReader implements ReaderView {
     let totalWidth = 0, totalHeight = 0
     for (const [index, node] of this.nodes) {
       const image = node.querySelector('img')!, width = Number(image.getAttribute('width')), height = Number(image.getAttribute('height'))
-      if (width > 0 && height > 0) this.dimensions.set(index, { width, height })
+      if (width > 0 && height > 0) this.know(index, { width, height })
       const size = this.scaledSize(this.dimensions.get(index) ?? { width: slot, height: slot * 1.45 }, slot, available.height)
       image.style.width = node.style.width = `${size.width}px`; image.style.height = node.style.height = `${size.height}px`
       node.style.minHeight = ''; node.style.flex = '0 0 auto'
@@ -375,7 +417,7 @@ export class ComicReader implements ReaderView {
     this.width = viewport.clientWidth; this.height = viewport.clientHeight
     this.updateSpacers()
     if (this.restoreTarget && this.dimensions.has(this.restoreTarget.index)) this.restoreTarget = undefined
-    this.anchor = this.current()
+    this.remember(this.current())
   }
   private measure(forced?: ScrollAnchor) {
     if (this.stopped || !this.pages.length) return
@@ -394,7 +436,6 @@ export class ComicReader implements ReaderView {
     const resized = width !== this.width || height !== this.height || layoutWidth !== this.layoutWidth || this.fit !== this.layoutFit || this.zoom !== this.layoutZoom
     const anchor = forced ?? this.capture(resized)
     let changed = resized
-    const fresh: number[] = []
     if (layoutWidth !== this.layoutWidth || this.fit !== this.layoutFit || this.zoom !== this.layoutZoom || this.fit === 'page' && layoutHeight !== this.layoutHeight) {
       if (this.layoutWidth) this.heights = this.heights.map((h, index) => {
         const size = this.dimensions.get(index)
@@ -406,54 +447,60 @@ export class ComicReader implements ReaderView {
     if (this.root.style.width !== `${layoutWidth}px`) this.root.style.width = `${layoutWidth}px`
     this.width = width; this.height = height; this.layoutWidth = layoutWidth; this.layoutHeight = layoutHeight; this.layoutFit = this.fit; this.layoutZoom = this.zoom
     // 先完成所有样式写入，再统一测量，避免逐页交替写样式和强制同步布局。
+    const styled = new Map<number, number>()
     for (const [index, node] of this.nodes) {
       const image = node.querySelector('img')!
       const width = Number(image.getAttribute('width')), height = Number(image.getAttribute('height'))
       const known = width > 0 && height > 0
-      if (known && !this.dimensions.has(index)) fresh.push(index)
       node.style.width = ''; node.style.height = ''; node.style.flex = ''
       const size = known ? this.scaledSize({ width, height }, layoutWidth / this.zoom, layoutHeight) : { width: layoutWidth, height: Math.min(196605, Math.max(120, this.estimateHeight(index, layoutWidth) - this.learnedExtras), this.fit === 'page' ? layoutHeight * this.zoom : Infinity) }
       // 无 src 的 img 在部分浏览器中忽略 aspect-ratio；显式高度保证解码前后和回收后几何一致。
       if (image.style.height !== `${size.height}px`) image.style.height = `${size.height}px`
       if (known) {
         if (image.style.width !== `${size.width}px`) image.style.width = `${size.width}px`
-        this.dimensions.set(index, { width, height })
+        this.know(index, { width, height })
+        styled.set(index, size.height)
         if (node.style.minHeight) node.style.minHeight = ''
       } else {
         const minHeight = `${this.heights[index]!}px`
         if (node.style.minHeight !== minHeight) node.style.minHeight = minHeight
       }
     }
-    for (const [index, node] of this.nodes) {
-      const h = node.getBoundingClientRect().height
-      if (h > 0 && Math.abs(h - this.heights[index]!) >= .5) { this.heights[index] = h; changed = true }
-    }
-    // 从新完成的页面学习真实页高：长条漫等页高远超 1.45 比例猜测时，快速滚动穿越未加载区不会被估成虚高页码，修正后也不再把视图钉到十几页之外。
     const median = (values: number[]) => {
       if (!values.length) return 0
       const sorted = [...values].sort((a, b) => a - b), middle = sorted.length >> 1
       return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2
     }
-    for (const index of fresh) {
-      const figure = this.heights[index] ?? 0
-      if (figure <= 0) continue
+    for (const [index, node] of this.nodes) {
+      const h = node.getBoundingClientRect().height
+      if (h > 0 && Math.abs(h - this.heights[index]!) >= .5) { this.heights[index] = h; changed = true }
+      // 图注等固定附加高度 = 挂载已知页的 figure 实测高 − 图片显式高，同页只采一次。
+      const imageHeight = styled.get(index)
+      if (imageHeight === undefined || this.extrasSampled.has(index) || !(h > 0)) continue
+      this.extrasSampled.add(index)
+      this.extrasSamples.push(Math.max(0, h - imageHeight))
+      if (this.extrasSamples.length > 9) this.extrasSamples.shift()
+    }
+    // 从所有新知道尺寸的页学习：头部探测与整图同等采样，首个样本即生效、中位数随样本收敛。
+    // 快速滚动穿越未加载区时页码映射不再依赖初始估高，修正后也不再把视图钉到十几页之外。
+    for (const index of this.fresh.splice(0)) {
+      const size = this.dimensions.get(index)
+      if (!size) continue
+      const imageHeight = this.scaledSize(size, layoutWidth / this.zoom, layoutHeight).height
+      if (!(imageHeight > 0)) continue
       // 以宽比记录采样，换布局后重新换算仍有效；中位数避免个别超长图拉偏整体估高。
-      this.learnedRatios.push(figure / Math.max(1, layoutWidth))
-      if (this.learnedRatios.length > 9) this.learnedRatios.shift()
+      this.ratioSamples.push(imageHeight / Math.max(1, layoutWidth))
+      if (this.ratioSamples.length > 15) this.ratioSamples.shift()
       const bytes = this.pages[index]?.bytes ?? 0
       if (bytes > 0) {
-        this.byteRatios.push(figure / Math.max(1, layoutWidth) / bytes)
-        if (this.byteRatios.length > 9) this.byteRatios.shift()
+        this.byteSamples.push(imageHeight / Math.max(1, layoutWidth) / bytes)
+        if (this.byteSamples.length > 15) this.byteSamples.shift()
       }
-      const image = this.nodes.get(index)?.querySelector('img')
-      const imageHeight = image ? image.getBoundingClientRect().height : 0
-      this.learnedExtrasSamples.push(Math.max(0, figure - imageHeight))
-      if (this.learnedExtrasSamples.length > 9) this.learnedExtrasSamples.shift()
     }
-    this.learnedHeight = this.learnedRatios.length >= 3 ? Math.min(196605, median(this.learnedRatios) * layoutWidth) : 0
-    this.learnedExtras = median(this.learnedExtrasSamples)
-    this.byteHeight = this.byteRatios.length >= 3 ? median(this.byteRatios) : 0
-    if (this.learnedHeight > 0 || this.byteHeight > 0) {
+    this.learnedImage = this.ratioSamples.length ? Math.min(196605, median(this.ratioSamples) * layoutWidth) : 0
+    this.learnedExtras = median(this.extrasSamples)
+    this.byteHeight = this.byteSamples.length ? median(this.byteSamples) : 0
+    if (this.learnedImage > 0 || this.byteHeight > 0) {
       for (let j = 0; j < this.pages.length; j++) {
         if (this.dimensions.has(j)) continue
         const estimate = this.estimateHeight(j, layoutWidth)
@@ -468,12 +515,23 @@ export class ComicReader implements ReaderView {
       }
     }
     this.updateSpacers()
-    const { location, offset, proportional } = anchor
+    const { location, offset, proportional, distance = 0 } = anchor
     const pageHeight = this.heights[location.index] ?? 0
     const withinPage = proportional ? (location.ratio ?? 0) * pageHeight : Math.min(offset, Math.max(0, pageHeight - 1))
-    this.syncScroll(this.sum(this.trackFirst, location.index) + withinPage)
+    const target = this.span(this.trackFirst, location.index) + withinPage + distance
+    if (distance !== 0 && !this.relocating) {
+      // 像素锚：按修正后的高度反推落点。落点离开当前挂载中心（可能越出局部轨道）时换窗，
+      // 换窗沿同一像素锚重新定位并按需换段，不把穿越区的虚高页码钉死。
+      const landing = this.locate(target)
+      if (landing.index !== this.index) {
+        this.relocating = true
+        try { void this.window(landing.index, landing.ratio).catch(error => this.report(error)) } finally { this.relocating = false }
+        return
+      }
+    }
+    this.syncScroll(target)
     if (this.restoreTarget && this.dimensions.has(this.restoreTarget.index)) this.restoreTarget = undefined
-    this.anchor = this.current()
+    this.remember(this.current())
     if (changed) this.scheduleProgress()
   }
   private onScroll = () => {
@@ -488,7 +546,7 @@ export class ComicReader implements ReaderView {
       if (this.stopped) return
       if (this.context.viewport.clientWidth !== this.width || this.context.viewport.clientHeight !== this.height) this.measure(this.snapshot(this.anchor, true))
       const position = this.current()
-      this.anchor = position; this.scrollPosition = this.context.viewport.scrollTop
+      this.remember(position); this.scrollPosition = this.context.viewport.scrollTop
       if (this.continuous && position.index !== this.index) {
         void this.window(position.index, position.ratio ?? 0).catch(error => this.report(error))
       } else this.scheduleProgress()
@@ -555,6 +613,6 @@ export class ComicReader implements ReaderView {
     if (this.probeFrame !== undefined) cancelAnimationFrame(this.probeFrame)
     this.probePending?.clear()
     clearTimeout(this.progressTimer)
-    this.nodes.clear(); this.dimensions.clear(); this.root.replaceChildren()
+    this.nodes.clear(); this.dimensions.clear(); this.fresh.length = 0; this.landmark = undefined; this.root.replaceChildren()
   }
 }

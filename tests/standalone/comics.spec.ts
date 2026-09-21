@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { build } from 'vite'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { crc32 } from 'node:zlib'
 import { png } from '../browser/readers-fixtures.mjs'
 import type { ComicReader } from '../../comics/comic'
 import type { Drive, FileEntry } from '../../sdk/types'
@@ -24,6 +25,15 @@ declare global {
 }
 let bundle = '', style = ''
 const normal = [...png(1000, 1200, [72, 120, 96])]
+/** 在纯色 PNG 的 IDAT 后插入一个私有辅助块（解码器忽略）把文件撑到指定字节数：
+ *  让 64 KiB 头部探测与整图读取成为两个可区分的请求，模拟真实网络里探测先到、整图后到。 */
+function padded(width: number, height: number, color: number[], bytes: number) {
+  const base = Buffer.from(png(width, height, color))
+  const type = Buffer.from('prVt'), data = Buffer.alloc(bytes, 0x5a)
+  const head = Buffer.alloc(4); head.writeUInt32BE(bytes)
+  const sum = Buffer.alloc(4); sum.writeUInt32BE(crc32(Buffer.concat([type, data])))
+  return [...Buffer.concat([base.subarray(0, base.length - 12), head, type, data, sum, base.subarray(base.length - 12)])]
+}
 test.beforeAll(async () => {
   const result = await build({
     configFile: false,
@@ -50,13 +60,13 @@ test.afterEach(async ({ page }) => {
   await page.evaluate(() => window.comicFixture?.reader.destroy())
 })
 
-async function open(page: Page, options: { count?: number; location?: Location; image?: number[]; overrides?: [number, number[]][]; blocked?: number[] } = {}) {
+async function open(page: Page, options: { count?: number; location?: Location; image?: number[]; overrides?: [number, number[]][]; blocked?: number[]; delays?: { head: number; full: number } } = {}) {
   // 直接注入打包脚本与内存 SDK；任何意外网络访问都阻断，测试不依赖宿主或外部资源。
   await page.route('**/*', (route) => route.abort())
   await page.setContent('<meta name="viewport" content="width=device-width,initial-scale=1"><div id="app" class="immersive" data-kind="comics"><main id="viewport" class="reading-viewport" data-mode="scroll"></main></div>')
   await page.addStyleTag({ content: style })
   await page.addScriptTag({ content: bundle })
-  await page.evaluate(async ({ count, location, image, overrides, blocked }) => {
+  await page.evaluate(async ({ count, location, image, overrides, blocked, delays }) => {
     const viewport = document.getElementById('viewport')!
     const errors: string[] = [], writes: number[] = []
     const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!
@@ -81,6 +91,12 @@ async function open(page: Page, options: { count?: number; location?: Location; 
           callbacks.add(finish); waiting.set(index, callbacks)
           signal.addEventListener('abort', cancel, { once: true })
         })
+        // 模拟真实网络：64 KiB 头部探测请求快、整图（≥1 MiB 分块）慢；中止即拒绝。
+        if (delays) await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve() }, length <= 65_536 ? delays.head : delays.full)
+          const cancel = () => { clearTimeout(timer); reject(signal.reason) }
+          signal.addEventListener('abort', cancel, { once: true })
+        })
         signal.throwIfAborted()
         return (resources.get(index) ?? bytes).slice(start, start + length)
       },
@@ -95,7 +111,7 @@ async function open(page: Page, options: { count?: number; location?: Location; 
       release: (index) => { blockedPages.delete(index); waiting.get(index)?.forEach((finish) => finish()) },
     }
     await reader.open(location)
-  }, { count: options.count ?? 1000, location: options.location ?? { format: 'comic', index: 449, ratio: .4 }, image: options.image ?? normal, overrides: options.overrides ?? [], blocked: options.blocked ?? [] })
+  }, { count: options.count ?? 1000, location: options.location ?? { format: 'comic', index: 449, ratio: .4 }, image: options.image ?? normal, overrides: options.overrides ?? [], blocked: options.blocked ?? [], delays: options.delays ?? null })
 }
 const current = (page: Page) => page.evaluate(() => window.comicFixture.reader.current())
 const imageAt = (page: Page, index: number) => page.locator(`img[data-resource="${index}"]`)
@@ -196,5 +212,29 @@ test.describe('手机触摸滚动', () => {
     expect(samples.at(-1)! - released!).toBeGreaterThan(50)
     for (let i = 1; i < samples.length; i++) expect(samples[i]!).toBeGreaterThanOrEqual(samples[i - 1]! - 1)
     expect(await page.evaluate(() => window.comicFixture.writes)).toEqual([])
+  })
+
+  test('探测先于整图到达时估高仍能学习，连续甩动穿越未探测区后的落点按真实页高回落而不是钉死虚高页码', async ({ page }) => {
+    // 真实网络形态：64 KiB 头部探测 300ms、整图 1200ms；各页字节相同、真实高 5000（初始估高 ≈ 2.2 个视口高 ≈ 1857）。
+    const strip = padded(390, 5000, [88, 120, 200], 200_000)
+    await open(page, { count: 300, location: { format: 'comic', index: 0 }, image: strip, delays: { head: 300, full: 1200 } })
+    // 打开后立刻连续甩动 5 次共 30000px：全程都是占位页，任何探测结果都来不及到达。
+    await page.evaluate(async () => {
+      const { viewport } = window.comicFixture
+      for (let i = 0; i < 5; i++) {
+        viewport.scrollTop += 6000
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      }
+    })
+    // 此刻页码只能按初始估高映射，被虚报到第 16 页上下。
+    expect((await current(page)).index).toBeGreaterThanOrEqual(12)
+    // 探测到达、估高学习后：物理滚动 30000px ÷ 真实页高 5000 = 第 6 页（0 基），
+    // 修复前保留虚高页码停在第 16 页，中间十页内容被永久跳过。
+    await expect.poll(async () => (await current(page)).index, { timeout: 10_000 }).toBe(6)
+    await page.waitForTimeout(1500)
+    expect((await current(page)).index).toBe(6)
+    expect(await page.evaluate(() => Math.round(window.comicFixture.viewport.scrollTop))).toBe(30_000)
+    await loaded(page, 6)
+    expect((await current(page)).index).toBe(6)
   })
 })
