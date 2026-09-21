@@ -169,9 +169,7 @@ export class ComicPreloader {
       // 只跳过已探测和正在探测的页面；正在整图读取的页面也要探测——
       // 快滚恰好穿越这些页，尺寸必须尽早精确，不能等完整字节到齐。
       if (this.probeSizes.has(i) || this.probeActive.has(i)) continue
-      // 压缩包页只在整图字节已入缓存时探测：读取共享 1 MiB 分块，
-      // 头部探测实际会拉取整段压缩数据，只解析缓存才能不放大下载。
-      if (this.options.archive && !this.cache.has(i)) continue
+
       if (!wanted.includes(i)) wanted.push(i)
     }
     wanted.sort((a, b) => Math.abs(a - this.center) - Math.abs(b - this.center) || b - a)
@@ -200,9 +198,8 @@ export class ComicPreloader {
         if (!page) throw new Error('探测页码无效')
         const bytes = this.cache.get(index)
         // 已有整图字节时直接解码头部，不再发起新的网络请求；压缩包页没有缓存时
-        // 等待整图加载（下次调度再试），不为头部探测拉取共享分块、放大并发重复下载。
+        // 通过 readHead 只解压条目头部（读够即中止底层流，约一个 1 MiB 分块）。
         if (!bytes || bytes.length === 0) {
-          if (this.options.archive) return
           const head = await this.readHead(page, signal)
           signal.throwIfAborted()
           let size: ProbeDimensions | null = null
@@ -229,9 +226,11 @@ export class ComicPreloader {
     }
   }
 
-  /** 只读目录页开头小段字节解析真实宽高；压缩包页不走网络（见 probeOne）。 */
+  /** 只读每页开头小段字节解析真实宽高：目录页走独立小范围请求，
+   *  压缩包页只解压条目头部（约一个共享 1 MiB 分块，读够即中止）。 */
   private async readHead(page: PreloadPage, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
     signal.throwIfAborted()
+    if (this.options.archive) return await this.options.archive.readHead(page.entry, this.probe.headBytes, signal)
     if (!page.file) throw new Error('目录页缺少文件引用')
     this.probeTransport ??= createTransport(this.options.drive)
     const length = Math.min(this.probe.headBytes, page.file.size)

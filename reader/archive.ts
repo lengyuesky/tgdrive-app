@@ -81,6 +81,33 @@ export class Archive {
     }
     return this
   }
+  /** 只解压条目开头 headBytes 字节即停：解析图片头部尺寸足够，读够立即中止
+   *  zip.js 的拷贝循环与底层流，不为探测拉取整个压缩条目。 */
+  async readHead(path: string, headBytes: number, signal = this.source.signal): Promise<Uint8Array<ArrayBuffer>> {
+    this.source.signal.throwIfAborted(); signal.throwIfAborted()
+    const entry = this.entries.get(archivePath(path))
+    if (!entry || entry.directory || !entry.getData) throw new Error(`归档资源不存在：${path}`)
+    const buffer = new Uint8Array(Math.max(0, Math.min(headBytes, entry.uncompressedSize)))
+    let written = 0, enough = false
+    const controller = new AbortController()
+    const onAbort = () => controller.abort(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    const combined = AbortSignal.any([this.source.signal, controller.signal])
+    try {
+      await entry.getData(new WritableStream<Uint8Array>({
+        write: (chunk) => {
+          combined.throwIfAborted()
+          const take = Math.min(chunk.length, buffer.length - written)
+          if (take > 0) { buffer.set(chunk.subarray(0, take), written); written += take }
+          if (buffer.length > 0 && written >= buffer.length) { enough = true; controller.abort(new DOMException('头部已足够', 'AbortError')) }
+        },
+      }), { signal: combined, useWebWorkers: false })
+    } catch (error) {
+      // 读够主动中止视为成功；其余失败原样抛出。
+      if (!enough) { signal.throwIfAborted(); throw error }
+    } finally { signal.removeEventListener('abort', onAbort) }
+    return buffer.subarray(0, written)
+  }
   async read(path: string, maximum = LIMITS.entry, signal = this.source.signal): Promise<Uint8Array<ArrayBuffer>> {
     this.source.signal.throwIfAborted(); signal.throwIfAborted()
     const entry = this.entries.get(archivePath(path))

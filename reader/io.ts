@@ -96,6 +96,15 @@ export class MessageChannelTransport implements RangeTransport {
   }
 }
 
+/** 等待共享分块任务；调用者中止只放弃本次等待，任务照常完成并进入缓存。 */
+function waitBlock(task: Promise<Uint8Array<ArrayBuffer>>, caller: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+  return new Promise((resolve, reject) => {
+    const settle = (action: () => void) => { caller.removeEventListener('abort', onAbort); action() }
+    const onAbort = () => settle(() => reject(caller.reason ?? new DOMException('已中止', 'AbortError')))
+    caller.addEventListener('abort', onAbort, { once: true })
+    task.then((bytes) => settle(() => resolve(bytes)), (error) => settle(() => reject(error)))
+  })
+}
 export function createTransport(drive: Drive): RangeTransport {
   const can = (name: string) => typeof drive.can === 'function' && drive.can(name)
   return can('media.bytes') ? new ByteTicketTransport(drive) : new MessageChannelTransport(drive)
@@ -120,23 +129,24 @@ export class RangeFile {
     this.batchable = !can('media.bytes') && can('files.readRanges')
   }
   private block(index: number, caller?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
-    const signal = caller ? AbortSignal.any([this.signal, caller]) : this.signal
-    signal.throwIfAborted()
+    this.signal.throwIfAborted(); caller?.throwIfAborted()
     const cached = this.cache.get(index)
     if (cached) { this.cache.delete(index); this.cache.set(index, cached); return Promise.resolve(cached) }
-    const existing = !caller && this.pending.get(index)
-    if (existing) return existing
+    const existing = this.pending.get(index)
+    if (existing) return caller ? waitBlock(existing, caller) : existing
     const offset = index * MiB
     const length = Math.min(MiB, this.file.size - offset)
-    const task = this.runner.run(signal, () => this.transport.read(this.ref, offset, length, signal))
+    // 在途分块对所有读者共享，fetch 只绑定文件级信号：并发读同一分块（压缩包整图
+    // 读取、头部探测、条漫多页预读）不再各自重复下载；调用者中止仅放弃本次等待。
+    const task = this.runner.run(this.signal, () => this.transport.read(this.ref, offset, length, this.signal))
       .then((bytes) => {
-        signal.throwIfAborted()
+        this.signal.throwIfAborted()
         if (bytes.length !== length) throw new Error('文件分块长度不一致')
         while (this.cache.size >= 32) this.cache.delete(this.cache.keys().next().value!)
         this.cache.set(index, bytes); return bytes
-      }).finally(() => { if (!caller) this.pending.delete(index) })
-    if (!caller) this.pending.set(index, task)
-    return task
+      }).finally(() => { if (this.pending.get(index) === task) this.pending.delete(index) })
+    this.pending.set(index, task)
+    return caller ? waitBlock(task, caller) : task
   }
   /** 一次 RPC 拉回多段，避免逐段往返触发限流；单批最多 8 段。 */
   private async loadBlocks(indices: number[], caller?: AbortSignal): Promise<void> {

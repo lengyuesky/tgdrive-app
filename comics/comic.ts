@@ -8,7 +8,7 @@ import { ComicPreloader, type ProbeDimensions } from './preload'
 import { boundedIndex, canvasThumbnail, contentSize, frame, sectionState, type ReaderView, type ReaderThumbnail, type Section, type ViewContext } from '../reader/view'
 import { zoomLevels, type Location, type Preferences } from '../reader/state'
 import type { FileEntry } from '../sdk/types'
-interface ComicPage { name: string; entry: string; file?: FileEntry }
+interface ComicPage { name: string; entry: string; file?: FileEntry; bytes?: number }
 interface Dimensions { width: number; height: number }
 interface ScrollAnchor { location: Location; offset: number; proportional: boolean }
 type ComicMode = 'scroll' | 'single' | 'double'
@@ -39,6 +39,11 @@ export class ComicReader implements ReaderView {
   private learnedRatios: number[] = []
   private learnedExtrasSamples: number[] = []
   private learnedHeight = 0
+  // 每字节比例采样（figure 高 / 布局宽 / 页字节）与其中位数：未加载页高度按
+  // “图高 ∝ 每页字节”估算。zip 中央目录/文件大小在打开时免费可得，条漫合集
+  // 里短卡与长条页字节差 7 倍以上，平面中位数估高会把长条页估成短卡造成跳页。
+  private byteRatios: number[] = []
+  private byteHeight = 0
   private learnedExtras = 0
   private root = document.createElement('div')
   private before = document.createElement('div')
@@ -95,13 +100,13 @@ export class ComicReader implements ReaderView {
       do {
         const page = await drive.files.list({ path: file.path, limit: 500, cursor }, { signal })
         signal.throwIfAborted()
-        for (const image of page.entries) if (!image.is_dir && isImage(image.name) && !image.name.startsWith('.')) this.pages.push({ name: image.name, entry: String(image.id), file: image })
+        for (const image of page.entries) if (!image.is_dir && isImage(image.name) && !image.name.startsWith('.')) this.pages.push({ name: image.name, entry: String(image.id), file: image, bytes: Math.max(0, image.size | 0) })
         if (this.pages.length > LIMITS.entries) throw new Error('图片章节超过 10000 页，请按章节拆分目录')
         cursor = page.next_cursor
       } while (cursor)
     } else {
       this.archive = await new Archive(new RangeFile(drive, file, signal, LIMITS.archive)).open()
-      for (const [path, item] of this.archive.entries) if (!item.directory && isImage(path) && !path.split('/').some((part) => part.startsWith('.') || part === '__MACOSX')) this.pages.push({ name: path, entry: path })
+      for (const [path, item] of this.archive.entries) if (!item.directory && isImage(path) && !path.split('/').some((part) => part.startsWith('.') || part === '__MACOSX')) this.pages.push({ name: path, entry: path, bytes: Math.max(0, Number(item.compressedSize ?? 0)) })
     }
     signal.throwIfAborted()
     this.pages.sort((a, b) => natural(a.name, b.name) || natural(a.entry, b.entry))
@@ -155,6 +160,14 @@ export class ComicReader implements ReaderView {
       const height = this.layoutHeight || contentSize(this.context.viewport).height
       this.heights[index] = this.scaledSize(size, width / this.zoom, height).height
     }
+  }
+  /** 未加载页占位高：有每页字节数时按“图高 ∝ 每页字节”估算（中央目录免费可得），
+   *  换段重锚的 spacer 求和不再被平面估高带偏；无字节数时回退学习估高。 */
+  private estimateHeight(index: number, layoutWidth: number): number {
+    const bytes = this.pages[index]?.bytes ?? 0
+    if (this.byteHeight > 0 && bytes > 0) return Math.min(196_640, Math.max(240, this.byteHeight * bytes * layoutWidth))
+    const floor = Math.min(196_640, Math.max(240, layoutWidth * 1.45, this.context.viewport.clientHeight * 2.2))
+    return Math.min(196_640, Math.max(240, this.learnedHeight > 0 ? this.learnedHeight : floor))
   }
   private bottomPadding() { return this.continuous && this.trackEnd === this.pages.length ? Math.max(0, this.context.viewport.clientHeight - (this.heights.at(-1) ?? 0)) : 0 }
   current(): Location {
@@ -399,7 +412,7 @@ export class ComicReader implements ReaderView {
       const known = width > 0 && height > 0
       if (known && !this.dimensions.has(index)) fresh.push(index)
       node.style.width = ''; node.style.height = ''; node.style.flex = ''
-      const size = known ? this.scaledSize({ width, height }, layoutWidth / this.zoom, layoutHeight) : { width: layoutWidth, height: Math.min(196605, this.learnedHeight > 0 ? Math.max(120, this.learnedHeight - this.learnedExtras) : layoutWidth * 1.45, this.fit === 'page' ? layoutHeight * this.zoom : Infinity) }
+      const size = known ? this.scaledSize({ width, height }, layoutWidth / this.zoom, layoutHeight) : { width: layoutWidth, height: Math.min(196605, Math.max(120, this.estimateHeight(index, layoutWidth) - this.learnedExtras), this.fit === 'page' ? layoutHeight * this.zoom : Infinity) }
       // 无 src 的 img 在部分浏览器中忽略 aspect-ratio；显式高度保证解码前后和回收后几何一致。
       if (image.style.height !== `${size.height}px`) image.style.height = `${size.height}px`
       if (known) {
@@ -427,6 +440,11 @@ export class ComicReader implements ReaderView {
       // 以宽比记录采样，换布局后重新换算仍有效；中位数避免个别超长图拉偏整体估高。
       this.learnedRatios.push(figure / Math.max(1, layoutWidth))
       if (this.learnedRatios.length > 9) this.learnedRatios.shift()
+      const bytes = this.pages[index]?.bytes ?? 0
+      if (bytes > 0) {
+        this.byteRatios.push(figure / Math.max(1, layoutWidth) / bytes)
+        if (this.byteRatios.length > 9) this.byteRatios.shift()
+      }
       const image = this.nodes.get(index)?.querySelector('img')
       const imageHeight = image ? image.getBoundingClientRect().height : 0
       this.learnedExtrasSamples.push(Math.max(0, figure - imageHeight))
@@ -434,13 +452,16 @@ export class ComicReader implements ReaderView {
     }
     this.learnedHeight = this.learnedRatios.length >= 3 ? Math.min(196605, median(this.learnedRatios) * layoutWidth) : 0
     this.learnedExtras = median(this.learnedExtrasSamples)
-    if (this.learnedHeight > 0) {
+    this.byteHeight = this.byteRatios.length >= 3 ? median(this.byteRatios) : 0
+    if (this.learnedHeight > 0 || this.byteHeight > 0) {
       for (let j = 0; j < this.pages.length; j++) {
-        if (this.dimensions.has(j) || Math.abs((this.heights[j] ?? 0) - this.learnedHeight) < 1) continue
-        this.heights[j] = this.learnedHeight
+        if (this.dimensions.has(j)) continue
+        const estimate = this.estimateHeight(j, layoutWidth)
+        if (Math.abs((this.heights[j] ?? 0) - estimate) < 1) continue
+        this.heights[j] = estimate
         const node = this.nodes.get(j)
         if (node) {
-          const minHeight = `${this.learnedHeight}px`
+          const minHeight = `${estimate}px`
           if (node.style.minHeight !== minHeight) node.style.minHeight = minHeight
         }
         changed = true

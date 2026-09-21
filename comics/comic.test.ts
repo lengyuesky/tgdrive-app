@@ -28,7 +28,7 @@ afterEach(() => {
   vi.useRealTimers(); vi.unstubAllGlobals(); document.body.replaceChildren()
 })
 
-function fixture(count = 1500, initialHeight = 1450, autoLoad = true) {
+function fixture(count = 1500, initialHeight = 1450, autoLoad = true, entrySizes?: number[]) {
   const frames = new Map<number, FrameRequestCallback>(); let sequence = 0
   const observers: (() => void)[] = []
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++sequence, callback); return sequence })
@@ -71,7 +71,7 @@ function fixture(count = 1500, initialHeight = 1450, autoLoad = true) {
     },
   })
   const file: FileEntry = { id: 1, name: '长漫画', path: '/长漫画', is_dir: true, size: 0, content_version: 'a'.repeat(64), created_at: 1, modified_at: 1, favorite: false }
-  const entries = Array.from({ length: count }, (_, index) => ({ ...file, id: index + 2, name: `${index + 1}.png`, is_dir: false }))
+  const entries = Array.from({ length: count }, (_, index) => ({ ...file, id: index + 2, name: `${index + 1}.png`, is_dir: false, size: entrySizes?.[index] ?? 0 }))
   const context: ViewContext = {
     drive: { files: { list: vi.fn(async () => ({ entries, next_cursor: null })) } } as unknown as Drive,
     file, viewport, signal: new AbortController().signal, prefs: { ...defaults, mode: 'scroll' }, changed: vi.fn(), error: vi.fn(),
@@ -108,6 +108,31 @@ function fixture(count = 1500, initialHeight = 1450, autoLoad = true) {
 }
 
 describe('长漫画滚动定位', () => {
+  it('未加载页高度按每页字节比例估算，短页不再把长条页估成矮页', async () => {
+    // 条漫合集常见结构：开头几张短卡，其后全是长条页；每页字节与像素量成正比。
+    const sizes = Array.from({ length: 60 }, (_, index) => (index < 4 ? 100_000 : 1_000_000))
+    const made = fixture(60, 1450, false, sizes)
+    const { reader, viewport, loadPages, measure } = made
+    await made.finish(reader.open({ format: 'comic', index: 0 }))
+    // 只加载开头三张短卡（真实高 1000、每页 10 万字节）：平面中位数会学到 1000
+    // 并套给所有未加载页，把后面的长条页全估成矮页。
+    loadPages([[0, 1000], [1, 1000], [2, 1000]])
+    measure()
+    const heights = (reader as unknown as { heights: number[] }).heights
+    // 长条页（100 万字节）估高应按字节比例 ≈ 10_000，而不是被短卡中位数带成 1000。
+    expect(Math.abs(heights[50]! - 10_000)).toBeLessThanOrEqual(200)
+    expect(Math.abs(heights[10]! - 10_000)).toBeLessThanOrEqual(200)
+    // 短卡字节小、估高相应小；已加载页保留真实高。
+    expect(Math.abs(heights[3]! - 1000)).toBeLessThanOrEqual(200)
+    expect(heights[0]).toBe(1000)
+    // 长条页占位进入轨道求和：跨过三张短卡与短卡估高（页 3）后，索引按真实
+    // 内容推进——32_500 = 前 6 页累计 24_000 + 8_500，落在第 7 张长条页内。
+    viewport.scrollTop = 32_500
+    viewport.dispatchEvent(new Event('scroll'))
+    made.draw()
+    expect((reader as unknown as { current(): { index: number } }).current().index).toBe(6)
+  })
+
   it('普通跨页只更新挂载窗口，不重写原生滚动坐标', async () => {
     const { reader, finish, scrollBy, scrollWrites } = fixture(1000, 1000)
     await finish(reader.open({ format: 'comic', index: 449, ratio: .4 }))

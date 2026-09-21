@@ -37,6 +37,9 @@ const sampleStrip = zip(
 // 图宽 1200 大于阅读视口，适宽只会缩小——与真实条漫一致。
 const raggedHeights = Array.from({ length: 40 }, (_, i) => (i < 3 ? 2000 : 12_000))
 const raggedPages = raggedHeights.map((height, i) => png(1200, height, [90, 60, 160]))
+// 参差条漫压缩包：与目录版同构（3 短卡 + 37 长条页）。回归用户真实场景——
+// 韩漫合集 zip 里平面估高被短卡带偏、快滚穿越未加载区时索引虚高跳几十页。
+const raggedStrip = zip(raggedPages.map((data, i) => [`${String(i + 1).padStart(2, '0')}.png`, data]))
 
 test.beforeAll(async () => {
   stagingTmp = await mkdtemp(join(tmpdir(), 'tgdrive-readers-build-'))
@@ -202,6 +205,20 @@ async function setupApp(
         favorite: false,
       },
       data: sampleStrip,
+    },
+    {
+      entry: {
+        id: 205,
+        name: '参差条漫.zip',
+        path: '/书库/参差条漫.zip',
+        is_dir: false,
+        size: raggedStrip.length,
+        content_version: 'v1',
+        created_at: 2004,
+        modified_at: 2004,
+        favorite: false,
+      },
+      data: raggedStrip,
     },
     {
       entry: {
@@ -754,6 +771,42 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
     expect(
       Math.abs(result.reported - result.expected),
       `页码应与真实内容一致：${JSON.stringify(result)}`
+    ).toBeLessThanOrEqual(1)
+  })
+
+  test('9. 压缩包参差条漫快滚不跳几十页：窗口探测真实尺寸穿越短卡区', async ({ page }) => {
+    // 用户的真实形态：几百 MB 韩漫合集 zip、一册上千页。压缩包页经 readHead
+    // 只解压条目头部（读够即中止，约一个共享分块），窗口内拿到真实尺寸。
+    await setupApp(page, { kind: 'comics', readDelay: 600, proportionalRead: true })
+    const libBtn = page.locator('#nav-library, #tab-library').filter({ visible: true }).first()
+    await libBtn.click()
+    await page.locator('#items .library-card', { hasText: '参差条漫.zip' }).first().click()
+    await expect(page.locator('#reading-status')).toHaveText('', { timeout: 20_000 })
+    const viewport = page.locator('#viewport')
+
+    // 等首屏加载与窗口探测就位。
+    await page.waitForTimeout(2_500)
+
+    // 大幅快滚到 50_000px：真实内容落在第 6 页（0 基）内。
+    // 修复前：短卡把平面估高带偏，长条页占位过矮，同一位置被虚报到 ~30 页。
+    await viewport.evaluate((node) => { node.scrollTop = 50_000 })
+    await page.waitForTimeout(1_800)
+    const result = await viewport.evaluate((node, heights) => {
+      const image = node.querySelector<HTMLElement>('figure.comic-page img')
+      const width = image ? image.getBoundingClientRect().width : node.clientWidth
+      const cum = [0]
+      for (const height of heights) cum.push(cum[cum.length - 1]! + (height * width) / 1200)
+      let expected = 0
+      while (expected + 1 < cum.length && cum[expected + 1]! <= node.scrollTop) expected++
+      return {
+        scrollTop: Math.round(node.scrollTop),
+        expected,
+        reported: Number(((document.querySelector('#position')?.textContent) ?? '').split(' / ')[0]) - 1,
+      }
+    }, raggedHeights)
+    expect(
+      Math.abs(result.reported - result.expected),
+      `压缩包页码应与真实内容一致：${JSON.stringify(result)}`
     ).toBeLessThanOrEqual(1)
   })
 })
