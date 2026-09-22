@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LibraryAccess, SOURCES_KEY, SourcesStore, parseSources } from './sources'
+import { LibraryAccess, SOURCES_KEY, SourcesStore, filesChangeAffectsSources, parseSources } from './sources'
 import { deferred, file, memoryDrive, signal, sources } from './test-fixtures'
 
 describe('SourcesStore 来源与旧值迁移', () => {
@@ -126,6 +126,39 @@ describe('LibraryAccess 稳定节点及异步范围核对', () => {
     })
     await expect(access.file(2, signal())).rejects.toMatchObject({ code: 'file_changed' })
   })
+  it('宿主声明 rpc.batch 时来源根与目标文件合并为两次批量核对，逐项失败不影响其余', async () => {
+    const one = file(1, '/一', true), two = file(2, '/二', true), book = file(3, '/一/正文.txt')
+    const mock = memoryDrive([one, two, book], {}, { batch: true }), access = new LibraryAccess(mock.drive)
+    access.setSources(sources(one, two))
+    const opened = await access.file(3, signal())
+    expect(opened.file.path).toBe('/一/正文.txt'); expect(opened.sourceIds).toEqual([1])
+    // 两次批量各含全部来源与目标文件，不再逐个 stat 往返。
+    expect(mock.batch).toHaveBeenCalledTimes(2)
+    expect(mock.batch.mock.calls.map(([calls]) => calls)).toEqual([
+      [{ method: 'files.stat', params: { id: 1 } }, { method: 'files.stat', params: { id: 2 } }, { method: 'files.stat', params: { id: 3 } }],
+      [{ method: 'files.stat', params: { id: 1 } }, { method: 'files.stat', params: { id: 2 } }, { method: 'files.stat', params: { id: 3 } }],
+    ])
+    // 某个来源缺失只进入不可用列表，其余来源与文件照常。
+    mock.nodes.delete(2)
+    const roots = await access.roots(signal())
+    expect(roots.roots.map(item => item.source.nodeId)).toEqual([1])
+    expect(roots.unavailable).toEqual([{ source: expect.objectContaining({ nodeId: 2 }), message: expect.stringContaining('节点不存在') }])
+    expect((await access.file(3, signal())).sourceIds).toEqual([1])
+    // 目标文件缺失按该项错误抛出。
+    mock.nodes.delete(3)
+    await expect(access.file(3, signal())).rejects.toMatchObject({ code: 'not_found' })
+    // 批量返回条目数不一致或越界节点一律拒绝。
+    mock.batch.mockResolvedValueOnce([{ result: one }])
+    await expect(access.roots(signal())).rejects.toMatchObject({ code: 'invalid_file' })
+    mock.batch.mockResolvedValueOnce([{ result: one }, { result: { ...two, id: 99 } }])
+    expect((await access.roots(signal())).unavailable.map(item => item.source.nodeId)).toEqual([2])
+    // 超过 16 个来源分批发送。
+    const many = Array.from({ length: 16 }, (_, index) => file(index + 10, `/库${index}`, true))
+    many.forEach(entry => mock.nodes.set(entry.id, entry)); mock.nodes.set(3, file(3, '/库0/正文.txt'))
+    access.setSources(sources(...many)); mock.batch.mockClear()
+    await access.file(3, signal())
+    expect(mock.batch.mock.calls.map(([calls]) => calls.length)).toEqual([16, 1, 16, 1])
+  })
   it('目录请求期间重绑定路径或来源失效，旧页不能发布', async () => {
     const root = file(1, '/书', true), book = file(2, '/书/正文.txt'), mock = memoryDrive([root, book]), access = new LibraryAccess(mock.drive)
     access.setSources(sources(root))
@@ -135,5 +168,20 @@ describe('LibraryAccess 稳定节点及异步范围核对', () => {
     })
     await expect(access.list(1, null, signal())).rejects.toMatchObject({ code: 'directory_changed' })
     expect(mock.readRange).not.toHaveBeenCalled()
+  })
+})
+
+describe('文件事件与来源范围', () => {
+  it('范围未知一律相关；已知目录按来源包含或祖先关系过滤；没有来源时无关', () => {
+    const list = sources(file(1, '/书', true), file(2, '/漫画/连载', true)).config.sources
+    expect(filesChangeAffectsSources(list, undefined)).toBe(true)
+    expect(filesChangeAffectsSources(list, ['/书', 1])).toBe(true)
+    expect(filesChangeAffectsSources(list, ['/书/子目录'])).toBe(true)
+    expect(filesChangeAffectsSources(list, ['/漫画'])).toBe(true)
+    expect(filesChangeAffectsSources(list, ['/'])).toBe(true)
+    expect(filesChangeAffectsSources(list, ['/影片', '/书籍', '/漫画/完结'])).toBe(false)
+    expect(filesChangeAffectsSources(list, [])).toBe(false)
+    expect(filesChangeAffectsSources([], ['/书'])).toBe(false)
+    expect(filesChangeAffectsSources([], undefined)).toBe(true)
   })
 })

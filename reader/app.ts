@@ -1,4 +1,5 @@
 /** 两个独立插件共用的阅读馆应用外壳与阅读器桥接，只依赖公开 SDK 与统一数据层。 */
+import { filesChangeAffectsSources } from './library/sources'
 import type { Drive, FileEntry } from '../sdk/types'
 import { isAbort } from './io'
 import {
@@ -404,7 +405,12 @@ export async function startApp(options: AppOptions) {
     const visible = key === 'library:sources' || key.startsWith('library:flags:') || key.startsWith('library:reading:') || key.startsWith('progress:')
     if (visible && !drive.storage.wroteRecently?.(key)) scheduleLibraryRefresh(false)
   })
-  const offFileEvents = drive.on('files.changed', () => scheduleLibraryRefresh(true))
+  const offFileEvents = drive.on('files.changed', (value) => {
+    // 新宿主附带变更目录：与任何来源目录无关的变化不重扫；旧宿主无参数时照常刷新。
+    const paths = (value as { paths?: unknown } | undefined)?.paths
+    if (!filesChangeAffectsSources(library.access.sources, paths)) return
+    scheduleLibraryRefresh(true)
+  })
   const offSyncEvents = drive.on('sync.hint', () => scheduleLibraryRefresh(true))
   const offScopeEvents = drive.on('scope.changed', () => scheduleLibraryRefresh(true))
 

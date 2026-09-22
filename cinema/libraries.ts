@@ -22,6 +22,18 @@ export function withinDirectory(path: string, root: string): boolean {
     return root === '/' || path === root || path.startsWith(root + '/')
   } catch { return false }
 }
+/**
+ * 文件事件是否与已配置的媒体库相关：宿主已按应用权限范围过滤，这里再按媒体库文件夹过滤。
+ * `paths` 是发生变化的目录；缺省表示范围未知，一律相关。变更目录落在某个库文件夹之下，
+ * 或本身是库文件夹的祖先（文件夹可能被改名、移动或删除）才需要刷新。
+ */
+export function filesChangeAffectsLibraries(libraries: readonly CinemaLibrary[], paths: unknown): boolean {
+  if (!Array.isArray(paths) || !paths.every(path => typeof path === 'string')) return true
+  if (!libraries.length) return false
+  return (paths as string[]).some(path => libraries.some(library => {
+    try { return withinDirectory(path, library.directoryPath) || withinDirectory(library.directoryPath, path) } catch { return true }
+  }))
+}
 export function requireDirectory(root: string | null, path: string) {
   if (!root || !withinDirectory(path, root)) throw new Error('目录不在当前媒体库内，请返回媒体库重新选择')
 }

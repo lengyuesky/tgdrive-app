@@ -5,7 +5,7 @@ import { VIDEO_EXTENSIONS, extension, isVideo, naturalOrder, parentPath, prefere
 import { ReadScheduler, RangeFile, isAbort } from './io'
 import { Library, ArtLoader } from './library'
 import { ProgressStore } from './storage'
-import { LibrariesStore, LibraryAccess, requireDirectory, withinDirectory, type CinemaLibrary, type LibrariesSnapshot, type SavedVideo } from './libraries'
+import { LibrariesStore, LibraryAccess, requireDirectory, withinDirectory, type CinemaLibrary, type LibrariesSnapshot, type SavedVideo, filesChangeAffectsLibraries } from './libraries'
 import { LibraryManager } from './libraries-ui'
 import { PlaybackSession, type PlaybackInfo } from './media'
 import { Captions, readSubtitle, type SubtitleTrack } from './subtitles'
@@ -592,7 +592,12 @@ drive.on('storage.changed', (value) => {
   if (drive.storage.wroteRecently?.(key)) return
   refreshLists()
 })
-drive.on('files.changed', refreshLists)
+drive.on('files.changed', (value) => {
+  // 新宿主附带变更目录：与任何媒体库文件夹无关的变化不刷新；旧宿主无参数时照常刷新。
+  const paths = (value as { paths?: unknown } | undefined)?.paths
+  if (configSnapshot && !filesChangeAffectsLibraries(configSnapshot.config.libraries, paths)) return
+  refreshLists()
+})
 drive.on('sync.hint', refreshLists)
 drive.on('scope.changed', refreshLists)
 window.addEventListener('pagehide', () => { pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })

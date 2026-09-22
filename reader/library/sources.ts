@@ -1,5 +1,5 @@
 /** 来源按节点绑定；所有路径只作缓存，异步操作前后均核对身份和代次。 */
-import type { Drive, FileEntry, Search } from '../../sdk/types'
+import type { BatchResult, Drive, FileEntry, Search } from '../../sdk/types'
 import { gate, isAbort } from '../io'
 import { LIBRARY_LIMITS, LibraryError, errorMessage, filePath, parentPath, validFile, validId, within } from './model'
 
@@ -10,6 +10,9 @@ export interface SourcesSnapshot { config: SourcesConfig; revision: string | nul
 export interface SourcesMigration { snapshot: SourcesSnapshot; migration: 'existing' | 'none' | 'migrated' | 'confirm-root' }
 export interface ResolvedSource { source: LibrarySource; file: FileEntry }
 export interface SourceRoots { roots: ResolvedSource[]; unavailable: { source: LibrarySource; message: string }[] }
+/** 宿主批量信封的单次上限；更多节点分批核对。 */
+const BATCH_LIMIT = 16
+type StatOutcome = { file: FileEntry; error?: undefined } | { error: unknown; file?: undefined }
 
 export function parseSources(raw: unknown): SourcesConfig {
   const value = raw as SourcesConfig | null
@@ -26,6 +29,16 @@ export function parseSources(raw: unknown): SourcesConfig {
     return { ...source, path }
   })
   return { schemaVersion: 1, sources }
+}
+/**
+ * 文件事件是否与阅读来源相关：宿主已按应用权限范围过滤，这里再按来源目录过滤。
+ * `paths` 是发生变化的目录；缺省表示范围未知，一律相关。变更目录落在某个来源之下，
+ * 或本身是来源目录的祖先（来源可能被改名、移动或删除）才需要重扫。
+ */
+export function filesChangeAffectsSources(sources: readonly LibrarySource[], paths: unknown): boolean {
+  if (!Array.isArray(paths) || !paths.every(path => typeof path === 'string')) return true
+  if (!sources.length) return false
+  return (paths as string[]).some(path => sources.some(source => within(path, source.path) || within(source.path, path)))
 }
 export function sourcesIdentity(snapshot: SourcesSnapshot): string {
   return JSON.stringify([snapshot.revision, snapshot.config.sources.map(source => [source.nodeId, source.rootConfirmed])])
@@ -99,27 +112,56 @@ export class LibraryAccess {
     const generation = this.generation, combined = AbortSignal.any([signal, this.controller.signal])
     return { signal: combined, check: () => { combined.throwIfAborted(); if (generation !== this.generation) throw new LibraryError('source_changed', '来源已变化，请重新加载') } }
   }
-  private async stat(id: number, signal: AbortSignal) {
-    const file = await gate.run(signal, () => this.drive.files.stat({ id }, { signal }))
-    signal.throwIfAborted()
+  private validated(id: number, file: unknown): FileEntry {
     if (!validFile(file) || file.id !== id) throw new LibraryError('invalid_file', '节点身份或文件信息无效')
     return file
   }
+  private async stat(id: number, signal: AbortSignal) {
+    const file = await gate.run(signal, () => this.drive.files.stat({ id }, { signal }))
+    signal.throwIfAborted()
+    return this.validated(id, file)
+  }
+  /**
+   * 一次核对多个节点：宿主声明 rpc.batch 时合并为一次往返（每 16 个一批），否则逐个 stat。
+   * 每个节点独立返回文件或错误，取消一律向上抛出。
+   */
+  private async statMany(ids: number[], signal: AbortSignal): Promise<StatOutcome[]> {
+    if (!ids.length) return []
+    const batch = typeof this.drive.can === 'function' && this.drive.can('rpc.batch') && typeof this.drive.batch === 'function'
+    if (!batch) {
+      return Promise.all(ids.map(async (id): Promise<StatOutcome> => {
+        try { return { file: await this.stat(id, signal) } } catch (error) { if (isAbort(error)) throw error; return { error } }
+      }))
+    }
+    const outcomes: StatOutcome[] = []
+    for (let start = 0; start < ids.length; start += BATCH_LIMIT) {
+      const slice = ids.slice(start, start + BATCH_LIMIT)
+      const results: BatchResult[] = await gate.run(signal, () => this.drive.batch(slice.map(id => ({ method: 'files.stat', params: { id } })), { signal }))
+      signal.throwIfAborted()
+      if (!Array.isArray(results) || results.length !== slice.length) throw new LibraryError('invalid_file', '批量核对返回的条目数与请求不一致')
+      slice.forEach((id, index) => {
+        const item = results[index]!
+        if (item.error) { outcomes.push({ error: item.error }); return }
+        try { outcomes.push({ file: this.validated(id, item.result) }) } catch (error) { outcomes.push({ error }) }
+      })
+    }
+    return outcomes
+  }
+  private collectRoots(sources: LibrarySource[], outcomes: StatOutcome[]): SourceRoots {
+    const roots: ResolvedSource[] = [], unavailable: SourceRoots['unavailable'] = []
+    sources.forEach((source, index) => {
+      const outcome = outcomes[index]!
+      if (outcome.error !== undefined || !outcome.file) { unavailable.push({ source, message: errorMessage(outcome.error) }); return }
+      if (!outcome.file.is_dir || outcome.file.path === '/' && !source.rootConfirmed) { unavailable.push({ source, message: '来源目录不可用或根目录尚未确认' }); return }
+      roots.push({ source, file: outcome.file })
+    })
+    return { roots, unavailable }
+  }
   async roots(signal: AbortSignal): Promise<SourceRoots> {
-    const ticket = this.ticket(signal)
-    const results = await Promise.all(this.snapshot.config.sources.map(async source => {
-      try {
-        const file = await this.stat(source.nodeId, ticket.signal); ticket.check()
-        if (!file.is_dir || file.path === '/' && !source.rootConfirmed) throw new LibraryError('source_unavailable', '来源目录不可用或根目录尚未确认')
-        return { source, file, message: '' }
-      } catch (error) {
-        ticket.check()
-        if (isAbort(error)) throw error
-        return { source, file: null, message: errorMessage(error) }
-      }
-    }))
+    const ticket = this.ticket(signal), sources = this.snapshot.config.sources
+    const outcomes = await this.statMany(sources.map(source => source.nodeId), ticket.signal)
     ticket.check()
-    return { roots: results.flatMap(item => item.file ? [{ source: item.source, file: item.file }] : []), unavailable: results.filter(item => !item.file).map(({ source, message }) => ({ source, message })) }
+    return this.collectRoots(sources, outcomes)
   }
   private requireRoots(roots: SourceRoots) {
     if (!this.snapshot.config.sources.length) throw new LibraryError('no_sources', '请先添加阅读来源')
@@ -133,13 +175,18 @@ export class LibraryAccess {
   }
   async file(nodeId: number, signal: AbortSignal, expectedVersion?: string): Promise<{ file: FileEntry; sourceIds: number[] }> {
     if (!validId(nodeId)) throw new LibraryError('invalid_file', '文件标识无效')
-    const ticket = this.ticket(signal), before = await this.roots(ticket.signal)
-    ticket.check(); this.requireRoots(before)
-    const file = await this.stat(nodeId, ticket.signal)
-    const after = await this.roots(ticket.signal)
-    ticket.check(); this.stableRoots(before, after)
-    const current = await this.stat(nodeId, ticket.signal)
+    const ticket = this.ticket(signal), sources = this.snapshot.config.sources
+    if (!sources.length) throw new LibraryError('no_sources', '请先添加阅读来源')
+    // 来源根与目标文件一次核对，再核对一次确认读取期间没有变化：支持批量时共两次往返。
+    const ids = [...sources.map(source => source.nodeId), nodeId]
+    const target = (outcomes: StatOutcome[]) => { const outcome = outcomes[sources.length]!; if (outcome.error !== undefined || !outcome.file) throw outcome.error; return outcome.file }
+    const first = await this.statMany(ids, ticket.signal)
     ticket.check()
+    const before = this.collectRoots(sources, first); this.requireRoots(before)
+    const file = target(first)
+    const second = await this.statMany(ids, ticket.signal)
+    ticket.check(); const after = this.collectRoots(sources, second); this.stableRoots(before, after)
+    const current = target(second)
     if (!sameNode(file, current)) throw new LibraryError('file_changed', '文件在读取期间发生变化，请刷新后重试')
     const sourceIds = after.roots.filter(root => within(current.path, root.file.path)).map(root => root.source.nodeId)
     if (!sourceIds.length) throw new LibraryError('outside_sources', '文件已不在当前来源范围内')

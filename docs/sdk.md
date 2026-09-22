@@ -75,6 +75,21 @@
   const blocks = await tgdrive.files.readRanges(file, [{ offset: 0, length: 4096 }, { offset: 9, length: 512 }], { signal });
   ```
 
+- **批量信封**（需宿主声明 `rpc.batch` 能力）：一次往返执行最多 16 项服务端能力，逐项返回 `{ result }` 或
+  `{ error }`（`error` 为 `Error`，带 `code` 与 HTTP `status`），一项失败不影响其余；权限与目录范围逐项检查，
+  批量算一次请求计入页面限流。可批量：`app.ping`、`settings.get/patch`、`files.search/list/stat/searchPage`、
+  `favorites.set`、`media.url`、`storage.get/set/list/delete`；`ui.*`、字节与资源读取、批量本身不可进入。
+  ```ts
+  if (tgdrive.can('rpc.batch')) {
+    const [root, file] = await tgdrive.batch([
+      { method: 'files.stat', params: { id: rootId } },
+      { method: 'files.stat', params: { id: fileId } },
+    ], { signal });
+    if (file.error) throw file.error;
+  }
+  ```
+  阅读馆的 `LibraryAccess` 在宿主支持时用它把"来源根 + 目标文件"的两轮核对合并为两次往返，旧宿主自动逐个 `stat`。
+
 ### 2. 媒体直链与缩略图 (`drive.media`)
 
 需在 `manifest.permissions` 中声明 `media.read`。
@@ -162,8 +177,15 @@ const unbindStorage = tgdrive.on('storage.changed', ({ key }) => {
   if (key.startsWith('progress:')) void reloadProgress(key);
 });
 
-// 文件树变更（需 storage.events 能力）：Bot 收件、上传、改名、清理等粗粒度通知
-const unbindFiles = tgdrive.on('files.changed', () => void refreshLists());
+// 文件树变更（需 storage.events 能力）：上传、改名、复制、删除、恢复、Bot 收件等通知。
+// 新宿主附带 { paths }（发生变化的目录列表，规范化绝对路径），并已按应用目录范围过滤且服务端合并去抖；
+// 旧宿主或范围未知时参数为 undefined，应整体重扫。图书/漫画（filesChangeAffectsSources）与影视
+// （filesChangeAffectsLibraries）再按自己的来源目录过滤，无关目录的变化不触发重扫。
+const unbindFiles = tgdrive.on('files.changed', (value) => {
+  const paths = value?.paths; // string[] | undefined
+  if (paths && !paths.some((path) => path === '/' || path.startsWith('/书'))) return;
+  void refreshLists();
+});
 
 // 用户在宿主端修改了目录范围：越界访问将从下一次请求起被拒绝
 tgdrive.on('scope.changed', () => void refreshLists());
@@ -184,6 +206,7 @@ tgdrive.on('sync.hint', () => void refreshLists());
 | `files.readRanges` | `files.readRanges` 批量段读可用 |
 | `storage.events` | `storage.changed` / `settings.changed` / `scope.changed` / `files.changed` / `sync.hint` 事件可用 |
 | `files.scope` | 宿主支持按应用配置目录范围 |
+| `rpc.batch` | `batch(calls)` 批量信封可用 |
 | `ui.setImmersive` / `ui.immersiveBackground` | 沉浸模式 |
 
 ```ts

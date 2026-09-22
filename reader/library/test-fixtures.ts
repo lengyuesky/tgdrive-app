@@ -17,7 +17,7 @@ export function deferred<T = void>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
-export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, string | boolean | number> = {}) {
+export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, string | boolean | number> = {}, options: { batch?: boolean } = {}) {
   const nodes = new Map(initial.map(entry => [entry.id, structuredClone(entry)])), records = new Map<string, RecordValue>(), data = new Map<number, Uint8Array>()
   let revision = 0, clock = 1
   const get = vi.fn(async (key: string, options?: CallOptions) => { options?.signal?.throwIfAborted(); return structuredClone(records.get(key) ?? null) })
@@ -64,11 +64,30 @@ export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, st
     if (!bytes || length > 1024 * 1024 || offset < 0 || offset + length > bytes.length) throw new Error('Range 越界')
     return new Uint8Array(bytes.subarray(offset, offset + length))
   })
+  /** 批量信封：逐项转发到对应的内存能力，逐项独立返回结果或错误（与宿主语义一致）。 */
+  const batch = vi.fn(async (calls: Array<{ method: string; params?: object }>, callOptions?: CallOptions) => {
+    callOptions?.signal?.throwIfAborted()
+    return Promise.all(calls.map(async (call) => {
+      const params = (call.params ?? {}) as Record<string, any>
+      try {
+        switch (call.method) {
+          case 'files.stat': return { result: await stat(params as { id: number }, callOptions) }
+          case 'files.list': return { result: await list(params as { path: string }, callOptions) }
+          case 'files.searchPage': return { result: await searchPage(params, callOptions) }
+          case 'storage.get': return { result: await get(params.key, callOptions) }
+          case 'app.ping': return { result: { ok: true } }
+          default: throw new Error(`夹具不支持批量能力 ${call.method}`)
+        }
+      } catch (error) { return { error } }
+    }))
+  })
+  const can = vi.fn((capability: string) => capability === 'rpc.batch' && options.batch === true)
   const drive = { files: { stat, list, searchPage, readRange }, storage: { get, set, delete: remove, list: storageList },
     settings: { get: vi.fn(async () => structuredClone(legacy)), patch: vi.fn(), open: vi.fn() },
     assets: { read: vi.fn(async () => { throw new Error('未提供合成 PDF 字体资源') }) }, media: { url: vi.fn() },
+    can, batch,
   } as unknown as Drive
   const seed = (key: string, value: unknown, updated_at = ++clock) => { const record = { key, value: structuredClone(value), revision: String(++revision), updated_at }; records.set(key, record); return structuredClone(record) }
   const binary = (entry: FileEntry, bytes: Uint8Array) => { nodes.set(entry.id, { ...entry, size: bytes.length }); data.set(entry.id, bytes); return nodes.get(entry.id)! }
-  return { drive, nodes, records, data, get, set, remove, storageList, stat, list, searchPage, readRange, seed, binary }
+  return { drive, nodes, records, data, get, set, remove, storageList, stat, list, searchPage, readRange, batch, can, seed, binary }
 }

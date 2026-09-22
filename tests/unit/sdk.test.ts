@@ -157,6 +157,23 @@ describe('SDK v2 新增能力', () => {
     expect(blocks.map((part) => [...part])).toEqual([[1, 2, 3, 4], [5, 6]])
     app.window.emit('pagehide')
   })
+  it('批量调用一次请求携带全部能力，逐项还原为结果或带码的错误', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const calls = [{ method: 'files.stat', params: { id: 1 } }, { method: 'app.ping' }, { method: 'files.stat', params: { id: 2 } }]
+    const request = app.drive.batch(calls)
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenCalledWith({ type: 'request', id: 1, method: 'rpc.batch', params: { calls } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: { results: [
+      { result: { id: 1, path: '/a' } }, { result: null }, { error: '路径不存在', code: null, status: 404 },
+    ] } } })
+    const results = await request
+    expect(results[0]).toEqual({ result: { id: 1, path: '/a' } })
+    expect(results[1]).toEqual({ result: null })
+    // SDK 在独立作用域运行，Error 构造器不同域，只核对形状。
+    expect(results[2]!.error).toMatchObject({ message: '路径不存在', status: 404 })
+    expect(results[2]!.result).toBeUndefined()
+    app.window.emit('pagehide')
+  })
   it('media.bytes 返回完整票据（含过期时间），media.url 保持只返回地址', async () => {
     const app = boot('hidden'); app.connect(); await app.drive.ready
     const ref = { id: 4, content_version: 'b'.repeat(64) }

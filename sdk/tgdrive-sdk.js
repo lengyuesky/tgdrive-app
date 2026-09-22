@@ -116,6 +116,12 @@
       /** 获取字节数据面票据；需要宿主声明 media.bytes 能力，凭票据直连 Range 读取。 */
       bytes: (ref, options) => request('media.url', { id: ref.id, content_version: ref.content_version, kind: 'bytes' }, options),
     }),
+    /** 批量调用：一次往返执行多项服务端能力，逐项返回 { result } 或 { error }（Error 带 code/status）；需宿主声明 rpc.batch 能力。 */
+    batch: (calls, options) => request('rpc.batch', { calls }, options).then((response) => (Array.isArray(response?.results) ? response.results : []).map((item) => (
+      item && typeof item === 'object' && typeof item.error === 'string'
+        ? { error: Object.assign(new Error(item.error), { code: item.code, status: item.status }) }
+        : { result: item && typeof item === 'object' ? item.result : undefined }
+    ))),
     favorites: Object.freeze({ set: (path, favorite) => request('favorites.set', { path, favorite }) }),
     settings: Object.freeze({ get: () => request('settings.get'), patch: (values) => request('settings.patch', values), open: () => request('ui.openSettings') }),
     ui: Object.freeze({ pickDirectory: (initial = '/') => request('ui.pickDirectory', { initial }), download: (path) => request('ui.download', { path }), close: () => request('ui.close'), setImmersive: (active, options) => request('ui.setImmersive', options === undefined ? { active } : { active, background: options.background }) }),

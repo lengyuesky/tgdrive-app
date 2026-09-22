@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Drive, FileEntry, RecordValue } from '../sdk/types'
-import { LIBRARIES_KEY, LibrariesStore, LibraryAccess, directoryPath, libraryForFile, parseLibraries, withinDirectory, type CinemaLibrary, type CinemaLibraries } from './libraries'
+import { LIBRARIES_KEY, LibrariesStore, LibraryAccess, directoryPath, filesChangeAffectsLibraries, libraryForFile, parseLibraries, withinDirectory, type CinemaLibrary, type CinemaLibraries } from './libraries'
 import { ReadScheduler } from './io'
 import type { CinemaFavorite, CinemaProgress } from './model'
 
@@ -181,5 +181,19 @@ describe('收藏和历史仅显示有效媒体库内的记录', () => {
     expect(s.stat).toHaveBeenCalledTimes(8)
     controller.abort(); await vi.runAllTimersAsync(); await cancelled
     expect(s.stat).toHaveBeenCalledTimes(8)
+  })
+})
+
+describe('文件事件与媒体库范围', () => {
+  it('范围未知一律相关；已知目录按库文件夹包含或祖先关系过滤；没有媒体库时无关', () => {
+    expect(filesChangeAffectsLibraries([movie, series], undefined)).toBe(true)
+    expect(filesChangeAffectsLibraries([movie, series], ['/电影', 1])).toBe(true)
+    expect(filesChangeAffectsLibraries([movie, series], ['/电影/2024'])).toBe(true)
+    expect(filesChangeAffectsLibraries([movie, series], ['/'])).toBe(true)
+    expect(filesChangeAffectsLibraries([movie, series], ['/电视剧'])).toBe(true)
+    expect(filesChangeAffectsLibraries([movie, series], ['/音乐', '/电影院'])).toBe(false)
+    expect(filesChangeAffectsLibraries([movie, series], [])).toBe(false)
+    expect(filesChangeAffectsLibraries([], ['/电影'])).toBe(false)
+    expect(filesChangeAffectsLibraries([], undefined)).toBe(true)
   })
 })
