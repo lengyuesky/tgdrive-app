@@ -1,6 +1,6 @@
 /** 仅用于 Vitest 的内存 SDK；键序分页故意不按更新时间排序。 */
 import { vi } from 'vitest'
-import type { CallOptions, Drive, FileEntry, RecordValue, Search } from '../../sdk/types'
+import type { CallOptions, CoverRecord, Drive, FileEntry, RecordValue, Search } from '../../sdk/types'
 import { parentPath, unitFormat, within, type ReadingUnit } from './model'
 import type { SourcesSnapshot } from './sources'
 
@@ -17,7 +17,7 @@ export function deferred<T = void>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
-export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, string | boolean | number> = {}, options: { batch?: boolean } = {}) {
+export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, string | boolean | number> = {}, options: { batch?: boolean; covers?: boolean } = {}) {
   const nodes = new Map(initial.map(entry => [entry.id, structuredClone(entry)])), records = new Map<string, RecordValue>(), data = new Map<number, Uint8Array>()
   let revision = 0, clock = 1
   const get = vi.fn(async (key: string, options?: CallOptions) => { options?.signal?.throwIfAborted(); return structuredClone(records.get(key) ?? null) })
@@ -64,6 +64,23 @@ export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, st
     if (!bytes || length > 1024 * 1024 || offset < 0 || offset + length > bytes.length) throw new Error('Range 越界')
     return new Uint8Array(bytes.subarray(offset, offset + length))
   })
+  /** 服务器封面库：只返回命中项，同键覆盖。 */
+  const coverRecords = new Map<string, CoverRecord>()
+  const coverGet = vi.fn(async (keys: string[], options?: CallOptions) => {
+    options?.signal?.throwIfAborted()
+    return keys.filter(key => coverRecords.has(key)).map(key => structuredClone(coverRecords.get(key)!))
+  })
+  const coverPut = vi.fn(async (key: string, data: string, meta: unknown = null, options?: CallOptions) => {
+    options?.signal?.throwIfAborted()
+    coverRecords.set(key, { key, data, meta: structuredClone(meta ?? null), updated_at: ++clock })
+    return { ok: true as const, bytes: data.length, evicted: 0 }
+  })
+  const coverDelete = vi.fn(async (keys: string[], options?: CallOptions) => {
+    options?.signal?.throwIfAborted()
+    const deleted = keys.filter(key => coverRecords.delete(key)).length
+    return { ok: true as const, deleted }
+  })
+  const coverStats = vi.fn(async () => ({ entries: coverRecords.size, bytes: [...coverRecords.values()].reduce((sum, item) => sum + item.data.length, 0), limit_bytes: 256 * 1024 * 1024, limit_entries: 50000 }))
   /** 批量信封：逐项转发到对应的内存能力，逐项独立返回结果或错误（与宿主语义一致）。 */
   const batch = vi.fn(async (calls: Array<{ method: string; params?: object }>, callOptions?: CallOptions) => {
     callOptions?.signal?.throwIfAborted()
@@ -75,19 +92,21 @@ export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, st
           case 'files.list': return { result: await list(params as { path: string }, callOptions) }
           case 'files.searchPage': return { result: await searchPage(params, callOptions) }
           case 'storage.get': return { result: await get(params.key, callOptions) }
+          case 'storage.delete': return { result: await remove(params.key, params.expected_revision, callOptions) }
           case 'app.ping': return { result: { ok: true } }
           default: throw new Error(`夹具不支持批量能力 ${call.method}`)
         }
       } catch (error) { return { error } }
     }))
   })
-  const can = vi.fn((capability: string) => capability === 'rpc.batch' && options.batch === true)
+  const can = vi.fn((capability: string) => capability === 'rpc.batch' && options.batch === true || capability === 'covers' && options.covers !== false)
   const drive = { files: { stat, list, searchPage, readRange }, storage: { get, set, delete: remove, list: storageList },
+    covers: { get: coverGet, put: coverPut, delete: coverDelete, stats: coverStats },
     settings: { get: vi.fn(async () => structuredClone(legacy)), patch: vi.fn(), open: vi.fn() },
     assets: { read: vi.fn(async () => { throw new Error('未提供合成 PDF 字体资源') }) }, media: { url: vi.fn() },
     can, batch,
   } as unknown as Drive
   const seed = (key: string, value: unknown, updated_at = ++clock) => { const record = { key, value: structuredClone(value), revision: String(++revision), updated_at }; records.set(key, record); return structuredClone(record) }
   const binary = (entry: FileEntry, bytes: Uint8Array) => { nodes.set(entry.id, { ...entry, size: bytes.length }); data.set(entry.id, bytes); return nodes.get(entry.id)! }
-  return { drive, nodes, records, data, get, set, remove, storageList, stat, list, searchPage, readRange, batch, can, seed, binary }
+  return { drive, nodes, records, data, get, set, remove, storageList, stat, list, searchPage, readRange, batch, can, seed, binary, coverRecords, coverGet, coverPut, coverDelete, coverStats }
 }

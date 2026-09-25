@@ -122,6 +122,13 @@
         ? { error: Object.assign(new Error(item.error), { code: item.code, status: item.status }) }
         : { result: item && typeof item === 'object' ? item.result : undefined }
     ))),
+    /** 封面缓存：生成好的封面小图存进服务器封面库，下次直接取用；需宿主声明 covers 能力。 */
+    covers: Object.freeze({
+      get: (keys, options) => request('covers.get', { keys }, options).then((response) => (Array.isArray(response?.covers) ? response.covers : [])),
+      put: (key, data, meta = null, options) => request('covers.put', meta == null ? { key, data } : { key, data, meta }, options),
+      delete: (keys, options) => request('covers.delete', { keys }, options),
+      stats: (options) => request('covers.stats', {}, options),
+    }),
     favorites: Object.freeze({ set: (path, favorite) => request('favorites.set', { path, favorite }) }),
     settings: Object.freeze({ get: () => request('settings.get'), patch: (values) => request('settings.patch', values), open: () => request('ui.openSettings') }),
     ui: Object.freeze({ pickDirectory: (initial = '/') => request('ui.pickDirectory', { initial }), download: (path) => request('ui.download', { path }), close: () => request('ui.close'), setImmersive: (active, options) => request('ui.setImmersive', options === undefined ? { active } : { active, background: options.background }) }),

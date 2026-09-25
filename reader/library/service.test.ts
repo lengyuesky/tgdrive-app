@@ -11,6 +11,23 @@ function configured() {
   return { ...mock, root, book }
 }
 describe('ReadingLibrary 集中服务的真实 SDK 行为', () => {
+  it('回收旧版私有存储里的封面缩略图，漫画另收旧 cover: 记录，不碰进度与其他缓存', async () => {
+    for (const batch of [false, true]) {
+      const mock = memoryDrive([], {}, { batch })
+      for (let index = 0; index < 70; index++) mock.seed(`library:cache:thumbnail:${index}`, { schemaVersion: 1 })
+      const progress = mock.seed('progress:2', { page: 1 }), meta = mock.seed('library:cache:metadata:a', { schemaVersion: 1 }), legacy = mock.seed('cover:7', { version: 'v1' })
+      const books = new ReadingLibrary(mock.drive, 'books')
+      expect(await books.purgeLegacyCovers()).toBe(70)
+      expect([...mock.records.keys()].some(key => key.startsWith('library:cache:thumbnail:'))).toBe(false)
+      expect(mock.records.get(progress.key)).toEqual(progress); expect(mock.records.get(meta.key)).toEqual(meta)
+      expect(mock.records.get(legacy.key)).toEqual(legacy)
+      const comics = new ReadingLibrary(mock.drive, 'comics')
+      expect(await comics.purgeLegacyCovers()).toBe(1)
+      expect(mock.records.has(legacy.key)).toBe(false)
+      if (batch) expect(mock.batch).toHaveBeenCalled(); else expect(mock.batch).not.toHaveBeenCalled()
+      books.destroy(); comics.destroy()
+    }
+  })
   it('无来源初始化零枚举，添加立即扫描；移除不删记录，再纳入恢复稳定作品 ID', async () => {
     const root = file(1, '/书', true), book = file(2, '/书/一本.txt'), mock = memoryDrive([root, book]), changed = vi.fn(), library = new ReadingLibrary(mock.drive, 'books', { changed })
     expect((await library.initialize()).units).toEqual([])

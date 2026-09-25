@@ -3,7 +3,8 @@ import type { Drive, Page, RecordValue } from '../../sdk/types'
 import { MiB, abortError, isAbort } from '../io'
 import { jsonBytes, timeSlice } from './model'
 
-export const CACHE_BUDGETS = { thumbnail: 8 * MiB, metadata: 4 * MiB } as const
+/** 封面缩略图已改存服务器封面库（见 ../cover-store），私有存储只保留元数据缓存。 */
+export const CACHE_BUDGETS = { metadata: 4 * MiB } as const
 export interface CacheStatus { mode: 'persistent' | 'session'; bytes: number; entries: number; message?: string }
 interface CacheValue<T> { schemaVersion: 1; key: string; value: T; touchedAt: number }
 interface CacheEntry<T> { value: T; bytes: number; touchedAt: number; record?: RecordValue<CacheValue<T>> }

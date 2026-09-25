@@ -96,8 +96,12 @@ test('收藏历史只显示当前范围，旧详情不能播放或下载移出�
   await frame.locator('.sidebar [data-nav="favorites"]').click()
   await expect(frame.locator('#items .poster-card')).toHaveCount(1)
   expect(audit.enumerations()).toEqual([])
+  const thumbnails = () => audit.calls.filter(call => call.method === 'media.url' && call.params.kind === 'thumbnail' && call.params.id === ids.inside).length
+  const before = thumbnails()
   await frame.getByRole('button', { name: '查看影视：流光.webm', exact: true }).click()
   await expect(frame.locator('#detail-favorite')).toBeEnabled()
+  // 详情海报先查封面库再申请缩略图票据；等它在移出范围前完成，避免迟到的请求落进下面的审计窗口。
+  await expect.poll(thumbnails).toBe(before + 1)
   await rename(page, original, moved)
   try {
     audit.calls.length = 0

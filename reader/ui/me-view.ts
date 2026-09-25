@@ -524,7 +524,7 @@ export class MeView {
     const subview = this.container.querySelector<HTMLElement>('#subview-settings')
     if (!subview) return
 
-    const thumbStatus = this.context.library.covers.cache.status
+    const coverStore = this.context.library.covers.cache.store
     const metaStatus = this.context.library.metadata.cache.status
 
     subview.innerHTML = `
@@ -532,9 +532,10 @@ export class MeView {
         <div class="card-box quota-card">
           <h3 class="card-title">缓存与存储配额</h3>
           <div class="quota-item">
-            <span class="quota-label">封面缩略图缓存（上限 8 MiB）:</span>
-            <span class="quota-value">${(thumbStatus.bytes / 1024).toFixed(1)} KB / 共 ${thumbStatus.entries} 项 (${thumbStatus.mode === 'persistent' ? '持久缓存' : '本次会话'})</span>
+            <span class="quota-label">封面缓存:</span>
+            <span class="quota-value" id="cover-quota">${coverStore.persistent ? '正在统计…' : `本次会话 ${coverStore.memoryStatus.entries} 张（宿主版本较旧，封面不跨会话保存）`}</span>
           </div>
+          <p class="quota-hint">${coverStore.persistent ? '封面保存在服务器封面库，再次打开直接显示；可在网盘「应用中心 → 设置」中查看并清理。' : ''}</p>
           <div class="quota-item">
             <span class="quota-label">元数据缓存（上限 4 MiB）:</span>
             <span class="quota-value">${(metaStatus.bytes / 1024).toFixed(1)} KB / 共 ${metaStatus.entries} 项 (${metaStatus.mode === 'persistent' ? '持久缓存' : '本次会话'})</span>
@@ -550,6 +551,19 @@ export class MeView {
         </div>
       </div>
     `
+
+    if (coverStore.persistent) {
+      const signal = this.lifecycle.signal
+      void coverStore.stats(signal).then(stats => {
+        const target = subview.querySelector<HTMLElement>('#cover-quota')
+        if (!stats || !target || signal.aborted) return
+        const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)
+        target.textContent = `${stats.entries} 张 · ${mib(stats.bytes)} MiB / ${mib(stats.limit_bytes)} MiB（服务器封面库）`
+      }).catch(() => {
+        const target = subview.querySelector<HTMLElement>('#cover-quota')
+        if (target && !signal.aborted) target.textContent = '暂时无法统计'
+      })
+    }
 
     const openSettingsBtn = subview.querySelector<HTMLButtonElement>(
       '#btn-open-settings'

@@ -333,6 +333,8 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .history-title-btn:hover, .simple-row-btn:hover { border-color: var(--accent); color: var(--accent); }
 .history-pagination { display: flex; gap: 12px; margin-top: 12px; }
 .quota-item { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.quota-hint { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.quota-hint:empty { display: none; }
 .settings-actions { display: flex; gap: 10px; }
 
 /* 弹窗通用样式 */

@@ -3,7 +3,8 @@ import type { Drive, FileEntry } from '../../sdk/types'
 import { Archive } from '../archive'
 import { imageBlob, imageInfo } from '../image'
 import { LIMITS, MiB, RangeFile, isAbort, isImage, natural } from '../io'
-import { BudgetCache, CACHE_BUDGETS, coverTasks, pdfPreviewTasks } from './cache'
+import { CoverStore, coverHash } from '../cover-store'
+import { coverTasks, pdfPreviewTasks } from './cache'
 import { downscaleCover, isThumbnailUrl, sortCoverCandidates } from './cover-image'
 import { epubArchiveMetadata, type PdfOpener } from './metadata'
 import { LibraryError, errorMessage, parentPath, unitFormat, type ReadingUnit } from './model'
@@ -21,6 +22,25 @@ export function validThumbnailRecord(raw: unknown): raw is ThumbnailRecord {
     return info.width <= 320 && info.height <= 320 && value.url.startsWith(`data:${info.mime};`)
   } catch { return false }
 }
+interface ThumbnailMeta { schemaVersion: 1; check: string; origin: ThumbnailRecord['origin']; target?: ThumbnailRecord['target'] }
+/**
+ * 封面缩略图按作品节点存进服务器封面库（每部作品一条，变化时原地覆盖）。
+ * 完整核验键（节点、内容版本、路径、父目录与来源身份）取摘要放进附加信息，不一致即视为未命中。
+ */
+export class ThumbnailCache {
+  constructor(readonly store: CoverStore<ThumbnailMeta>) {}
+  async get(slot: string, check: string, signal?: AbortSignal): Promise<ThumbnailRecord | undefined> {
+    const hit = await this.store.get(slot, signal), meta = hit?.meta
+    if (!hit || !meta || meta.schemaVersion !== 1 || meta.check !== coverHash(check)) return undefined
+    const record: ThumbnailRecord = { url: hit.data, origin: meta.origin, ...(meta.target ? { target: meta.target } : {}) }
+    return validThumbnailRecord(record) ? record : undefined
+  }
+  set(slot: string, check: string, record: ThumbnailRecord) {
+    if (!validThumbnailRecord(record)) return Promise.resolve(false)
+    return this.store.set(slot, record.url, { schemaVersion: 1, check: coverHash(check), origin: record.origin, ...(record.target ? { target: record.target } : {}) })
+  }
+  destroy() { this.store.destroy() }
+}
 const lease = (url: string | null, origin: CoverOrigin, warnings: string[] = []): CoverResource => {
   let released = false
   return { url, origin, warnings, release: () => { if (!released && url?.startsWith('blob:')) URL.revokeObjectURL(url); released = true } }
@@ -28,11 +48,11 @@ const lease = (url: string | null, origin: CoverOrigin, warnings: string[] = [])
 const hidden = (path: string) => path.split('/').some(part => part.startsWith('.') || part === '__MACOSX')
 
 export class CoverService {
-  readonly cache: BudgetCache<ThumbnailRecord>
+  readonly cache: ThumbnailCache
   private controller = new AbortController()
   private paused = false
-  constructor(private drive: Drive, private access: LibraryAccess, cache?: BudgetCache<ThumbnailRecord>, private openPdf?: PdfOpener) {
-    this.cache = cache ?? new BudgetCache(drive, 'thumbnail', CACHE_BUDGETS.thumbnail, validThumbnailRecord)
+  constructor(private drive: Drive, private access: LibraryAccess, cache?: ThumbnailCache, private openPdf?: PdfOpener) {
+    this.cache = cache ?? new ThumbnailCache(new CoverStore(drive))
   }
   private async image(file: FileEntry, signal: AbortSignal) {
     const checked = await this.access.file(file.id, signal, file.content_version)
@@ -117,13 +137,13 @@ export class CoverService {
       const directory = fresh.file.is_dir ? fresh.file : await this.drive.files.stat({ path: parentPath(fresh.file.path) }, { signal: current })
       const parent = await this.access.file(directory.id, current, directory.content_version)
       if (!parent.file.is_dir || parent.file.path !== (fresh.file.is_dir ? fresh.file.path : parentPath(fresh.file.path))) throw new LibraryError('directory_changed', '封面目录已变化')
-      const key = JSON.stringify(['cover', unit.nodeId, fresh.file.content_version, fresh.file.path, parent.file.id, parent.file.content_version, this.access.identity])
+      const key = JSON.stringify(['cover', unit.nodeId, fresh.file.content_version, fresh.file.path, parent.file.id, parent.file.content_version, this.access.identity]), slot = `unit:${unit.nodeId}`
       const verify = async () => {
         const directory = await this.access.file(parent.file.id, current, parent.file.content_version)
         const file = await this.access.file(unit.nodeId, current, fresh.file.content_version)
         if (directory.file.path !== parent.file.path || file.file.path !== fresh.file.path) throw new LibraryError('directory_changed', '封面归属在异步读取期间变化，请重试')
       }
-      const cached = await this.cache.get(key, current)
+      const cached = await this.cache.get(slot, key, current)
       if (cached) {
         try {
           if (cached.target) {
@@ -148,7 +168,8 @@ export class CoverService {
       }
       try {
         current.throwIfAborted(); await verify()
-        if (result) { await this.cache.set(key, result, current); await verify(); return lease(result.url, result.origin, warnings) }
+        // 先显示，封面库在后台写入；写入失败只是下次重新生成。
+        if (result) { void this.cache.set(slot, key, result); return lease(result.url, result.origin, warnings) }
         return lease(null, 'placeholder', warnings)
       } catch (error) { if (result?.url.startsWith('blob:')) URL.revokeObjectURL(result.url); throw error }
     })

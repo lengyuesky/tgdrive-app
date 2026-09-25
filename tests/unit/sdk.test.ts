@@ -189,6 +189,31 @@ describe('SDK v2 新增能力', () => {
     app.window.emit('pagehide')
   })
 
+  it('covers 能力按键批量读取、写入可选附加信息并返回命中列表', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const read = app.drive.covers.get(['unit:1', 'unit:2'])
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 1, method: 'covers.get', params: { keys: ['unit:1', 'unit:2'] } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: { covers: [{ key: 'unit:1', data: 'data:image/webp;base64,AA==', meta: { h: 'x' }, updated_at: 1 }] } } })
+    await expect(read).resolves.toEqual([{ key: 'unit:1', data: 'data:image/webp;base64,AA==', meta: { h: 'x' }, updated_at: 1 }])
+    const plain = app.drive.covers.put('unit:1', 'data:image/webp;base64,AA==')
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 2, method: 'covers.put', params: { key: 'unit:1', data: 'data:image/webp;base64,AA==' } })
+    app.port.onmessage!({ data: { type: 'response', id: 2, result: { ok: true, bytes: 1, evicted: 0 } } })
+    await plain
+    const withMeta = app.drive.covers.put('unit:2', 'data:image/jpeg;base64,AA==', { h: 'y' })
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 3, method: 'covers.put', params: { key: 'unit:2', data: 'data:image/jpeg;base64,AA==', meta: { h: 'y' } } })
+    app.port.onmessage!({ data: { type: 'response', id: 3, result: { ok: true, bytes: 1, evicted: 0 } } })
+    await withMeta
+    const stats = app.drive.covers.stats()
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 4, method: 'covers.stats', params: {} })
+    app.port.onmessage!({ data: { type: 'response', id: 4, result: { entries: 2, bytes: 2, limit_bytes: 9, limit_entries: 9 } } })
+    await expect(stats).resolves.toMatchObject({ entries: 2 })
+    app.window.emit('pagehide')
+  })
+
   it('storage.wroteRecently 标记本页写入，供事件回声抑制', async () => {
     const app = boot('hidden'); app.connect(); await app.drive.ready
     const write = app.drive.storage.set('progress:1', { page: 2 })

@@ -1,4 +1,5 @@
 import type { Drive, FileEntry } from '../sdk/types'
+import { CoverStore, coverHash } from '../reader/cover-store'
 import { imageInfo } from '../reader/image'
 import { coverCandidates, isVideo, parentPath } from './model'
 import { RangeFile, ReadScheduler, MiB, isAbort, delay } from './io'
@@ -47,18 +48,46 @@ export class Library {
     return task
   }
 }
+/** 封面库附加信息：视频内容版本与路径、生成时的本地海报候选摘要及来源；任一不符即重新生成。 */
+export interface CinemaArtMeta { v: string; p: string; c: string; s: 'local' | 'thumbnail' }
+const MAX_STORED_COVER = 256 * 1024
+const storedCover = (raw: unknown): raw is string => typeof raw === 'string' && /^data:image\/(?:webp|jpeg|png);base64,[A-Za-z0-9+/]+={0,2}$/.test(raw)
+/** 把已加载的海报按长边缩放后编码为 WebP（不支持时 JPEG）；超过封面库单张上限先降质量再放弃。 */
+export function encodePoster(image: HTMLImageElement, maxDim: number): string | undefined {
+  const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height
+  if (!width || !height) return undefined
+  const scale = Math.min(1, maxDim / Math.max(width, height)), canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale))
+  try {
+    const context = canvas.getContext('2d')
+    if (!context) return undefined
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    for (const quality of [0.8, 0.6]) {
+      const webp = canvas.toDataURL('image/webp', quality), data = webp.startsWith('data:image/webp;') ? webp : canvas.toDataURL('image/jpeg', quality)
+      if (!storedCover(data)) return undefined
+      if ((data.length - data.indexOf(',') - 1) * 3 / 4 <= MAX_STORED_COVER) return data
+    }
+    return undefined
+  } catch { return undefined /* 跨源污染或编码失败只是不写封面库。 */ }
+  finally { canvas.width = 0; canvas.height = 0 }
+}
 /** 按可见性加载封面；离开页面立即终止，离开视口保留已成功加载海报并复用缓存。 */
 export class ArtLoader {
   private static caches = new WeakMap<Drive, Map<string, string | Blob>>()
+  /** 服务器封面库：每个网盘会话一份，跨页面复用内存一级缓存与批量读取。 */
+  private static stores = new WeakMap<Drive, CoverStore<CinemaArtMeta>>()
   private static readonly MAX_CACHE = 150
   private static readonly MAX_CACHE_BYTES = 32 * MiB
   private cache: Map<string, string | Blob>
+  private store: CoverStore<CinemaArtMeta>
   private jobs = new Map<HTMLElement, { file: FileEntry; controller?: AbortController; url?: string; wide: boolean; running?: boolean; visible?: boolean }>()
   private observer: IntersectionObserver
   private active = 0
   constructor(private drive: Drive, private library: Library, private scheduler: ReadScheduler, private signal: AbortSignal, private thumbnailsOnly = false, private thumbnailRoots: readonly string[] = []) {
     this.cache = ArtLoader.caches.get(drive) ?? new Map()
     ArtLoader.caches.set(drive, this.cache)
+    this.store = ArtLoader.stores.get(drive) ?? new CoverStore(drive)
+    ArtLoader.stores.set(drive, this.store)
     this.observer = new IntersectionObserver(entries => {
       for (const entry of entries) {
         const target = entry.target as HTMLElement, job = this.jobs.get(target)
@@ -108,6 +137,23 @@ export class ArtLoader {
       return cached ?? this.drive.media.url(current, 'thumbnail')
     }, signal)
   }
+  private slot(file: FileEntry, kind: 'poster' | 'wide' | 'thumb') { return `video:${file.id}:${kind}` }
+  /** 封面库命中需视频内容版本与路径一致；海报墙另核对当前本地海报候选，收藏历史复用已有海报或缩略图。 */
+  private async stored(file: FileEntry, wide: boolean, candidates: string, signal: AbortSignal): Promise<string | undefined> {
+    const valid = (hit: { data: string; meta: CinemaArtMeta | null } | undefined, checkCandidates: boolean) =>
+      !!hit?.meta && storedCover(hit.data) && hit.meta.v === file.content_version && hit.meta.p === file.path && (!checkCandidates || hit.meta.c === candidates)
+    if (this.thumbnailsOnly) {
+      const [poster, thumb] = await Promise.all([this.store.get(this.slot(file, 'poster'), signal), this.store.get(this.slot(file, 'thumb'), signal)])
+      return valid(poster, false) ? poster!.data : valid(thumb, false) ? thumb!.data : undefined
+    }
+    const hit = await this.store.get(this.slot(file, wide ? 'wide' : 'poster'), signal)
+    return valid(hit, true) ? hit!.data : undefined
+  }
+  private persist(file: FileEntry, wide: boolean, image: HTMLImageElement, candidates: string, source: CinemaArtMeta['s']) {
+    if (!this.store.persistent) return
+    const data = encodePoster(image, wide ? 1280 : 480)
+    if (data) void this.store.set(this.slot(file, this.thumbnailsOnly ? 'thumb' : wide ? 'wide' : 'poster'), data, { v: file.content_version, p: file.path, c: candidates, s: source })
+  }
   observe(target: HTMLElement, file: FileEntry, wide = false) {
     if (this.jobs.has(target)) this.release(target)
     this.jobs.set(target, { file, wide }); this.observer.observe(target)
@@ -144,22 +190,35 @@ export class ArtLoader {
       }
       // 收藏和历史只取已有缩略图，不为每条记录枚举不同媒体库的目录。
       const files = this.thumbnailsOnly ? [] : (await this.library.directory(parentPath(job.file.path), signal)).files
-      for (const file of coverCandidates(job.file, files, job.wide)) {
-        if (file.size > 8 * MiB) continue
+      const candidates = coverCandidates(job.file, files, job.wide).filter(file => file.size <= 8 * MiB)
+      const signature = coverHash(JSON.stringify(candidates.map(file => [file.id, file.content_version])))
+      if (this.store.persistent) {
+        // 封面库命中：不再下载原图或申请缩略图票据，只核对视频仍在范围内。
+        const stored = await this.stored(job.file, job.wide, signature, signal)
+        if (stored) {
+          const checked = await this.thumbnail(job.file, signal, stored)
+          await this.image(target, checked, signal)
+          this.setCache(job.file, job.wide, checked)
+          return
+        }
+      }
+      for (const file of candidates) {
         try {
           const source = new RangeFile(this.drive, file, signal, this.scheduler)
           const bytes = await source.read(0, file.size); source.clear()
           const info = imageInfo(bytes)
           if (info.width * info.height > 16_000_000) continue
           const blob = new Blob([bytes], { type: info.mime })
-          await this.image(target, blob, signal)
+          const image = await this.image(target, blob, signal)
           this.setCache(job.file, job.wide, blob)
+          this.persist(job.file, job.wide, image, signature, 'local')
           return
         } catch (error) { if (isAbort(error)) throw error }
       }
       const url = await this.thumbnail(job.file, signal)
-      await this.image(target, url, signal)
+      const image = await this.image(target, url, signal)
       this.setCache(job.file, job.wide, url)
+      this.persist(job.file, job.wide, image, signature, 'thumbnail')
     } catch { /* 无封面、超限或取消均保留不读取原视频的占位。 */ }
     finally {
       if (entered) this.active--
@@ -168,7 +227,7 @@ export class ArtLoader {
       if (signal.aborted && !this.signal.aborted && job.visible && this.jobs.get(target) === job) void this.load(target)
     }
   }
-  private async image(target: HTMLElement, source: string | Blob, signal: AbortSignal) {
+  private async image(target: HTMLElement, source: string | Blob, signal: AbortSignal): Promise<HTMLImageElement> {
     signal.throwIfAborted()
     // 缓存保存字节，每个图片节点独立持有对象地址；淘汰缓存或关闭详情不影响列表封面。
     const isBlob = typeof source !== 'string', url = typeof source === 'string' ? source : URL.createObjectURL(source)
@@ -182,6 +241,7 @@ export class ArtLoader {
       })
       signal.throwIfAborted(); target.append(image)
       if (isBlob) this.jobs.get(target)!.url = url
+      return image
     } catch (error) {
       image.removeAttribute('src')
       if (isBlob) URL.revokeObjectURL(url)

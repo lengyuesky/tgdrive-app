@@ -141,6 +141,29 @@
   if (previous) await tgdrive.storage.delete('my-key', previous.revision);
   ```
 
+### 3.1 封面缓存 (`drive.covers`)
+
+需宿主声明 `covers` 能力，无需额外权限。插件把生成好的封面小图存进服务器封面库（独立于私有存储、不占 8 MiB 配额），
+下次打开直接取用，不必重新下载原图、解压归档或渲染 PDF。
+
+- **读取**：一次 1～16 个键，只返回命中项：
+  ```ts
+  if (tgdrive.can('covers')) {
+    const hits = await tgdrive.covers.get(['unit:12', 'unit:13']);
+    // [{ key, data: 'data:image/webp;base64,…', meta, updated_at }]
+  }
+  ```
+- **写入**：`data` 只接受 WebP/JPEG/PNG 的 base64 data URL，解码后最多 256 KiB；`meta` 为可选 JSON（最多 4 KiB），
+  用来记录内容版本等核验信息，宿主不解读：
+  ```ts
+  await tgdrive.covers.put('unit:12', dataUrl, { version: file.content_version });
+  ```
+- **删除与统计**：`covers.delete(keys)`、`covers.stats()` → `{ entries, bytes, limit_bytes, limit_entries }`。
+
+每应用最多 256 MiB、50000 张，超出时宿主自动淘汰最久未看的封面；用户可在网盘「应用中心 → 设置」清理，
+卸载应用时一并删除。封面是可再生缓存：读到的 `meta` 与当前文件不符时应重新生成并覆盖；写入失败只影响这一张，
+不要因此停用整个缓存。官方插件通过 `reader/cover-store.ts` 合并批量读取、内存一级缓存和后台写入。
+
 ### 4. 插件配置项 (`drive.settings`)
 
 读取用户在宿主应用管理中为该插件填写的设置（对应 `app.json` 中的 `settings` 定义）。
@@ -207,6 +230,7 @@ tgdrive.on('sync.hint', () => void refreshLists());
 | `storage.events` | `storage.changed` / `settings.changed` / `scope.changed` / `files.changed` / `sync.hint` 事件可用 |
 | `files.scope` | 宿主支持按应用配置目录范围 |
 | `rpc.batch` | `batch(calls)` 批量信封可用 |
+| `covers` | `covers.get/put/delete/stats` 服务器封面库可用 |
 | `ui.setImmersive` / `ui.immersiveBackground` | 沉浸模式 |
 
 ```ts

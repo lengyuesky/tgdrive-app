@@ -1372,6 +1372,8 @@ export async function startApp(options: AppOptions) {
 
     // 初始化统一阅读馆数据层
     const snapshot = await library.initialize(appLifecycle.signal)
+    // 旧版封面缩略图占用私有存储配额，后台回收；失败不影响阅读馆使用。
+    void library.purgeLegacyCovers(appLifecycle.signal).catch(() => {})
 
     // 如果未配置任何来源或根目录迁移待确认，优先切到“我的”进行来源引导
     if (snapshot.sources.config.sources.length === 0 || snapshot.migration === 'confirm-root') {

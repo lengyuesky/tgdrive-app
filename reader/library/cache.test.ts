@@ -5,8 +5,8 @@ import { deferred, memoryDrive, signal } from './test-fixtures'
 
 const text = (value: unknown): value is string => typeof value === 'string'
 describe('BudgetCache 字节预算及非破坏性降级', () => {
-  it('缩略图 8 MiB、元数据 4 MiB，按字节 LRU 回收，跨会话复用并只删缓存前缀', async () => {
-    expect(CACHE_BUDGETS).toEqual({ thumbnail: 8 * 1024 * 1024, metadata: 4 * 1024 * 1024 })
+  it('元数据 4 MiB，按字节 LRU 回收，跨会话复用并只删缓存前缀', async () => {
+    expect(CACHE_BUDGETS).toEqual({ metadata: 4 * 1024 * 1024 })
     const mock = memoryDrive(), cache = new BudgetCache(mock.drive, 'thumbnail', 700, text)
     mock.seed('progress:1', { old: true }); mock.seed('library:works:shard:user:0', { old: true })
     let now = 10; vi.spyOn(Date, 'now').mockImplementation(() => now++)
@@ -30,7 +30,7 @@ describe('BudgetCache 字节预算及非破坏性降级', () => {
     expect(cache.status.mode).toBe('session'); expect(await cache.get('session')).toBe('可用元数据')
     expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'session', message: expect.stringContaining('不受影响') }))
     expect(mock.records.get(user.key)).toEqual(user); expect(mock.remove).not.toHaveBeenCalled()
-    const next = new BudgetCache(mock.drive, 'thumbnail', CACHE_BUDGETS.thumbnail, text)
+    const next = new BudgetCache(mock.drive, 'thumbnail', 8 * 1024 * 1024, text)
     const calls = mock.set.mock.calls.length
     await next.set('large', 'x'.repeat(100 * 1024))
     expect(await next.get('large')).toHaveLength(100 * 1024)

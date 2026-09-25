@@ -66,3 +66,49 @@ test('影视封面在手机和桌面滚出视口再返回，不重建图片或�
     expect((await page.request.post('/api/fs/delete', { data: { paths: [root], permanent: true } })).ok()).toBe(true)
   }
 })
+
+test('影视海报写入服务器封面库，重新打开直接显示而不再读取原图', async ({ page }) => {
+  const errors: string[] = [], reads: number[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('request', request => {
+    const match = /\/api\/apps\/media\/([^/?]+)/.exec(request.url())
+    if (!match) return
+    const claim = JSON.parse(Buffer.from(match[1]!.split('.')[0]!, 'base64url').toString())
+    if (claim.purpose === 'preview' || claim.purpose === 'bytes' || claim.purpose === 'thumbnail') reads.push(claim.node_id)
+  })
+  await installCinema(page, null)
+  const root = '/封面库回归'
+  expect((await page.request.post('/api/fs/mkdir', { data: { path: root } })).ok()).toBe(true)
+  try {
+    for (let i = 1; i <= 3; i++) {
+      const name = `影片 ${i}`
+      for (const [from, suffix] of [['/测试影视/星际旅程 S01E01.mp4', 'mp4'], ['/测试影视/poster.png', 'png']]) {
+        expect((await page.request.post('/api/fs/copy', { data: { from, to: `${root}/${name}.${suffix}` } })).ok()).toBe(true)
+      }
+    }
+    await createCinemaLibrary(page, '封面库', root)
+    await enterCinemaLibrary(page, '封面库')
+    const frame = page.frameLocator('iframe')
+    const images = frame.locator('#items .poster-card .poster-art img')
+    await expect(images).toHaveCount(3)
+    const covers = await frame.locator('body').evaluate(async (_node, path) => {
+      const drive = (window as any).tgdrive
+      return Promise.all([1, 2, 3].map(async i => (await drive.files.stat({ path: `${path}/影片 ${i}.png` })).id as number))
+    }, root)
+    expect(reads.filter(id => covers.includes(id)).length).toBeGreaterThan(0)
+    // 海报与首页横幅在后台写入封面库。
+    await expect.poll(async () => (await (await page.request.get('/api/apps/cinema/covers')).json()).entries).toBeGreaterThanOrEqual(4)
+
+    reads.length = 0
+    await page.reload()
+    await enterCinemaLibrary(page, '封面库')
+    await expect(images).toHaveCount(3)
+    await expect.poll(() => images.evaluateAll(nodes => nodes.every(node => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0))).toBe(true)
+    expect(await images.evaluateAll(nodes => nodes.map(node => (node as HTMLImageElement).getAttribute('src')!.slice(0, 16)))).toEqual(Array(3).fill('data:image/webp;'))
+    await expect(frame.locator('#hero .hero-art img')).toHaveAttribute('src', /^data:image\/webp;/)
+    expect(reads).toEqual([])
+    expect(errors).toEqual([])
+  } finally {
+    expect((await page.request.post('/api/fs/delete', { data: { paths: [root], permanent: true } })).ok()).toBe(true)
+  }
+})

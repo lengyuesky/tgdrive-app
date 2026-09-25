@@ -17,7 +17,7 @@
 ### 生命周期与进度
 
 - `changed(snapshot)` 返回可独立持有的快照；`progress(progress)` 按扫描批次给出 `phase / nodes / directories / units / issues`，不是正文阅读进度。
-- `cacheStatus(kind, status)` 提供 `thumbnail | metadata` 的字节数、条目数及 `persistent | session` 状态。
+- `cacheStatus(kind, status)` 提供 `metadata` 的字节数、条目数及 `persistent | session` 状态；封面占用由 `covers.cache.store.stats()` 向宿主查询。
 - `bindLibraryLifecycle(library)` 在页面隐藏时暂停、`pagehide` 时销毁，返回解绑函数。它**不会自动在可见时恢复**，避免用户仍在阅读时重启库任务；界面需结合当前页面调用 `resume()`。
 - 为详情、封面和历史迁移另持有页面级 `AbortController`，离开该页面时中止。想暂停后继续的扫描应使用应用级信号；中止扫描信号意味着取消，而不是暂停。
 - `history.cancel()` 停止旧任务发布结果；需要立即中止 SDK 请求并保留已遍历的迁移断点时，中止传给 `migrate()` 的信号。
@@ -84,7 +84,9 @@
 - 优先级：同名图片、可确认独立作品的目录封面、内嵌封面、首图/PDF 首页、文字占位。混放目录的通用 cover 不套给所有文件；目录版本和命中缓存期间的归属变化也会重新核验。
 - `ViewportCoverLoader(service, signal)` 用于可见卡片，`observe(element, unit)` 后才监听；离开视口取消，列表换页/重绘用 `clear()`，退出用 `destroy()`。它不负责列表虚拟化；不要登记无限累积的 DOM 节点。
 - 元数据和封面各最多 2 个任务；PDF 预览在封面任务内再限 1 个。保留现有 Range 单次 1 MiB/全局 3 并发、归档与图片像素上限。提取结束释放 Archive、Range、PDF 文档、画布和临时 URL，不写阅读进度。
-- `BudgetCache` 只管自身缓存前缀，thumbnail 8 MiB、metadata 4 MiB，最多各 2000 项，单记录大于 48 KiB 时仅内存缓存。超配额/存储失败会话降级，不删用户状态。
+- 封面缩略图存进服务器封面库（`covers` 能力，见 `../cover-store.ts`）：键为 `unit:${nodeId}`，每部作品一条、变化时原地覆盖；完整核验键（节点、内容版本、路径、父目录、来源身份）取摘要放进附加信息，命中后仍按上面的归属规则核验。生成成功先显示，再后台写入；单张失败只影响这一张。旧宿主退回本次会话内存缓存。
+- `BudgetCache` 只管自身缓存前缀，现仅用于 metadata 4 MiB，最多 2000 项，单记录大于 48 KiB 时仅内存缓存。超配额/存储失败会话降级，不删用户状态。
+- 初始化后后台调用 `purgeLegacyCovers()` 回收旧版写在私有存储的 `library:cache:thumbnail:`（漫画另含旧 `cover:`）记录，把配额还给进度和书签。
 
 ### PDF 入口与下一阶段构建要求
 
@@ -104,7 +106,8 @@
 | `library:reading:${fileId}` | 显式阅读状态，绑定内容版本。 |
 | `library:flags:${workId}` | 独立想读/收藏，别名记录保留。 |
 | `library:cache:index`、`library:cache:history`、其 `:shard:` | 可重建有界快照；成功替换后只回收刚被替换的缓存分片，避免每次刷新/阅读进度都累积整份历史。 |
-| `library:cache:metadata:`、`library:cache:thumbnail:` | 按各自字节预算回收的提取缓存。 |
+| `library:cache:metadata:` | 按字节预算回收的元数据提取缓存。 |
+| `library:cache:thumbnail:`（漫画另含 `cover:`） | 旧版封面缓存，新版不再写入，初始化后后台回收；封面改存服务器封面库。 |
 
 分片按 UTF-8 字节计量，最多 48 KiB。缓存的明确未发布草稿可回收；提交结果不明时保留，避免删除可能仍活动的快照。人工旧分片及草稿不会自动清理。取消/通信失败若发生在提交确认附近，应重新读取指针确认状态，不能假定远端肯定没有保存。
 

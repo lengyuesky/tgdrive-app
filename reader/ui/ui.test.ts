@@ -389,7 +389,9 @@ describe('阅读馆 UI 模块', () => {
     container.querySelector<HTMLButtonElement>('#me-tab-settings')!.click()
     await vi.waitFor(() => expect(container.querySelector('.quota-card')).not.toBeNull())
 
-    expect(container.querySelector('.quota-card')?.textContent).toContain('封面缩略图缓存（上限 8 MiB）')
+    // 该替身宿主未声明 covers 能力：封面只在本次会话内存缓存，并如实提示。
+    expect(container.querySelector('#cover-quota')?.textContent).toBe('本次会话 0 张（宿主版本较旧，封面不跨会话保存）')
+    expect(container.querySelector('.quota-card')?.textContent).not.toContain('封面缩略图缓存（上限 8 MiB）')
     expect(container.querySelector('.quota-card')?.textContent).toContain('元数据缓存（上限 4 MiB）')
 
     meView.destroy()

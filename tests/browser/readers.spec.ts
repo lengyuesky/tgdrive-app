@@ -25,6 +25,30 @@ test.beforeEach(async ({ page }) => {
   for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
 })
 
+test('漫画封面写入服务器封面库，重新打开直接显示而不再读取归档', async ({ page }) => {
+  const reads: number[] = []
+  page.on('request', request => {
+    const match = /\/api\/apps\/media\/([^/?]+)/.exec(request.url())
+    if (!match) return
+    const claim = JSON.parse(Buffer.from(match[1]!.split('.')[0]!, 'base64url').toString())
+    if (claim.purpose === 'preview' || claim.purpose === 'bytes') reads.push(claim.node_id)
+  })
+  await install(page, 'comics', '/测试漫画')
+  const frame = page.frameLocator('iframe')
+  const cover = frame.locator('#items .library-card:has-text("自然页序.cbz") .cover-art')
+  const background = () => cover.evaluate(node => getComputedStyle(node).backgroundImage)
+  await expect.poll(background).toMatch(/^url\("data:image\//)
+  const id = await frame.locator('body').evaluate(async () => (await (window as any).tgdrive.files.stat({ path: '/测试漫画/自然页序.cbz' })).id as number)
+  expect(reads).toContain(id)
+  await expect.poll(async () => (await (await page.request.get('/api/apps/comics/covers')).json()).entries).toBeGreaterThan(0)
+  reads.length = 0
+  await page.reload()
+  await expect(page.locator('.host-status')).toHaveCount(0)
+  await frame.locator('#btn-home-view-all').click()
+  await expect.poll(background).toMatch(/^url\("data:image\//)
+  expect(reads).not.toContain(id)
+})
+
 test('反复冷启动后图书和漫画的首次点击均进入阅读器', async ({ page }) => {
   for (const [id, directory, file] of [['books', '/测试图书', 'GBK.txt'], ['comics', '/测试漫画', '自然页序.cbz']]) {
     await install(page, id!, directory!)

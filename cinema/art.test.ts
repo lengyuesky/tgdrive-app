@@ -10,7 +10,14 @@ const callbacks: IntersectionObserverCallback[] = []
 const flush = () => vi.advanceTimersByTimeAsync(0)
 async function loaded(index: number) { images[index]!.dispatchEvent(new Event('load')); await flush() }
 
-function driveWithArt(local = false) {
+/** 模拟宿主封面库：多个网盘会话共享同一份记录，用于验证跨会话复用。 */
+function coverHost() {
+  const records = new Map<string, { key: string; data: string; meta: unknown; updated_at: number }>()
+  const get = vi.fn(async (keys: string[]) => keys.filter(key => records.has(key)).map(key => structuredClone(records.get(key)!)))
+  const put = vi.fn(async (key: string, data: string, meta: unknown = null) => { records.set(key, { key, data, meta: structuredClone(meta), updated_at: 1 }); return { ok: true, bytes: data.length, evicted: 0 } })
+  return { records, get, put, api: { get, put, delete: vi.fn(), stats: vi.fn() } }
+}
+function driveWithArt(local = false, covers?: ReturnType<typeof coverHost>) {
   // 这里只验证尺寸头和加载生命周期，真实位图解码另由浏览器回归覆盖。
   const bytes = new Uint8Array(24)
   bytes.set([137, 80, 78, 71]); bytes.set([73, 72, 68, 82], 12)
@@ -20,7 +27,8 @@ function driveWithArt(local = false) {
   const stat = vi.fn(async ({ id }: { id: number }) => file(id))
   const url = vi.fn(async (video: FileEntry) => `https://example.com/thumbnail-${video.id}.jpg`)
   const readRange = vi.fn().mockResolvedValue(bytes)
-  return { drive: { files: { list, stat, readRange }, media: { url } } as unknown as Drive, list, stat, url, readRange }
+  const extra = covers ? { covers: covers.api, can: (capability: string) => capability === 'covers' } : {}
+  return { drive: { files: { list, stat, readRange }, media: { url }, ...extra } as unknown as Drive, list, stat, url, readRange, cover }
 }
 function observe(drive: Drive, thumbnailsOnly = true, video = file()) {
   const controller = new AbortController(); controllers.push(controller)
@@ -167,5 +175,60 @@ describe('影视封面滚动、缓存与取消', () => {
     const renamedItem = observe(firstDrive.drive, true, renamed)
     renamedItem.visible(true); await flush()
     expect(firstDrive.url).toHaveBeenCalledTimes(3); await loaded(3)
+  })
+})
+
+describe('影视封面写入服务器封面库并跨会话复用', () => {
+  const encoded = `data:image/webp;base64,${btoa('poster')}`
+  beforeEach(() => {
+    vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(1000)
+    vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(1500)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(encoded)
+  })
+
+  it('本地海报压缩后写入封面库，新会话直接显示，不再读取原图', async () => {
+    const host = coverHost(), first = driveWithArt(true, host), item = observe(first.drive, false)
+    item.visible(true); await flush(); await loaded(0)
+    await vi.waitFor(() => expect(host.put).toHaveBeenCalledOnce())
+    const [key, data, meta] = host.put.mock.calls[0]!
+    expect(key).toBe(`video:${fileId}:poster`); expect(data).toBe(encoded)
+    expect(meta).toMatchObject({ v: file().content_version, p: file().path, s: 'local' })
+    const next = driveWithArt(true, host), again = observe(next.drive, false)
+    again.visible(true); await flush(); await flush()
+    expect(host.get).toHaveBeenCalledWith([`video:${fileId}:poster`], expect.anything())
+    expect(images.at(-1)!.getAttribute('src')).toBe(encoded)
+    await loaded(images.length - 1)
+    expect(next.readRange).not.toHaveBeenCalled(); expect(next.url).not.toHaveBeenCalled()
+    expect(next.stat).toHaveBeenCalled()
+    expect(host.put).toHaveBeenCalledOnce()
+  })
+
+  it('本地海报被替换后候选摘要不符，重新读取并覆盖', async () => {
+    const host = coverHost(), first = driveWithArt(true, host), item = observe(first.drive, false)
+    item.visible(true); await flush(); await loaded(0)
+    await vi.waitFor(() => expect(host.put).toHaveBeenCalledOnce())
+    const next = driveWithArt(true, host)
+    next.list.mockResolvedValue({ entries: [{ ...next.cover, content_version: 'c'.repeat(64) }], has_more: false, next_cursor: null })
+    const again = observe(next.drive, false)
+    again.visible(true); await flush(); await flush(); await loaded(images.length - 1)
+    expect(next.readRange).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(host.put).toHaveBeenCalledTimes(2))
+  })
+
+  it('收藏历史复用已存的海报；没有时取缩略图并存为缩略图记录', async () => {
+    const host = coverHost(), grid = driveWithArt(true, host), item = observe(grid.drive, false)
+    item.visible(true); await flush(); await loaded(0)
+    await vi.waitFor(() => expect(host.put).toHaveBeenCalledOnce())
+    const saved = driveWithArt(false, host), history = observe(saved.drive)
+    history.visible(true); await flush(); await flush(); await loaded(images.length - 1)
+    expect(saved.url).not.toHaveBeenCalled(); expect(saved.list).not.toHaveBeenCalled()
+    fileId++
+    const fresh = driveWithArt(false, host), other = observe(fresh.drive)
+    other.visible(true); await flush(); await flush(); await loaded(images.length - 1)
+    expect(fresh.url).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(host.put).toHaveBeenCalledTimes(2))
+    expect(host.put.mock.calls[1]![0]).toBe(`video:${fileId}:thumb`)
+    expect(host.put.mock.calls[1]![2]).toMatchObject({ s: 'thumbnail' })
   })
 })

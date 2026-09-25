@@ -10,6 +10,9 @@ export interface ByteGrant { url: string; expires_at: number }
 /** 批量信封中的一项调用；可批量的能力见 docs/sdk.md，界面交互、字节读取与批量本身不可用。 */
 export interface BatchCall { method: string; params?: object }
 export type BatchResult<T = unknown> = { result: T; error?: undefined } | { error: Error & { code?: string; status?: number }; result?: undefined }
+/** 封面缓存记录：data 为 WebP/JPEG/PNG 的 base64 data URL，meta 由插件自定义用于核验是否过期。 */
+export interface CoverRecord<M = unknown> { key: string; data: string; meta: M | null; updated_at: number }
+export interface CoverStats { entries: number; bytes: number; limit_bytes: number; limit_entries: number }
 export interface Drive {
   ready: Promise<ReadyContext>
   /** 能力探测：宿主未声明的功能需降级到消息通道。 */
@@ -34,6 +37,13 @@ export interface Drive {
     list<T = unknown>(params?: { prefix?: string; cursor?: string | null; limit?: number }, options?: CallOptions): Promise<Page & { records: RecordValue<T>[] }>
     /** 近期内本页是否写入过该键；用于抑制自身写入经服务端事件回流。 */
     wroteRecently(key: string, windowMs?: number): boolean
+  }
+  /** 封面缓存：每次 1～16 个键，只返回命中项；单张解码后最多 256 KiB。需 covers 能力。 */
+  covers: {
+    get<M = unknown>(keys: string[], options?: CallOptions): Promise<CoverRecord<M>[]>
+    put(key: string, data: string, meta?: object | null, options?: CallOptions): Promise<{ ok: true; bytes: number; evicted: number }>
+    delete(keys: string[], options?: CallOptions): Promise<{ ok: true; deleted: number }>
+    stats(options?: CallOptions): Promise<CoverStats>
   }
   /** 批量调用：一次往返执行最多 16 项服务端能力，逐项独立返回；需 rpc.batch 能力。 */
   batch(calls: BatchCall[], options?: CallOptions): Promise<BatchResult[]>

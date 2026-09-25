@@ -2,7 +2,8 @@
 import type { Drive } from '../../sdk/types'
 import { isAbort } from '../io'
 import { BudgetCache, CACHE_BUDGETS, type CacheStatus } from './cache'
-import { CoverService, validThumbnailRecord } from './covers'
+import { CoverStore } from '../cover-store'
+import { CoverService, ThumbnailCache } from './covers'
 import { queryLibrary, type LibraryQuery } from './catalog'
 import { reconcileWorks } from './grouping'
 import { HistoryStore } from './history'
@@ -35,7 +36,7 @@ export interface LibrarySnapshot {
 export interface LibraryCallbacks {
   changed?: (snapshot: LibrarySnapshot) => void
   progress?: (progress: ScanProgress) => void
-  cacheStatus?: (kind: 'thumbnail' | 'metadata', status: CacheStatus) => void
+  cacheStatus?: (kind: 'metadata', status: CacheStatus) => void
 }
 export class ReadingLibrary {
   readonly sources: SourcesStore
@@ -60,7 +61,7 @@ export class ReadingLibrary {
   constructor(readonly drive: Drive, readonly kind: LibraryKind, private callbacks: LibraryCallbacks = {}, private openPdf?: PdfOpener) {
     this.sources = new SourcesStore(drive); this.access = new LibraryAccess(drive); this.works = new WorksStore(drive)
     this.metadata = new MetadataService(drive, this.access, new BudgetCache(drive, 'metadata', CACHE_BUDGETS.metadata, validMetadataResult, status => callbacks.cacheStatus?.('metadata', status)), this.openPdf)
-    this.covers = new CoverService(drive, this.access, new BudgetCache(drive, 'thumbnail', CACHE_BUDGETS.thumbnail, validThumbnailRecord, status => callbacks.cacheStatus?.('thumbnail', status)), this.openPdf)
+    this.covers = new CoverService(drive, this.access, new ThumbnailCache(new CoverStore(drive)), this.openPdf)
     this.history = new HistoryStore(drive, this.access); this.reading = new ReadingDataStore(drive, this.access, record => this.history.record(record, this.controller.signal))
     this.scanner = new LibraryScanner(this.access, kind)
     const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
@@ -214,6 +215,39 @@ export class ReadingLibrary {
     const checked = await this.access.file(nodeId, signal), format = unitFormat(checked.file, this.kind)
     if (!format) throw new LibraryError('unsupported_file', '文件不再是此应用支持的阅读格式')
     return { ...checked, format }
+  }
+  /**
+   * 旧版把封面缩略图存在应用私有存储（与进度、书签共用 8 MiB 配额），漫画更早的版本还写过 `cover:` 记录。
+   * 新版改存服务器封面库、不再写这些键：后台按修订号回收，每次会话最多一轮；失败或冲突只是留待下次。
+   */
+  async purgeLegacyCovers(signal = this.controller.signal) {
+    const prefixes = ['library:cache:thumbnail:', ...(this.kind === 'comics' ? ['cover:'] : [])]
+    const batch = typeof this.drive.can === 'function' && this.drive.can('rpc.batch') && typeof this.drive.batch === 'function'
+    let removed = 0
+    for (const prefix of prefixes) {
+      for (let round = 0; round < 50; round++) {
+        const page = await this.drive.storage.list({ prefix, limit: 64 }, { signal })
+        signal.throwIfAborted()
+        const records = page.records.filter(record => record.key.startsWith(prefix))
+        if (!records.length) break
+        let deleted = 0
+        for (let start = 0; start < records.length; start += 16) {
+          const slice = records.slice(start, start + 16)
+          if (batch) {
+            const results = await this.drive.batch(slice.map(record => ({ method: 'storage.delete', params: { key: record.key, expected_revision: record.revision } })), { signal })
+            deleted += results.filter(item => !item.error).length
+          } else {
+            for (const record of slice) {
+              try { await this.drive.storage.delete(record.key, record.revision, { signal }); deleted++ } catch (error) { if (isAbort(error)) throw error }
+            }
+          }
+          signal.throwIfAborted()
+        }
+        removed += deleted
+        if (!deleted || !page.has_more) break
+      }
+    }
+    return removed
   }
   pause() { this.paused = true; this.scanner.pause(); this.metadata.pause(); this.covers.pause() }
   resume() { this.requireReady(); this.paused = false; this.metadata.resume(); this.covers.resume(); this.scanner.resume() }
