@@ -35,7 +35,7 @@
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.2.7",
+        "version": "1.2.8",
         "api_version": 2,
         "min_host_version": "0.2.0",
         "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",
@@ -48,9 +48,9 @@
         ],
         "settings": []
       },
-      "sha256": "4b23e01e2a48aa4a072467b17e954b91886e5cb841856ca6f2f165f1dc1bb4ec",
-      "size": 119275,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.2.7.tgapp"
+      "sha256": "9fde54de7dc09e4d08ee3f19a58c16bf82aecde335da6ccb95cbf50162904860",
+      "size": 120250,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.2.8.tgapp"
     },
     {
       "manifest": {

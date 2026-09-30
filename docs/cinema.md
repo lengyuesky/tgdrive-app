@@ -118,6 +118,32 @@ iOS Safari／PWA、Android Chrome 的编解码、全屏、画中画、安全区�
 
 命名媒体库自动化另外覆盖真实建库／编辑／删除、根目录二次确认、无库零枚举、库间查询隔离、目录节点移动与同路径重建、库外记录隐藏恢复、旧详情不能播放或下载移出文件、CAS 草稿保留、慢查询取消、配置读取失败、旧版升级及管理表单的小屏布局。保存和搜索直接通过 SDK 执行，回车不会触发原生表单提交，不需要放宽沙箱的 `allow-forms` 或 CSP。
 
+### 滚动性能优化（1.2.8）
+
+- 海报解码完成后再挂载；保留滚出视口的已加载图片，回看不重复下载或重建节点。
+- 封面库写入改用异步 `toBlob` 编码并串行处理；持续滚动时推迟缩放、编码，停下至少 180 毫秒后处理，退出页面取消队列并释放画布。
+- 格式标签使用半透明底色，减少逐卡片背景模糊的绘制开销；悬停动效只在支持鼠标悬停的设备启用。
+- 主动进入或切换媒体库时取消旧页面排队的刷新，避免浏览中突然重建列表并回到顶部。
+
+发布保留其他三个应用的既有安装包，仅升级影视。当前工具链重建旧包时压缩字节不同，故在独立临时目录执行 `TGDRIVE_APP_BUILD_OUTPUT=<临时目录> npm run check`，逐文件核对未变更应用与已发布包完全一致，再以原目录为版本及摘要基线生成新目录；没有覆盖其他应用的同版本包或放宽目录校验。
+
+本机验证记录（2026-10-01，Node.js 22.22.0、Playwright Chromium）：
+
+| 命令 | 实际结果 |
+|---|---|
+| `npm ci --prefer-offline --no-audit` | 退出 0 |
+| `npm run check` | 退出 1，旧图书包压缩摘要不一致；全部插件编译完成，分发保护未放宽 |
+| `TGDRIVE_APP_BUILD_OUTPUT=<临时目录> npm run check` | 退出 0，类型检查及四插件独立构建通过 |
+| `npm test` | 退出 0，45 个文件、508 项通过 |
+| `npm run catalog verify ./catalog.json` | 退出 0，目录、完整清单及包摘要通过 |
+| `shasum -a 256 -c SHA256SUMS` | 退出 0，四个原包／新包及目录通过 |
+| `TGDRIVE_HOST_DIR=<宿主目录> npm run test:e2e` | 最终完整运行退出 1，40/43 通过，失败项见下文 |
+| `TGDRIVE_HOST_DIR=<宿主目录> npm run test:e2e -- tests/browser/cinema-art.spec.ts tests/browser/cinema-libraries.spec.ts tests/browser/cinema-lifecycle.spec.ts tests/browser/cinema.spec.ts` | 最终影视单独复核退出 0，20/20 通过 |
+
+实际测试宿主提交为 `de1cf4273966fda313a36d7f625602154d4dfd8d`。完整回归中，影视收藏范围用例的缩略图请求计数出现一次时序波动（期望 1，实际 2），单独整套影视复核通过；未变更的 EPUB 旧进度兼容用例因 CAS 冲突失败，漫画自然页序用例在 RTL 切换后页码断言失败。没有跳过用例或放宽断言，不将完整回归或既有全量兼容基线标记为通过；iOS／Android 真机未验收。
+
+宿主 `docker compose build tgdrive` 和 `docker compose up -d --no-deps --force-recreate tgdrive` 均退出 0，容器健康检查通过；`docker image prune -f --filter dangling=true` 退出 0，无旧镜像待回收。插件在应用中心更新到 1.2.8 后生效。
+
 ### 拆分前历史验收（1.0.0，2026-09-13）
 
 以下为拆分前 `1.0.0` 初版的历史记录，不作为当前独立仓库或 `1.1.2` 的验收证据；命名媒体库版本的历史验收单独记录在文末。

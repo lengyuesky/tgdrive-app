@@ -13,13 +13,13 @@
   - `apps/shorts-1.1.4.tgapp`
   - `apps/books-1.3.10.tgapp`
   - `apps/comics-1.2.13.tgapp`
-  - `apps/cinema-1.2.7.tgapp`
+  - `apps/cinema-1.2.8.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
 <sha256>  apps/books-1.3.10.tgapp
-<sha256>  apps/cinema-1.2.7.tgapp
+<sha256>  apps/cinema-1.2.8.tgapp
 <sha256>  apps/comics-1.2.13.tgapp
 <sha256>  apps/shorts-1.1.4.tgapp
 <sha256>  catalog.json

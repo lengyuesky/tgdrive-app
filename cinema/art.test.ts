@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Drive, FileEntry } from '../sdk/types'
-import { ArtLoader, Library } from './library'
+import { ArtLoader, Library, encodePoster } from './library'
 import { ReadScheduler } from './io'
 
 let fileId = 100
@@ -60,6 +60,26 @@ afterEach(async () => {
 })
 
 describe('影视封面滚动、缓存与取消', () => {
+  it('异步解码完成后才挂载图片，解码期间退出不回填旧页面', async () => {
+    const { drive } = driveWithArt(), item = observe(drive)
+    let decoded!: () => void
+    const decode = vi.fn(() => new Promise<void>(resolve => { decoded = resolve }))
+    item.visible(true); await flush()
+    images[0]!.decode = decode
+    await loaded(0)
+    expect(decode).toHaveBeenCalledOnce()
+    expect(item.target.querySelector('img')).toBeNull()
+    decoded(); await flush()
+    expect(item.target.querySelector('img')).toBe(images[0])
+    const next = observe(drive)
+    next.visible(true); await flush()
+    images[1]!.decode = decode
+    await loaded(1)
+    next.loader.clear(); decoded(); await flush()
+    expect(next.target.querySelector('img')).toBeNull()
+    expect(images[1]!.hasAttribute('src')).toBe(false)
+  })
+
   it('本地封面滚出再滚回保留同一图片，离开页面才回收对象地址', async () => {
     const { drive, readRange } = driveWithArt(true), item = observe(drive, false)
     item.visible(true); await flush(); await loaded(0)
@@ -184,7 +204,64 @@ describe('影视封面写入服务器封面库并跨会话复用', () => {
     vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(1000)
     vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(1500)
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D)
-    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(encoded)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(callback => callback(new Blob(['poster'], { type: 'image/webp' })))
+  })
+
+  it('持续滚动时先显示图片，停止滚动后才异步压缩并写入封面库', async () => {
+    const synchronous = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+    const host = coverHost(), { drive } = driveWithArt(true, host), item = observe(drive, false)
+    item.visible(true); await flush(); await loaded(0)
+    expect(item.target.querySelector('img')).not.toBeNull()
+    const scroller = document.createElement('main'); document.body.append(scroller)
+    try {
+      for (let i = 0; i < 10; i++) {
+        scroller.dispatchEvent(new Event('scroll'))
+        await vi.advanceTimersByTimeAsync(100)
+      }
+      expect(HTMLCanvasElement.prototype.toBlob).not.toHaveBeenCalled()
+      expect(host.put).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(host.put).toHaveBeenCalledOnce())
+      expect(synchronous).not.toHaveBeenCalled()
+      expect(item.target.querySelector('img')).toBe(images[0])
+    } finally { scroller.remove() }
+  })
+
+  it('清理页面会丢弃排队的编码，迟到的编码结果也不能写入', async () => {
+    const host = coverHost(), { drive } = driveWithArt(true, host), item = observe(drive, false)
+    item.visible(true); await flush(); await loaded(0)
+    item.loader.clear()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(HTMLCanvasElement.prototype.toBlob).not.toHaveBeenCalled()
+    const next = observe(driveWithArt(true, host).drive, false)
+    let finish!: BlobCallback
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementationOnce(callback => { finish = callback })
+    next.visible(true); await flush(); await loaded(1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(finish).toBeTypeOf('function')
+    next.controller.abort(); await flush()
+    finish(new Blob(['poster'], { type: 'image/webp' })); await flush()
+    expect(host.put).not.toHaveBeenCalled()
+  })
+
+  it('不支持 WebP 时回退 JPEG，超限时降低质量，取消时释放画布', async () => {
+    vi.mocked(HTMLCanvasElement.prototype.toBlob)
+      .mockImplementationOnce(callback => callback(new Blob(['png'], { type: 'image/png' })))
+      .mockImplementationOnce(callback => callback(new Blob([new Uint8Array(256 * 1024 + 1)], { type: 'image/jpeg' })))
+      .mockImplementationOnce(callback => callback(new Blob(['poster'], { type: 'image/webp' })))
+    const controller = new AbortController(), image = new Image()
+    let result: string | undefined
+    const task = encodePoster(image, 480, controller.signal).then(data => { result = data })
+    await vi.waitFor(() => expect(result).toBe(encoded))
+    await task
+    expect(HTMLCanvasElement.prototype.toBlob).toHaveBeenNthCalledWith(2, expect.any(Function), 'image/jpeg', 0.8)
+    expect(HTMLCanvasElement.prototype.toBlob).toHaveBeenNthCalledWith(3, expect.any(Function), 'image/webp', 0.6)
+    let canvas!: HTMLCanvasElement
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementationOnce(function (this: HTMLCanvasElement) { canvas = this })
+    const cancelled = encodePoster(image, 480, controller.signal)
+    expect([canvas.width, canvas.height]).toEqual([320, 480])
+    controller.abort()
+    expect(await cancelled).toBeUndefined()
+    expect([canvas.width, canvas.height]).toEqual([0, 0])
   })
 
   it('本地海报压缩后写入封面库，新会话直接显示，不再读取原图', async () => {

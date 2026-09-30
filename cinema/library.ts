@@ -52,10 +52,19 @@ export class Library {
 export interface CinemaArtMeta { v: string; p: string; c: string; s: 'local' | 'thumbnail' }
 const MAX_STORED_COVER = 256 * 1024
 const storedCover = (raw: unknown): raw is string => typeof raw === 'string' && /^data:image\/(?:webp|jpeg|png);base64,[A-Za-z0-9+/]+={0,2}$/.test(raw)
-/** 把已加载的海报按长边缩放后编码为 WebP（不支持时 JPEG）；超过封面库单张上限先降质量再放弃。 */
-export function encodePoster(image: HTMLImageElement, maxDim: number): string | undefined {
+function posterBlob(canvas: HTMLCanvasElement, type: string, quality: number, signal: AbortSignal): Promise<Blob | null> {
+  if (signal.aborted) return Promise.resolve(null)
+  return new Promise(resolve => {
+    const finish = (blob: Blob | null) => { signal.removeEventListener('abort', stop); resolve(blob) }
+    const stop = () => finish(null)
+    signal.addEventListener('abort', stop, { once: true })
+    try { canvas.toBlob(finish, type, quality) } catch { finish(null) }
+  })
+}
+/** 异步编码封面，避免同步 WebP 压缩阻塞滚动；取消后不再读取编码结果。 */
+export async function encodePoster(image: HTMLImageElement, maxDim: number, signal: AbortSignal): Promise<string | undefined> {
   const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height
-  if (!width || !height) return undefined
+  if (!width || !height || signal.aborted) return undefined
   const scale = Math.min(1, maxDim / Math.max(width, height)), canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale))
   try {
@@ -63,9 +72,20 @@ export function encodePoster(image: HTMLImageElement, maxDim: number): string | 
     if (!context) return undefined
     context.drawImage(image, 0, 0, canvas.width, canvas.height)
     for (const quality of [0.8, 0.6]) {
-      const webp = canvas.toDataURL('image/webp', quality), data = webp.startsWith('data:image/webp;') ? webp : canvas.toDataURL('image/jpeg', quality)
-      if (!storedCover(data)) return undefined
-      if ((data.length - data.indexOf(',') - 1) * 3 / 4 <= MAX_STORED_COVER) return data
+      let blob = await posterBlob(canvas, 'image/webp', quality, signal)
+      if (signal.aborted) return undefined
+      if (blob?.type !== 'image/webp') blob = await posterBlob(canvas, 'image/jpeg', quality, signal)
+      if (signal.aborted || !blob) return undefined
+      if (blob.size > MAX_STORED_COVER) continue
+      return await new Promise<string | undefined>(resolve => {
+        const reader = new FileReader()
+        const finish = (data?: string) => { signal.removeEventListener('abort', stop); resolve(data) }
+        const stop = () => { reader.abort(); finish() }
+        reader.onload = () => finish(!signal.aborted && storedCover(reader.result) ? reader.result : undefined)
+        reader.onerror = () => finish()
+        signal.addEventListener('abort', stop, { once: true })
+        reader.readAsDataURL(blob)
+      })
     }
     return undefined
   } catch { return undefined /* 跨源污染或编码失败只是不写封面库。 */ }
@@ -83,6 +103,11 @@ export class ArtLoader {
   private jobs = new Map<HTMLElement, { file: FileEntry; controller?: AbortController; url?: string; wide: boolean; running?: boolean; visible?: boolean }>()
   private observer: IntersectionObserver
   private active = 0
+  private lifetime = new AbortController()
+  private lastScroll = 0
+  private encoding = false
+  private pendingCovers: Array<() => Promise<void>> = []
+  private onScroll = () => { this.lastScroll = Date.now() }
   constructor(private drive: Drive, private library: Library, private scheduler: ReadScheduler, private signal: AbortSignal, private thumbnailsOnly = false, private thumbnailRoots: readonly string[] = []) {
     this.cache = ArtLoader.caches.get(drive) ?? new Map()
     ArtLoader.caches.set(drive, this.cache)
@@ -101,6 +126,7 @@ export class ArtLoader {
         }
       }
     }, { rootMargin: '150px' })
+    document.addEventListener('scroll', this.onScroll, { capture: true, passive: true })
     signal.addEventListener('abort', () => this.clear(), { once: true })
   }
   private cacheKey(file: FileEntry, wide: boolean): string {
@@ -150,9 +176,25 @@ export class ArtLoader {
     return valid(hit, true) ? hit!.data : undefined
   }
   private persist(file: FileEntry, wide: boolean, image: HTMLImageElement, candidates: string, source: CinemaArtMeta['s']) {
-    if (!this.store.persistent) return
-    const data = encodePoster(image, wide ? 1280 : 480)
-    if (data) void this.store.set(this.slot(file, this.thumbnailsOnly ? 'thumb' : wide ? 'wide' : 'poster'), data, { v: file.content_version, p: file.path, c: candidates, s: source })
+    if (!this.store.persistent || this.lifetime.signal.aborted) return
+    this.pendingCovers.push(async () => {
+      const data = await encodePoster(image, wide ? 1280 : 480, this.lifetime.signal)
+      if (data && !this.lifetime.signal.aborted) await this.store.set(this.slot(file, this.thumbnailsOnly ? 'thumb' : wide ? 'wide' : 'poster'), data, { v: file.content_version, p: file.path, c: candidates, s: source })
+    })
+    void this.drainCovers()
+  }
+  /** 缓存写入串行执行，滚动停止后再缩放、编码；退出页面立即丢弃待处理任务。 */
+  private async drainCovers() {
+    if (this.encoding) return
+    this.encoding = true
+    try {
+      while (this.pendingCovers.length) {
+        await delay(180, this.lifetime.signal)
+        while (Date.now() - this.lastScroll < 180) await delay(180, this.lifetime.signal)
+        await this.pendingCovers.shift()!()
+      }
+    } catch { /* 缓存失败或页面退出不影响已显示海报。 */ }
+    finally { this.encoding = false }
   }
   observe(target: HTMLElement, file: FileEntry, wide = false) {
     if (this.jobs.has(target)) this.release(target)
@@ -170,7 +212,7 @@ export class ArtLoader {
     if (!job || job.running || target.querySelector('img')) return
     // 缓存解码也必须进入同一套去重、取消和并发控制。
     job.running = true; job.controller = new AbortController()
-    const signal = AbortSignal.any([this.signal, job.controller.signal])
+    const signal = AbortSignal.any([this.signal, this.lifetime.signal, job.controller.signal])
     let entered = false
     try {
       while (this.active >= 4) await delay(50, signal)
@@ -239,6 +281,7 @@ export class ArtLoader {
         image.onload = () => { cleanup(); resolve() }; image.onerror = () => { cleanup(); reject(new Error('封面不可用')) }
         signal.addEventListener('abort', stop, { once: true }); image.src = url
       })
+      if (typeof image.decode === 'function') await image.decode()
       signal.throwIfAborted(); target.append(image)
       if (isBlob) this.jobs.get(target)!.url = url
       return image
@@ -248,5 +291,9 @@ export class ArtLoader {
       throw error
     }
   }
-  clear() { this.observer.disconnect(); for (const target of this.jobs.keys()) this.release(target); this.jobs.clear() }
+  clear() {
+    this.lifetime.abort(); this.pendingCovers.length = 0
+    document.removeEventListener('scroll', this.onScroll, true)
+    this.observer.disconnect(); for (const target of this.jobs.keys()) this.release(target); this.jobs.clear()
+  }
 }

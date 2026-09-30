@@ -130,6 +130,8 @@ function renderLibraries(snapshot: LibrariesSnapshot) {
   text('empty-title', '尚未创建媒体库'); text('empty-text', '创建一个媒体库，例如“电影”，选择对应文件夹。进入该库后才会加载视频，旧的影视文件夹设置不会自动启用。')
 }
 async function loadPage() {
+  // 主动导航已读取最新数据，取消旧页面排队的刷新，避免稍后打断滚动并重建海报。
+  clearTimeout(hostEventTimer); hostEventTimer = undefined
   pageController.abort(); pageController = new AbortController()
   const signal = pageController.signal, recordView = view === 'favorites' || view === 'history', activeId = activeLibraryId, previousRoot = currentRoot
   closeDetail(); art?.clear(); currentRoot = null; library.setScope(null)

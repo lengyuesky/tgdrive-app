@@ -625,7 +625,7 @@ describe('build.mjs 与独立分发输出行为', () => {
     expect(packages).toHaveLength(4)
     expect(packages.map(p => p.filename)).toEqual([
       'books-1.3.10.tgapp',
-      'cinema-1.2.7.tgapp',
+      'cinema-1.2.8.tgapp',
       'comics-1.2.13.tgapp',
       'shorts-1.1.4.tgapp',
     ])

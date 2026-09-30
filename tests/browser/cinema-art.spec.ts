@@ -2,6 +2,13 @@ import { expect, test } from '@playwright/test'
 import { createCinemaLibrary, enterCinemaLibrary, installCinema } from './cinema-helpers'
 
 test('影视封面在手机和桌面滚出视口再返回，不重建图片或重复读取', async ({ page }) => {
+  await page.addInitScript(() => {
+    const counts = { synchronous: 0, asynchronous: 0 }
+    ;(window as any).__cinemaEncodes = counts
+    const sync = HTMLCanvasElement.prototype.toDataURL, async = HTMLCanvasElement.prototype.toBlob
+    HTMLCanvasElement.prototype.toDataURL = function (...args) { counts.synchronous++; return sync.apply(this, args) }
+    HTMLCanvasElement.prototype.toBlob = function (...args) { counts.asynchronous++; return async.apply(this, args) }
+  })
   const errors: string[] = [], reads: number[] = []
   page.on('pageerror', error => errors.push(error.message))
   page.on('request', request => {
@@ -56,6 +63,8 @@ test('影视封面在手机和桌面滚出视口再返回，不重建图片或�
         expect(reads.filter(id => id === ids.cover)).toHaveLength(initialReads)
       }
     }
+    await expect.poll(() => frame.locator('body').evaluate(() => (window as any).__cinemaEncodes.asynchronous)).toBeGreaterThan(0)
+    expect(await frame.locator('body').evaluate(() => (window as any).__cinemaEncodes.synchronous)).toBe(0)
     expect(reads.filter(id => ids.videos.includes(id))).toEqual([])
     await frame.locator('#library-back').click()
     await expect(frame.locator('#items .poster-card')).toHaveCount(0)
