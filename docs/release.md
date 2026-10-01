@@ -10,7 +10,7 @@
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
-  - `apps/shorts-1.1.4.tgapp`
+  - `apps/shorts-1.2.0.tgapp`
   - `apps/books-1.3.10.tgapp`
   - `apps/comics-1.2.14.tgapp`
   - `apps/cinema-1.2.8.tgapp`
@@ -21,7 +21,7 @@
 <sha256>  apps/books-1.3.10.tgapp
 <sha256>  apps/cinema-1.2.8.tgapp
 <sha256>  apps/comics-1.2.14.tgapp
-<sha256>  apps/shorts-1.1.4.tgapp
+<sha256>  apps/shorts-1.2.0.tgapp
 <sha256>  catalog.json
 ```
 

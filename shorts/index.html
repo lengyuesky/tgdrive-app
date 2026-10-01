@@ -10,13 +10,13 @@
 </head>
 <body tabindex="-1">
   <main class="shorts">
-    <header class="shorts-top"><button id="exit" aria-label="退出短视频">返回</button><span class="mode-label">随机播放</span><span id="source-label" class="source-label">正在读取取材目录</span></header>
+    <header class="shorts-top"><button id="exit" aria-label="退出短视频">返回</button><span class="mode-label">随机播放</span><button id="source-label" class="source-label" aria-label="更换取材文件夹">正在读取取材目录</button></header>
     <div id="player" class="player" hidden>
-      <video id="video" autoplay playsinline loop muted crossorigin="anonymous" aria-label="当前视频"></video>
-      <div id="buffering" class="buffering" role="status"><span class="spinner"></span><span>正在缓冲</span></div>
-      <button id="play-prompt" class="play-prompt" hidden>轻触播放</button>
+      <video id="video" playsinline loop muted preload="auto" crossorigin="anonymous" aria-label="当前视频"></video>
+      <div id="buffering" class="buffering" role="status" hidden><span class="spinner"></span><span>正在加载视频</span></div>
+      <button id="play-prompt" class="play-prompt" hidden><span aria-hidden="true">▶</span><span>轻触播放</span></button>
       <div id="play-error" class="play-error" hidden>
-        <p>这个视频暂时无法播放，可以下载后查看。</p><button id="skip-error">看下一个</button>
+        <p id="play-error-message">这个视频暂时无法播放，可以重试或下载后查看。</p><div class="error-actions"><button id="retry-video">重新播放</button><button id="skip-error">看下一个</button></div>
       </div>
     </div>
     <div id="loading-list" class="empty-state" role="status"><span class="spinner"></span><p>正在读取视频列表…</p></div>
@@ -32,7 +32,14 @@
       <button id="shuffle" class="action" title="重新洗牌"><span class="symbol" aria-hidden="true">⟳</span><span class="label">洗牌</span></button>
       <div class="switchers"><button id="previous" aria-label="上一个视频">↑</button><button id="next" aria-label="下一个视频">↓</button></div>
     </aside>
-    <footer id="video-info" class="video-info" hidden><strong id="video-name"></strong><p id="video-meta"></p><span class="keyboard-hint">↑↓ 或滑动切换 · 空格暂停 · M 静音 · Esc 退出</span></footer>
+    <footer id="video-info" class="video-info" hidden>
+      <div class="video-caption"><strong id="video-name"></strong><p id="video-meta"></p><span class="keyboard-hint">↑↓ 切换 · 空格暂停 · ←→ 快进后退 · M 静音</span><span class="touch-hint">上下滑动切换 · 轻触画面暂停</span></div>
+      <div class="playback-controls">
+        <button id="play-toggle" aria-label="暂停视频" title="播放或暂停（空格）"><span aria-hidden="true">Ⅱ</span></button>
+        <div class="timeline"><div class="timeline-track" aria-hidden="true"><span id="buffered-progress"></span><span id="played-progress"></span></div><input id="seek" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="播放进度" /></div>
+        <output id="playback-time">0:00 / --:--</output>
+      </div>
+    </footer>
     <div id="message" class="message" role="status" hidden></div>
   </main>
 </body>

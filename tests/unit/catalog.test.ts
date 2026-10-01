@@ -627,7 +627,7 @@ describe('build.mjs 与独立分发输出行为', () => {
       'books-1.3.10.tgapp',
       'cinema-1.2.8.tgapp',
       'comics-1.2.14.tgapp',
-      'shorts-1.1.4.tgapp',
+      'shorts-1.2.0.tgapp',
     ])
   }, 20_000)
 })

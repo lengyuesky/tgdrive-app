@@ -2,35 +2,35 @@
 (() => {
   const drive = window.tgdrive
   const get = (id) => document.getElementById(id)
-  const video = get('video')
+  const video = get('video'), seek = get('seek')
   const extensions = 'mp4,mov,m4v,mkv,webm,avi,wmv,flv,ts,mts,m2ts,3gp,ogv'
-  let queue = []
-  let index = 0
-  let directory = '/'
-  let muted = true
-  let generation = 0
-  let listGeneration = 0
-  let wheelAt = 0
-  let touchStart = null
-  let touchMultiple = false
+  const lifetime = new AbortController()
+  const listen = (target, event, listener, options = {}) => target.addEventListener(event, listener, { ...options, signal: lifetime.signal })
   const mobileQuery = window.matchMedia('(max-width: 767px), (pointer: coarse)')
-  async function syncImmersive() {
-    await drive.ready
-    if (!disposed && typeof drive.ui.setImmersive === 'function') await drive.ui.setImmersive(mobileQuery.matches)
-  }
-  let messageTimer
-  let disposed = false
-
+  let queue = [], index = 0, directory = '/', muted = true
+  let generation = 0, listGeneration = 0, disposed = false, listController
+  let wantsPlay = true, scrubbing = false, resumeAfterSeek = false
+  let messageTimer, bufferingTimer, prepared, warmedGeneration = -1
+  let wheelAt = -Infinity, wheelTotal = 0, wheelConsumed = false
+  let touchStart = null, touchMultiple = false, suppressClickUntil = 0
   const current = () => queue[index]
   const hide = (id, value) => { get(id).hidden = value }
   const report = (error) => {
-    if (disposed) return
+    if (disposed || error?.name === 'AbortError') return
     get('message').textContent = error instanceof Error ? error.message : String(error)
     hide('message', false)
     clearTimeout(messageTimer)
     messageTimer = setTimeout(() => hide('message', true), 4500)
   }
   const handle = (promise) => Promise.resolve(promise).catch(report)
+  const mediaRef = (item) => item.content_version ? { id: item.id, content_version: item.content_version } : item.path
+  const itemKey = (item) => `${item.id}:${item.content_version || item.path}`
+  async function syncImmersive() {
+    const context = await drive.ready
+    if (!disposed && context.capabilities?.includes('ui.setImmersive') && typeof drive.ui.setImmersive === 'function') {
+      await drive.ui.setImmersive(mobileQuery.matches)
+    }
+  }
   function shuffled(items) {
     const result = items.slice()
     for (let i = result.length - 1; i > 0; i--) {
@@ -42,18 +42,52 @@
   function sizeText(bytes) {
     if (bytes < 1024) return `${bytes} B`
     const units = ['KiB', 'MiB', 'GiB', 'TiB']
-    let value = bytes / 1024
-    let unit = 0
+    let value = bytes / 1024, unit = 0
     while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ }
     return `${value.toFixed(1)} ${units[unit]}`
   }
+  function clock(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '--:--'
+    const value = Math.floor(seconds), hours = Math.floor(value / 3600)
+    return `${hours ? `${hours}:` : ''}${String(Math.floor(value / 60) % 60).padStart(hours ? 2 : 1, '0')}:${String(value % 60).padStart(2, '0')}`
+  }
+  function syncProgress() {
+    const duration = video.duration, time = video.currentTime || 0
+    const ready = video.hasAttribute('src') && Number.isFinite(duration) && duration > 0
+    seek.disabled = !ready
+    if (!scrubbing) seek.value = String(ready ? Math.min(1000, time / duration * 1000) : 0)
+    get('played-progress').style.width = `${Number(seek.value) / 10}%`
+    let buffered = 0
+    if (ready) for (let i = 0; i < video.buffered.length; i++) {
+      if (video.buffered.start(i) <= time && video.buffered.end(i) >= time) buffered = video.buffered.end(i) / duration * 100
+    }
+    get('buffered-progress').style.width = `${Math.min(100, buffered)}%`
+    get('playback-time').textContent = `${clock(ready ? time : 0)} / ${ready ? clock(duration) : '--:--'}`
+    seek.setAttribute('aria-valuetext', ready ? `${clock(time)}，共 ${clock(duration)}` : '正在读取时长')
+  }
+  function syncPlay() {
+    const paused = !wantsPlay || video.paused
+    get('play-toggle').setAttribute('aria-label', paused ? '播放视频' : '暂停视频')
+    get('play-toggle').firstElementChild.textContent = paused ? '▶' : 'Ⅱ'
+  }
+  function buffering(value) {
+    clearTimeout(bufferingTimer)
+    hide('buffering', true)
+    // 短暂切换不闪烁转圈提示，只有确实在等待时才显示。
+    if (value) bufferingTimer = setTimeout(() => {
+      if (!disposed && wantsPlay && !document.hidden && get('play-error').hidden) hide('buffering', false)
+    }, 220)
+  }
   function stopVideo() {
     generation++
+    scrubbing = false; resumeAfterSeek = false
+    buffering(false)
     video.pause()
-    video.removeAttribute('src')
-    video.removeAttribute('poster')
-    // 清空并重新加载，主动取消在途 Range 请求。
+    video.removeAttribute('src'); video.removeAttribute('poster')
+    // 立即取消旧视频的 Range 读取，迟到的票据与封面由 generation 拦截。
     video.load()
+    seek.value = '0'; seek.disabled = true
+    syncProgress()
   }
   function syncFavorite() {
     const favorite = Boolean(current()?.favorite)
@@ -68,166 +102,234 @@
     get('mute').querySelector('.label').textContent = muted ? '静音中' : '有声'
     get('mute').setAttribute('aria-pressed', String(!muted))
   }
-  async function play() {
+  function fail(error) {
+    wantsPlay = false
+    buffering(false)
+    hide('play-prompt', true); hide('play-error', false)
+    get('play-error-message').textContent = error?.name === 'NotSupportedError' || video.error?.code === 4
+      ? '浏览器暂不支持这个视频格式，可以下载后查看或切换下一个。'
+      : '视频加载失败，请重试或切换下一个。'
+    syncPlay()
+  }
+  async function attemptPlay(active = generation) {
+    if (disposed || active !== generation || !wantsPlay || document.hidden || scrubbing || !video.hasAttribute('src')) return
+    try {
+      await video.play()
+      if (disposed || active !== generation) return
+      if (!wantsPlay || document.hidden) video.pause()
+    } catch (error) {
+      if (disposed || active !== generation || error.name === 'AbortError') return
+      buffering(false)
+      if (error.name === 'NotAllowedError') hide('play-prompt', false)
+      else fail(error)
+    }
+    syncPlay()
+  }
+  function warmNext() {
+    if (disposed || document.hidden || queue.length < 2 || warmedGeneration === generation) return
+    warmedGeneration = generation
+    const item = queue[(index + 1) % queue.length]
+    // 只预取下一条的短期播放地址，不创建隐藏播放器、不下载下一段视频。
+    const next = { key: itemKey(item), at: Date.now(), promise: drive.media.url(mediaRef(item)) }
+    prepared = next
+    next.promise.catch(() => { if (prepared === next) prepared = undefined })
+  }
+  async function play(fresh = false) {
     stopVideo()
-    const active = generation
-    const item = current()
+    const active = generation, item = current()
     if (!item || disposed) return
-    hide('player', false)
-    hide('actions', false)
-    hide('video-info', false)
-    hide('buffering', false)
-    hide('play-error', true)
-    hide('play-prompt', true)
+    wantsPlay = true
+    hide('player', false); hide('actions', false); hide('video-info', false)
+    hide('play-error', true); hide('play-prompt', true)
+    buffering(true)
     get('video-name').textContent = item.name
     get('video-name').title = item.path
-    get('video-meta').textContent = `${sizeText(item.size)} · ${index + 1} / ${queue.length}${queue.length === 2000 ? '（本次最多载入 2000 条）' : ''}`
-    get('previous').disabled = queue.length < 2
-    get('next').disabled = queue.length < 2
-    syncFavorite()
-    syncMute()
+    get('video-meta').textContent = `${index + 1} / ${queue.length} · ${sizeText(item.size)}${queue.length === 2000 ? ' · 本次最多载入 2000 条' : ''}`
+    for (const id of ['previous', 'next', 'skip-error']) get(id).disabled = queue.length < 2
+    syncFavorite(); syncMute(); syncPlay()
+    const cached = !fresh && prepared?.key === itemKey(item) && Date.now() - prepared.at < 30_000 ? prepared.promise : undefined
+    prepared = undefined
+    // 封面完全独立于视频启动；失败或迟到不能拖住首帧，更不能覆盖已经切换的视频。
+    drive.media.url(mediaRef(item), 'thumbnail').then(poster => {
+      if (!disposed && active === generation && poster) video.poster = poster
+    }).catch(() => {})
     try {
-      const [url, poster] = await Promise.all([
-        drive.media.url(item.path), drive.media.url(item.path, 'thumbnail').catch(() => ''),
-      ])
+      const url = await (cached || drive.media.url(mediaRef(item)))
       if (disposed || active !== generation) return
-      if (poster) video.poster = poster
       video.src = url
-      try { await video.play() }
-      catch (error) {
-        if (active !== generation || disposed) return
-        if (error.name === 'NotAllowedError') { hide('buffering', true); hide('play-prompt', false) }
-      }
+      await attemptPlay(active)
     } catch (error) {
       if (active !== generation || disposed) return
-      hide('buffering', true)
-      hide('play-error', false)
-      report(error)
+      fail(error)
     }
   }
   async function load() {
     const active = ++listGeneration
-    stopVideo()
-    queue = []
+    listController?.abort(); listController = new AbortController()
+    const signal = AbortSignal.any([lifetime.signal, listController.signal])
+    stopVideo(); queue = []; prepared = undefined
     for (const id of ['player', 'actions', 'video-info', 'empty', 'list-error']) hide(id, true)
     hide('loading-list', false)
     try {
       await drive.ready
+      if (disposed || active !== listGeneration) return
       const settings = await drive.settings.get()
       if (disposed || active !== listGeneration) return
-      directory = settings.source_dir || '/'
-      muted = settings.muted !== false
-      get('source-label').textContent = directory === '/' ? '整库' : directory
-      get('source-label').title = directory
-      const result = await drive.files.search({ under: directory, kind: 'file', extensions, limit: 2000 })
+      directory = settings.source_dir || '/'; muted = settings.muted !== false
+      get('source-label').textContent = directory === '/' ? '整库 · 更换' : directory
+      get('source-label').title = `取材文件夹：${directory}，点击更换`
+      const result = await drive.files.search({ under: directory, kind: 'file', extensions, limit: 2000 }, { signal })
       if (disposed || active !== listGeneration) return
-      queue = shuffled(result.results)
-      index = 0
+      queue = shuffled(result.results); index = 0
       hide('loading-list', true)
       if (queue.length) await play()
       else {
         get('empty-description').textContent = directory === '/' ? '向网盘添加视频，或选择其他取材文件夹。' : `${directory} 及子目录中没有视频。`
         hide('empty', false)
       }
-      document.body.focus()
     } catch (error) {
-      if (disposed || active !== listGeneration) return
+      if (disposed || active !== listGeneration || error.name === 'AbortError') return
       hide('loading-list', true)
       get('list-error-message').textContent = error.message
       hide('list-error', false)
     }
   }
   function go(delta) {
-    if (queue.length < 2) return
+    if (disposed || queue.length < 2) return
     index = (index + delta + queue.length) % queue.length
     handle(play())
   }
   async function togglePlay() {
-    if (!video.src) return
-    if (video.paused) {
-      try { await video.play(); hide('play-prompt', true) } catch (error) { report(error) }
-    } else { video.pause(); hide('play-prompt', false) }
+    if (disposed || !video.hasAttribute('src')) return
+    if (!get('play-error').hidden) { await play(true); return }
+    wantsPlay = video.paused
+    if (wantsPlay) { hide('play-prompt', true); await attemptPlay() }
+    else { video.pause(); buffering(false); hide('play-prompt', false) }
+    syncPlay()
   }
   async function toggleMute() {
-    if (get('mute').disabled) return
+    if (disposed || get('mute').disabled) return
     get('mute').disabled = true
     const old = muted
-    muted = !muted
-    syncMute()
-    try { await drive.settings.patch({ muted }); if (!muted && video.src) await video.play() }
-    catch (error) { muted = old; syncMute(); report(error) }
-    finally { get('mute').disabled = false }
+    muted = !muted; syncMute()
+    try { await drive.settings.patch({ muted }) }
+    catch (error) { if (!disposed) { muted = old; syncMute(); report(error) } }
+    finally { if (!disposed) get('mute').disabled = false }
   }
   async function favorite() {
     const item = current()
-    if (!item || get('favorite').disabled) return
+    if (disposed || !item || get('favorite').disabled) return
     get('favorite').disabled = true
     try {
       item.favorite = (await drive.favorites.set(item.path, !item.favorite)).favorite
-      syncFavorite()
+      if (!disposed) syncFavorite()
     } catch (error) { report(error) }
-    finally { get('favorite').disabled = false }
+    finally { if (!disposed) get('favorite').disabled = false }
   }
-  get('exit').addEventListener('click', () => { stopVideo(); handle(drive.ui.close()) })
-  get('favorite').addEventListener('click', () => handle(favorite()))
-  get('mute').addEventListener('click', () => handle(toggleMute()))
-  get('download').addEventListener('click', () => { if (current()) handle(drive.ui.download(current().path)) })
-  get('shuffle').addEventListener('click', () => { if (queue.length) { queue = shuffled(queue); index = 0; handle(play()) } })
-  get('previous').addEventListener('click', () => go(-1))
-  get('next').addEventListener('click', () => go(1))
-  get('skip-error').addEventListener('click', () => go(1))
-  get('open-settings').addEventListener('click', () => handle(drive.settings.open()))
-  get('retry-list').addEventListener('click', () => handle(load()))
-  get('play-prompt').addEventListener('click', () => handle(togglePlay()))
-  video.addEventListener('click', () => handle(togglePlay()))
-  video.addEventListener('playing', () => { hide('buffering', true); hide('play-prompt', true) })
-  video.addEventListener('waiting', () => { if (video.hasAttribute('src')) hide('buffering', false) })
-  video.addEventListener('error', () => { if (video.hasAttribute('src')) { hide('buffering', true); hide('play-error', false) } })
-  get('player').addEventListener('wheel', (event) => {
+  function beginSeek() {
+    if (seek.disabled || scrubbing) return
+    resumeAfterSeek = wantsPlay && !video.paused; scrubbing = true
+    video.pause(); buffering(false)
+  }
+  function finishSeek() {
+    if (!scrubbing) return
+    scrubbing = false
+    if (resumeAfterSeek) handle(attemptPlay())
+    resumeAfterSeek = false; syncProgress(); syncPlay()
+  }
+  function dispose() {
+    if (disposed) return
+    disposed = true; listGeneration++; prepared = undefined
+    listController?.abort(); lifetime.abort(); unsubscribe()
+    clearTimeout(messageTimer); stopVideo()
+  }
+  async function close() { dispose(); await drive.ui.close() }
+  listen(get('exit'), 'click', () => handle(close()))
+  listen(get('favorite'), 'click', () => handle(favorite()))
+  listen(get('mute'), 'click', () => handle(toggleMute()))
+  listen(get('download'), 'click', () => { if (current()) handle(drive.ui.download(current().path)) })
+  listen(get('shuffle'), 'click', () => {
+    if (queue.length < 2) return
+    const previous = current()
+    queue = shuffled(queue)
+    if (queue[0] === previous) [queue[0], queue[1]] = [queue[1], queue[0]]
+    index = 0; handle(play())
+  })
+  listen(get('previous'), 'click', () => go(-1))
+  listen(get('next'), 'click', () => go(1))
+  listen(get('skip-error'), 'click', () => go(1))
+  listen(get('retry-video'), 'click', () => handle(play(true)))
+  for (const id of ['open-settings', 'source-label']) listen(get(id), 'click', () => handle(drive.settings.open()))
+  listen(get('retry-list'), 'click', () => handle(load()))
+  for (const id of ['play-prompt', 'play-toggle']) listen(get(id), 'click', () => handle(togglePlay()))
+  listen(video, 'click', () => { if (performance.now() >= suppressClickUntil) handle(togglePlay()) })
+  listen(video, 'playing', () => {
+    if (!wantsPlay || document.hidden || scrubbing) { video.pause(); return }
+    buffering(false); hide('play-prompt', true); hide('play-error', true)
+    syncPlay(); syncProgress(); warmNext()
+  })
+  listen(video, 'pause', syncPlay)
+  listen(video, 'waiting', () => { if (video.hasAttribute('src') && wantsPlay && !scrubbing) buffering(true) })
+  listen(video, 'error', () => { if (video.hasAttribute('src') && video.error) fail(video.error) })
+  for (const event of ['loadedmetadata', 'durationchange', 'timeupdate', 'progress']) listen(video, event, syncProgress)
+  listen(seek, 'pointerdown', beginSeek)
+  listen(seek, 'input', () => {
+    if (seek.disabled || !Number.isFinite(video.duration)) return
+    video.currentTime = Number(seek.value) / 1000 * video.duration
+    syncProgress()
+  })
+  listen(seek, 'change', finishSeek)
+  listen(window, 'pointerup', finishSeek)
+  listen(window, 'pointercancel', finishSeek)
+  listen(get('player'), 'wheel', event => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || event.ctrlKey) return
     event.preventDefault()
-    if (performance.now() - wheelAt < 400 || Math.abs(event.deltaY) < 8) return
-    wheelAt = performance.now()
-    go(event.deltaY > 0 ? 1 : -1)
+    const now = performance.now()
+    if (now - wheelAt > 180) { wheelTotal = 0; wheelConsumed = false }
+    wheelAt = now
+    if (wheelConsumed) return
+    wheelTotal += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? innerHeight : 1)
+    if (Math.abs(wheelTotal) < 48) return
+    wheelConsumed = true; go(wheelTotal > 0 ? 1 : -1)
   }, { passive: false })
-  get('player').addEventListener('touchstart', (event) => {
+  listen(get('player'), 'touchstart', event => {
     if (event.target.closest('button, input, select')) { touchStart = null; return }
     if (event.touches.length !== 1) { touchMultiple = true; return }
     touchMultiple = false
     touchStart = { x: event.touches[0].clientX, y: event.touches[0].clientY }
   }, { passive: true })
-  get('player').addEventListener('touchmove', (event) => { if (event.touches.length > 1) touchMultiple = true }, { passive: true })
-  get('player').addEventListener('touchcancel', () => { touchStart = null; touchMultiple = false }, { passive: true })
-  get('player').addEventListener('touchend', (event) => {
+  listen(get('player'), 'touchmove', event => { if (event.touches.length > 1) touchMultiple = true }, { passive: true })
+  listen(get('player'), 'touchcancel', () => { touchStart = null; touchMultiple = false }, { passive: true })
+  listen(get('player'), 'touchend', event => {
     if (event.touches.length) return
     const end = event.changedTouches[0]
     if (touchStart && end && !touchMultiple) {
       const dy = end.clientY - touchStart.y, dx = end.clientX - touchStart.x
-      if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.4) go(dy < 0 ? 1 : -1)
+      if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.4) { suppressClickUntil = performance.now() + 400; go(dy < 0 ? 1 : -1) }
     }
     touchStart = null
   }, { passive: true })
-  document.addEventListener('keydown', (event) => {
-    if (['INPUT', 'TEXTAREA'].includes(event.target.tagName)) return
-    if (['ArrowDown', 'PageDown'].includes(event.key)) { event.preventDefault(); go(1) }
-    else if (['ArrowUp', 'PageUp'].includes(event.key)) { event.preventDefault(); go(-1) }
-    else if (event.key === ' ') { event.preventDefault(); handle(togglePlay()) }
-    else if (event.key.toLowerCase() === 'm') handle(toggleMute())
-    else if (event.key === 'Escape') handle(drive.ui.close())
+  listen(document, 'keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); handle(close()); return }
+    if (event.target.closest('button,input,textarea,select,a,[contenteditable="true"]') || event.altKey || event.ctrlKey || event.metaKey) return
+    if (['ArrowDown', 'PageDown', 'ArrowUp', 'PageUp'].includes(event.key)) {
+      event.preventDefault(); if (!event.repeat) go(['ArrowDown', 'PageDown'].includes(event.key) ? 1 : -1)
+    } else if (event.key === ' ') { event.preventDefault(); if (!event.repeat) handle(togglePlay()) }
+    else if (event.key.toLowerCase() === 'm' && !event.repeat) handle(toggleMute())
+    else if (['ArrowLeft', 'ArrowRight'].includes(event.key) && !seek.disabled) {
+      event.preventDefault(); video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + (event.key === 'ArrowRight' ? 5 : -5))); syncProgress()
+    }
   })
-  drive.on('settings.changed', (settings) => {
+  const unsubscribe = drive.on('settings.changed', settings => {
     if ((settings.source_dir || '/') !== directory) handle(load())
     else { muted = settings.muted !== false; syncMute() }
   })
-  window.addEventListener('pagehide', () => {
-    disposed = true
-    listGeneration++
-    clearTimeout(messageTimer)
-    stopVideo()
+  listen(window, 'pagehide', dispose)
+  listen(mobileQuery, 'change', () => handle(syncImmersive()))
+  listen(document, 'visibilitychange', () => {
+    if (document.hidden) { finishSeek(); video.pause(); buffering(false) }
+    else if (wantsPlay) handle(attemptPlay())
+    syncPlay()
   })
-  const onLayout = () => handle(syncImmersive())
-  mobileQuery.addEventListener('change', onLayout)
-  window.addEventListener('pagehide', () => mobileQuery.removeEventListener('change', onLayout), { once: true })
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { video.pause(); hide('play-prompt', false) } })
-  handle(syncImmersive())
-  handle(load())
+  handle(syncImmersive()); handle(load())
 })()

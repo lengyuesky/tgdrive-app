@@ -85,10 +85,10 @@
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "1.1.4",
+        "version": "1.2.0",
         "api_version": 2,
         "min_host_version": "0.2.0",
-        "description": "随机播放网盘文件夹里的视频，支持滑动切换、收藏和下载。",
+        "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
         "author": "tgdrive",
         "entry": "index.html",
         "icon": "icon.svg",
@@ -114,9 +114,9 @@
           }
         ]
       },
-      "sha256": "e4b2202734b58b6331aa357f36eb63fd14926efbe358563a13efdf0ffcd4ddc8",
-      "size": 10395,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.1.4.tgapp"
+      "sha256": "af540eab0911b86db947129abd0ddf54263e6a06e2f0078e4ca2d862c632b02e",
+      "size": 13463,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.2.0.tgapp"
     }
   ]
 }

@@ -82,6 +82,10 @@ sha256sum -c SHA256SUMS
 
 普通构建与校验不联网；正式分发规范与防篡改说明见 [分发协议说明](release.md)。
 
+## 短视频独立浏览器回归
+
+本机安装 `ffmpeg` 与 Playwright Chromium 后运行 `npm run test:shorts`，使用合成 MP4 验证首帧、进度拖动、滑动切换与手机布局。WebKit 可运行 `npm run test:shorts -- --browser=webkit --grep-invert '手机真实上滑'`；触摸注入使用 Chromium CDP。行为说明与验收记录见 [短视频说明](shorts.md)。
+
 ## 漫画独立浏览器回归
 
 漫画滚动可独立验证真实浏览器几何，不需要 `TGDRIVE_HOST_DIR`、数据库或真实网盘文件：
