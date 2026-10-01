@@ -3,7 +3,7 @@
  */
 import type { BibliographicMetadata, Work, WorkMember, ReadingUnit } from '../library'
 
-function createModal(options: {
+export function createModal(options: {
   title: string
   wide?: boolean
   signal?: AbortSignal

@@ -1,4 +1,5 @@
 /** 详情视图：图书封面作者简介/按需独立loadNavigation目录/重读确认；漫画正篇番外/不可变CAS人工归组管理。 */
+import { fillGroupSelect } from './book-groups'
 import type { UiContext } from './types'
 import {
   defaults,
@@ -328,6 +329,34 @@ export class DetailView {
     // 6. 分别渲染 图书（按需目录） 或 漫画（卷章与人工归组）
     if (isBooks) {
       this.renderBooksSection(unit)
+      const store = this.context.library.bookGroups
+      const controls = document.createElement('div'); controls.className = 'book-group-controls'
+      const label = document.createElement('label'); label.textContent = '分组 '
+      const select = document.createElement('select'); select.setAttribute('aria-label', '书籍分组')
+      const save = document.createElement('button'); save.type = 'button'; save.textContent = '保存分组'
+      const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '重新加载分组'
+      const status = document.createElement('span'); status.setAttribute('role', 'status')
+      label.append(select); controls.append(label, save, retry, status)
+      this.container.querySelector('.detail-meta')?.append(controls)
+      const reload = async () => {
+        select.disabled = save.disabled = retry.disabled = true
+        try {
+          await store.load(signal); if (signal.aborted) return
+          fillGroupSelect(select, store, false, store.groupFor(unit.nodeId) ?? '')
+          select.disabled = save.disabled = false; status.textContent = ''
+        } catch (error) { if (!signal.aborted) { status.textContent = '分组加载失败，请重试'; this.context.reportError(error) } }
+        finally { retry.disabled = false }
+      }
+      retry.onclick = () => { void reload() }
+      save.onclick = () => {
+        select.disabled = save.disabled = retry.disabled = true
+        void store.assign([unit.nodeId], select.value || undefined, signal).then(() => {
+          status.textContent = '分组已保存'
+        }).catch(error => { if (!signal.aborted) { status.textContent = '保存失败，可重新加载后重试'; this.context.reportError(error) } })
+          .finally(() => { select.disabled = save.disabled = retry.disabled = false })
+      }
+      await reload()
+      if (signal.aborted) return
     } else {
       this.renderComicsSection(work, unit)
     }

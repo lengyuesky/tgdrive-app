@@ -395,8 +395,10 @@ export async function startApp(options: AppOptions) {
       await meView?.render()
     }
   }
-  let pendingPaths = new Set<string>(), pendingFull = false, pendingSources = false, pendingWorks = false
-  const scheduleLibraryRefresh = (kind: 'state' | 'files' | 'sources' | 'works', paths?: string[]) => {
+  let pendingPaths = new Set<string>(), pendingFull = false, pendingSources = false, pendingWorks = false, pendingGroups = false, pendingState = false
+  const scheduleLibraryRefresh = (kind: 'state' | 'files' | 'sources' | 'works' | 'groups', paths?: string[]) => {
+    if (kind === 'state') pendingState = true
+    if (kind === 'groups') pendingGroups = true
     if (kind === 'sources') pendingSources = true
     if (kind === 'works') pendingWorks = true
     if (kind === 'files' || kind === 'sources') { if (!paths) pendingFull = true; else paths.forEach(path => pendingPaths.add(path)) }
@@ -404,9 +406,11 @@ export async function startApp(options: AppOptions) {
     hostEventTimer = setTimeout(() => {
       hostEventTimer = undefined
       if (reading()) return
-      const full = pendingFull, sources = pendingSources, works = pendingWorks, paths = [...pendingPaths]
-      pendingPaths.clear(); pendingFull = false; pendingSources = false; pendingWorks = false
+      const full = pendingFull, sources = pendingSources, works = pendingWorks, groups = pendingGroups, state = pendingState, paths = [...pendingPaths]
+      pendingPaths.clear(); pendingFull = false; pendingSources = false; pendingWorks = false; pendingGroups = false; pendingState = false
       void (async () => {
+        // 分组按实际修订号区分自身回流，不能按时间窗口忽略其他设备的连续写入。
+        if (groups && !sources && !works && !full && !paths.length && !state && await library.bookGroups.isCurrent(appLifecycle.signal)) return
         if (sources) await library.initialize()
         else if (works) await library.reloadWorks()
         if (full || paths.length) await library.refresh(undefined, full ? undefined : paths)
@@ -419,6 +423,7 @@ export async function startApp(options: AppOptions) {
     const key = typeof (value as { key?: string })?.key === 'string' ? (value as { key: string }).key : ''
     const visible = key.startsWith('library:flags:') || key.startsWith('library:reading:') || key.startsWith('progress:')
     if (visible) library.invalidateReadingState(key)
+    if (key === 'library:book-groups') { scheduleLibraryRefresh('groups'); return }
     if (drive.storage.wroteRecently?.(key)) return
     if (key === 'library:sources') scheduleLibraryRefresh('sources')
     else if (key === 'library:works') scheduleLibraryRefresh('works')

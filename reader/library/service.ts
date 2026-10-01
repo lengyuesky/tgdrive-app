@@ -1,4 +1,5 @@
 /** 应用层只需持有一个 ReadingLibrary；初始化不枚举正文，退出时显式销毁。 */
+import { BookGroupsStore } from './book-groups'
 import type { Drive } from '../../sdk/types'
 import { isAbort } from '../io'
 import { BudgetCache, CACHE_BUDGETS, type CacheStatus } from './cache'
@@ -41,6 +42,7 @@ export interface LibraryCallbacks {
   cacheStatus?: (kind: 'metadata', status: CacheStatus) => void
 }
 export class ReadingLibrary {
+  readonly bookGroups: BookGroupsStore
   readonly sources: SourcesStore
   readonly access: LibraryAccess
   readonly works: WorksStore
@@ -64,6 +66,7 @@ export class ReadingLibrary {
   private readingCache: ReadingStateCache
   private initialization?: Promise<LibrarySnapshot>
   constructor(readonly drive: Drive, readonly kind: LibraryKind, private callbacks: LibraryCallbacks = {}, private openPdf?: PdfOpener) {
+    this.bookGroups = new BookGroupsStore(drive)
     this.sources = new SourcesStore(drive); this.access = new LibraryAccess(drive); this.works = new WorksStore(drive)
     this.metadata = new MetadataService(drive, this.access, new BudgetCache(drive, 'metadata', CACHE_BUDGETS.metadata, validMetadataResult, status => callbacks.cacheStatus?.('metadata', status)), this.openPdf)
     this.covers = new CoverService(drive, this.access, new ThumbnailCache(new CoverStore(drive)), this.openPdf)
@@ -262,7 +265,7 @@ export class ReadingLibrary {
     this.current(generation, signal); this.state.works = works; this.invalidateReadingState(); this.emit()
   }
   query(query: LibraryQuery = {}, readings?: ReadonlyMap<number, UnitReading>, flags?: ReadonlyMap<string, WorkFlags>) {
-    return queryLibrary({ units: this.state.units, works: this.state.works.rows, metadata: this.names, readings, flags, complete: this.state.complete && (this.indexedSourceId === undefined || query.sourceId === this.indexedSourceId) }, query)
+    return queryLibrary({ bookGroups: this.kind === 'books' ? this.bookGroups : undefined, units: this.state.units, works: this.state.works.rows, metadata: this.names, readings, flags, complete: this.state.complete && (this.indexedSourceId === undefined || query.sourceId === this.indexedSourceId) }, query)
   }
   async openUnit(nodeId: number, signal = this.controller.signal) {
     await this.initialization

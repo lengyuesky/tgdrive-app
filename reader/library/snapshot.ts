@@ -12,7 +12,7 @@ export class SnapshotPublishError<T, M> extends LibraryError {
   }
 }
 export class ShardedStore<T, M> {
-  constructor(private drive: Drive, readonly key: string, private row: (raw: unknown) => T, private metadata: (raw: unknown) => M, private empty: () => M, private maxRows = Infinity) {}
+  constructor(private drive: Drive, readonly key: string, private row: (raw: unknown) => T, private metadata: (raw: unknown) => M, private empty: () => M, private maxRows = Infinity, private shardBytes = SNAPSHOT_SHARD_BYTES) {}
   async load(signal?: AbortSignal, retryCache = true): Promise<ShardedSnapshot<T, M>> {
     signal?.throwIfAborted()
     const record = await this.drive.storage.get(this.key, { signal })
@@ -47,10 +47,10 @@ export class ShardedStore<T, M> {
     // 以实际 UTF-8 大小切片，不把长中文简介或路径按字符数误当成字节数。
     for (const row of rows) {
       const candidate = { ...shard, rows: [...shard.rows, row] }
-      if (jsonBytes(candidate) > SNAPSHOT_SHARD_BYTES) {
+      if (jsonBytes(candidate) > this.shardBytes) {
         if (!shard.rows.length) throw new LibraryError('snapshot_item_limit', '单条记录过大，无法安全保存')
         shards.push(shard); shard = { schemaVersion: 1, snapshotId, index: shards.length, rows: [row] }
-        if (jsonBytes(shard) > SNAPSHOT_SHARD_BYTES) throw new LibraryError('snapshot_item_limit', '单条记录过大，无法安全保存')
+        if (jsonBytes(shard) > this.shardBytes) throw new LibraryError('snapshot_item_limit', '单条记录过大，无法安全保存')
       } else shard = candidate
     }
     if (shard.rows.length) shards.push(shard)

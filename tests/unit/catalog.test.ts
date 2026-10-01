@@ -555,6 +555,8 @@ describe('catalog CLI、真实 ZIP 与 SHA256SUMS', () => {
 })
 
 describe('build.mjs 与独立分发输出行为', () => {
+  const currentManifest = async (id: string) => JSON.parse(await readFile(root + '/' + id + '/app.json', 'utf8')) as { id: string; version: string }
+  const currentPackage = async (id: string) => { const manifest = await currentManifest(id); return id + '-' + manifest.version + '.tgapp' }
   it('TGDRIVE_APP_BUILD_OUTPUT 指定独立输出分发目录时生成完整分发产物并通过校验', async () => {
     const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
     temporary.push(output)
@@ -569,14 +571,14 @@ describe('build.mjs 与独立分发输出行为', () => {
     await expect(verifyCatalogPackages(catalog, `${output}/apps`)).resolves.toBeUndefined()
     const shaCheck = await run('sha256sum', ['-c', 'SHA256SUMS'], { cwd: output })
     // execFile 成功退出已证明校验通过，不绑定系统语言中的“成功”或“OK”。
-    expect(shaCheck.stdout).toContain('apps/books-1.4.2.tgapp:')
+    expect(shaCheck.stdout).toContain('apps/' + await currentPackage('books') + ':')
     expect(shaCheck.stdout).toContain('catalog.json:')
   }, 20_000)
 
   it('目标 catalog.json 存在同版本篡改时，在 staging 阻断并不破坏目标目录', async () => {
     const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
     temporary.push(output)
-    const tamperedCatalog = sampleCatalog([sampleEntry('books', '1.4.2', 'f'.repeat(64))])
+    const tamperedCatalog = sampleCatalog([sampleEntry('books', (await currentManifest('books')).version, 'f'.repeat(64))])
     await writeFile(`${output}/catalog.json`, JSON.stringify(tamperedCatalog, null, 2))
 
     await expect(
@@ -623,11 +625,6 @@ describe('build.mjs 与独立分发输出行为', () => {
 
     const packages = await collectPackages(`${output}/apps`)
     expect(packages).toHaveLength(4)
-    expect(packages.map(p => p.filename)).toEqual([
-      'books-1.4.2.tgapp',
-      'cinema-1.3.1.tgapp',
-      'comics-1.3.2.tgapp',
-      'shorts-1.3.1.tgapp',
-    ])
+    expect(packages.map(p => p.filename)).toEqual(await Promise.all(['books', 'cinema', 'comics', 'shorts'].map(currentPackage)))
   }, 20_000)
 })

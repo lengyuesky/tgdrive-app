@@ -1,4 +1,5 @@
 /** 书库视图：两列封面、搜索筛选排序、作品/文件切换、部分范围提示、SDK文件分页兜底与滚动恢复。 */
+import { fillGroupSelect, showBookGroups } from './book-groups'
 import type { UiContext, LibraryFilterState } from './types'
 import type { FileEntry } from '../../sdk/types'
 import {
@@ -33,6 +34,11 @@ export class LibraryView {
   private currentProgress?: ScanProgress
   private sdkPageCursors = new Map<number, string | null>()
   private hasMore = false
+  private selecting = false
+  private selected = new Set<number>()
+  private displayed: CatalogItem[] = []
+  private savingGroups = false
+  private targetGroup = ''
 
   constructor(
     private container: HTMLElement,
@@ -143,6 +149,13 @@ export class LibraryView {
       </div>
     `
 
+    if (isBooks) {
+      const signal = this.lifecycle.signal
+      try { await this.context.library.bookGroups.load(signal) }
+      catch (error) { if (!signal.aborted) this.context.reportError(error) }
+      if (signal.aborted) return
+      this.renderGroupControls()
+    }
     this.bindEvents()
     await this.loadItems()
 
@@ -150,6 +163,98 @@ export class LibraryView {
       const scrollEl = this.container.closest('.ui-content') || this.container
       scrollEl.scrollTop = this.state.scrollTop
     }
+  }
+
+  private renderGroupControls() {
+    this.container.querySelector('#book-group-controls')?.remove()
+    const store = this.context.library.bookGroups
+    if (this.state.groupId && !store.groups.some(group => group.id === this.state.groupId)) this.state.groupId = undefined
+    const controls = document.createElement('div')
+    controls.id = 'book-group-controls'; controls.className = 'book-group-controls'
+    const filter = document.createElement('select')
+    filter.id = 'filter-book-group'; filter.setAttribute('aria-label', '筛选分组')
+    fillGroupSelect(filter, store, true, this.state.groupId ?? '*')
+    filter.disabled = !store.ready
+    filter.onchange = () => {
+      this.state.groupId = filter.value === '*' ? undefined : filter.value
+      this.state.offset = 0; this.sdkPageCursors.clear(); void this.loadItems()
+    }
+    const manage = document.createElement('button')
+    manage.textContent = '管理分组'; manage.type = 'button'
+    manage.onclick = () => {
+      void showBookGroups(store, this.lifecycle.signal).then(() => {
+        if (this.lifecycle.signal.aborted) return
+        this.renderGroupControls(); this.state.offset = 0; this.sdkPageCursors.clear(); void this.loadItems()
+      })
+    }
+    const toggle = document.createElement('button')
+    toggle.textContent = this.selecting ? '退出多选' : '批量分组'; toggle.type = 'button'
+    toggle.disabled = !store.ready
+    toggle.onclick = () => {
+      this.selecting = !this.selecting; this.selected.clear()
+      this.renderGroupControls(); void this.loadItems()
+    }
+    controls.append(filter, manage, toggle)
+    if (!store.ready) {
+      const notice = document.createElement('span'); notice.textContent = '分组读取失败，可在管理分组中重新加载'
+      controls.append(notice)
+    }
+    if (this.selecting) {
+      const all = document.createElement('button')
+      all.type = 'button'; all.textContent = '全选当前页'
+      all.onclick = () => {
+        this.selected = new Set(this.displayed.flatMap(item => item.units.map(unit => unit.nodeId)))
+        this.updateSelection()
+      }
+      const target = document.createElement('select')
+      if (this.targetGroup && !store.groups.some(group => group.id === this.targetGroup)) this.targetGroup = ''
+      target.setAttribute('aria-label', '移动到分组'); fillGroupSelect(target, store, false, this.targetGroup)
+      target.onchange = () => { this.targetGroup = target.value }
+      const move = document.createElement('button')
+      move.id = 'btn-move-group'; move.type = 'button'; move.textContent = '移动'; move.disabled = !this.selected.size
+      move.onclick = () => {
+        if (!this.selected.size || this.savingGroups) return
+        this.savingGroups = true
+        const frozen = [...this.container.querySelectorAll<HTMLElement>('.library-toolbar,.library-pagination')]
+        frozen.forEach(el => { el.inert = true })
+        controls.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(el => { el.disabled = true })
+        void store.assign([...this.selected], target.value || undefined, this.lifecycle.signal).then(() => {
+          this.state.offset = 0; this.sdkPageCursors.clear(); return this.loadItems(true)
+        }).catch(error => {
+          if (!this.lifecycle.signal.aborted) this.context.reportError(error)
+        }).finally(() => {
+          this.savingGroups = false
+          frozen.forEach(el => { el.inert = false })
+          if (!this.lifecycle.signal.aborted) { this.renderGroupControls(); this.updateSelection() }
+        })
+      }
+      const count = document.createElement('span'); count.id = 'group-selection-count'; count.setAttribute('role', 'status')
+      const reload = document.createElement('button')
+      reload.type = 'button'; reload.textContent = '重新加载分组'
+      reload.onclick = () => {
+        reload.disabled = true
+        void store.load(this.lifecycle.signal).then(() => {
+          if (!this.lifecycle.signal.aborted) this.renderGroupControls()
+        }).catch(error => { if (!this.lifecycle.signal.aborted) this.context.reportError(error) })
+          .finally(() => { reload.disabled = false })
+      }
+      controls.append(all, target, move, reload, count)
+    }
+    this.container.querySelector('.library-toolbar')?.append(controls)
+    this.updateSelection()
+  }
+
+  private updateSelection() {
+    for (const card of this.container.querySelectorAll<HTMLButtonElement>('.library-card')) {
+      const selected = this.selected.has(Number(card.dataset.fileId))
+      card.classList.toggle('group-selected', selected)
+      if (this.selecting) card.setAttribute('aria-pressed', String(selected))
+      else card.removeAttribute('aria-pressed')
+    }
+    const count = this.container.querySelector('#group-selection-count')
+    if (count) count.textContent = '已选 ' + this.selected.size + ' 本'
+    const move = this.container.querySelector<HTMLButtonElement>('#btn-move-group')
+    if (move) move.disabled = !this.selected.size || this.savingGroups
   }
 
   private bindEvents() {
@@ -354,7 +459,9 @@ export class LibraryView {
     }
   }
 
-  private async loadItems() {
+  private async loadItems(afterSave = false) {
+    if (this.savingGroups && !afterSave) return
+    this.selected.clear(); this.displayed = []; this.updateSelection()
     const activeGen = ++this.loadGeneration
     this.coverLoader?.clear()
     const itemsContainer = this.container.querySelector<HTMLElement>('#items')
@@ -380,6 +487,7 @@ export class LibraryView {
       // 1. 先查询已索引数据
       const result = this.context.library.query(
         {
+          groupId: this.context.kind === 'books' ? this.state.groupId : undefined,
           query: this.state.query || undefined,
           format: this.state.format,
           sourceId: this.state.sourceId,
@@ -442,6 +550,8 @@ export class LibraryView {
             .filter((f) => {
               const fmt = unitFormat(f, this.context.kind)
               if (!fmt) return false
+              if (this.context.kind === 'books' && !this.context.library.bookGroups.matches(f.id, this.state.groupId)) return false
+              if (this.state.status && this.state.status !== 'unread') return false
               if (this.state.format && fmt !== this.state.format) return false
               return true
             })
@@ -490,11 +600,14 @@ export class LibraryView {
         statusMsg.textContent = ''
       }
 
+      this.displayed = displayItems
       itemsContainer.replaceChildren()
       displayItems.forEach((item) => {
         const card = this.renderCard(item)
         itemsContainer.append(card)
       })
+
+      this.updateSelection()
 
       // 更新分页
       const totalPages = Math.max(1, Math.ceil(this.totalItems / this.pageSize))
@@ -549,7 +662,7 @@ export class LibraryView {
     coverArt.append(initial, mark, statusBadge)
 
     // 如果未归组或顺序待确认，显示未归组标签
-    if (item.ungrouped || !item.work?.orderConfirmed) {
+    if (this.context.kind === 'comics' && (item.ungrouped || !item.work?.orderConfirmed)) {
       const ungroupedBadge = document.createElement('span')
       ungroupedBadge.className = 'badge-ungrouped'
       ungroupedBadge.textContent = '未归组'
@@ -578,10 +691,22 @@ export class LibraryView {
     }
 
     info.append(titleEl, metaEl)
+    if (this.context.kind === 'books') {
+      const badge = document.createElement('span'); badge.className = 'book-group-badge'
+      const store = this.context.library.bookGroups
+      badge.textContent = store.ready ? (store.groups.find(group => group.id === store.groupFor(firstUnit.nodeId))?.name ?? '未分组') : '分组未加载'
+      info.append(badge)
+    }
     card.append(coverWrapper, info)
 
     // 点击直接进入阅读器：单卷作品一步开读，多卷作品仍进详情选择卷话。
     card.addEventListener('click', () => {
+      if (this.savingGroups) return
+      if (this.selecting) {
+        const selected = this.selected.has(firstUnit.nodeId)
+        for (const unit of item.units) { if (selected) this.selected.delete(unit.nodeId); else this.selected.add(unit.nodeId) }
+        this.updateSelection(); return
+      }
       this.getState() // 保存滚动位置
       if (item.units.length === 1) {
         void this.context.openReader(firstUnit.nodeId).catch(this.context.reportError)

@@ -367,3 +367,17 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .body-search [data-search-results] { max-height: 35vh; overflow: auto; }
 .body-search [data-search-results] button { display: flex; flex-direction: column; width: 100%; text-align: left; white-space: normal; padding: 10px; gap: 4px; }
 .body-search [data-search-results] span { overflow-wrap: anywhere; }
+
+/* 图书手动分组工具栏与多选状态。 */
+.book-group-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.book-group-controls select { max-width: 100%; min-width: 100px; }
+.book-group-controls button, .book-group-row button { min-height: 36px; padding: 6px 10px; }
+.book-group-controls select, .book-group-row input { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.book-group-list { max-height: 50vh; overflow-y: auto; }
+.book-group-row { display: flex; gap: 6px; margin: 10px 0; align-items: center; }
+.book-group-row input { flex: 1; min-width: 0; width: 100%; }
+.book-group-row button { flex-shrink: 0; }
+.book-group-badge { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-card.group-selected { outline: 3px solid var(--accent, #16a34a); outline-offset: -3px; }
+.library-card[aria-pressed] .card-cover::after { content: '选择'; position: absolute; bottom: 8px; left: 8px; border-radius: 4px; padding: 3px 6px; background: var(--bg); color: var(--text); }
+.library-card[aria-pressed="true"] .card-cover::after { content: '✓ 已选'; background: #15803d; color: white; }

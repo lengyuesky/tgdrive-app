@@ -17,6 +17,7 @@ import type {
 export type UiView = 'home' | 'library' | 'detail' | 'me'
 
 export interface LibraryFilterState {
+  groupId?: string
   query: string
   format?: UnitFormat
   sourceId?: number

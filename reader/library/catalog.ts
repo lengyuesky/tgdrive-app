@@ -1,10 +1,12 @@
 /** 书库筛选与排序只作用于当前索引，不把不完整索引冒充全库搜索。 */
+import type { BookGroupsStore } from './book-groups'
 import type { BibliographicMetadata, ReadingStatus, ReadingUnit, UnitFormat, UnitReading, Work, WorkFlags } from './model'
 import { sortTitle } from './model'
 import { resolvedMetadata } from './grouping'
 import { aggregateFlags, aggregateReading } from './reading'
 
 export interface LibraryQuery {
+  groupId?: string
   query?: string
   format?: UnitFormat
   sourceId?: number
@@ -27,6 +29,7 @@ export interface CatalogItem {
   ungrouped: boolean
 }
 export function queryLibrary(input: {
+  bookGroups?: BookGroupsStore
   units: readonly ReadingUnit[]; works: readonly Work[]; complete: boolean
   metadata?: ReadonlyMap<number, BibliographicMetadata>; readings?: ReadonlyMap<number, UnitReading>; flags?: ReadonlyMap<string, WorkFlags>
 }, query: LibraryQuery = {}) {
@@ -50,6 +53,7 @@ export function queryLibrary(input: {
   }
   const needle = query.query?.normalize('NFKC').toLocaleLowerCase().trim()
   items = items.filter(item => (!needle || [item.metadata.title ?? '', ...(item.metadata.authors ?? []), ...item.units.map(unit => unit.file.name)].some(value => value.normalize('NFKC').toLocaleLowerCase().includes(needle)))
+    && (query.groupId === undefined || item.units.some(unit => input.bookGroups?.matches(unit.nodeId, query.groupId)))
     && (!query.format || item.units.some(unit => unit.format === query.format))
     && (query.sourceId === undefined || item.units.some(unit => unit.sourceIds.includes(query.sourceId!)))
     && (!query.status || item.reading.status === query.status)

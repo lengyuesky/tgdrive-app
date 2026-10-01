@@ -1,0 +1,98 @@
+import { describe, expect, it } from 'vitest'
+import { BookGroupsStore, BOOK_GROUPS_KEY } from './book-groups'
+import { ReadingLibrary } from './service'
+import { file, memoryDrive, sources } from './test-fixtures'
+import { SOURCES_KEY } from './sources'
+
+describe('图书单分组持久化', () => {
+  it('2000 本大节点标识图书按宿主 32 KiB 限制分片，分片中断不发布不完整分组', async () => {
+    const mock = memoryDrive(), store = new BookGroupsStore(mock.drive)
+    const write = mock.set.getMockImplementation()!
+    mock.set.mockImplementation(async (...args) => {
+      if (new TextEncoder().encode(JSON.stringify(args[1])).length > 32 * 1024) throw new Error('单条应用数据最多 32 KiB')
+      return write(...args)
+    })
+    await store.load(); const id = await store.create('大书库')
+    const nodes = Array.from({ length: 2000 }, (_, i) => Number.MAX_SAFE_INTEGER - i)
+    await store.assign(nodes, id)
+    const restored = new BookGroupsStore(mock.drive); await restored.load()
+    expect(restored.groups[0]!.nodeIds).toEqual(nodes)
+    const before = mock.records.get(BOOK_GROUPS_KEY)
+    mock.set.mockImplementationOnce(write).mockRejectedValueOnce(new Error('第二片中断'))
+    await expect(store.assign(nodes.slice(0, 500))).rejects.toThrow('分片保存失败')
+    expect(mock.records.get(BOOK_GROUPS_KEY)).toEqual(before)
+    await restored.load(); expect(restored.groups[0]!.nodeIds).toEqual(nodes)
+  })
+  it('新增、改名、批量移动、移出与删除保持单分组，重新加载后仍有效', async () => {
+    const mock = memoryDrive(), store = new BookGroupsStore(mock.drive)
+    await store.load()
+    const fiction = await store.create(' 小说 '), tech = await store.create('技术')
+    await store.assign([2, 3], fiction)
+    await store.assign([3, 4], tech)
+    expect(store.groups.map(group => group.nodeIds)).toEqual([[2], [3, 4]])
+    await store.rename(fiction, '文学')
+    await store.assign([4])
+    const another = new BookGroupsStore(mock.drive); await another.load()
+    expect(another.groups).toEqual(store.groups)
+    expect(another.matches(4, '')).toBe(true)
+    await another.remove(tech)
+    expect(another.groupFor(3)).toBeUndefined()
+    expect(another.groups).toEqual([{ id: fiction, name: '文学', nodeIds: [2] }])
+  })
+  it('拒绝空名称、超长名称、重名和不存在的目标，不改动当前数据', async () => {
+    const store = new BookGroupsStore(memoryDrive().drive); await store.load()
+    const id = await store.create('技术')
+    const before = store.groups
+    for (const name of ['', '  ', '字'.repeat(41), ' 技术 ']) await expect(store.create(name)).rejects.toThrow()
+    await expect(store.assign([1], 'missing')).rejects.toThrow('分组已不存在')
+    await expect(store.rename(id, '')).rejects.toThrow()
+    expect(store.groups).toEqual(before)
+  })
+  it('并发设备保存冲突保留旧快照，显式重新加载后可再次操作', async () => {
+    const mock = memoryDrive(), a = new BookGroupsStore(mock.drive), b = new BookGroupsStore(mock.drive)
+    await a.load(); const id = await a.create('小说'); await b.load()
+    await a.assign([2], id)
+    expect(await a.isCurrent()).toBe(true)
+    expect(await b.isCurrent()).toBe(false)
+    await expect(b.assign([3], id)).rejects.toThrow('另一设备已更新')
+    expect(b.groups[0]!.nodeIds).toEqual([])
+    const check = new BookGroupsStore(mock.drive); await check.load()
+    expect(check.groups[0]!.nodeIds).toEqual([2])
+    await b.load(); await b.assign([3], id)
+    expect(b.groups[0]!.nodeIds).toEqual([2, 3])
+  })
+  it('损坏数据不能作为空分组覆盖，分片保存失败不会发布半份数据', async () => {
+    const mock = memoryDrive(), store = new BookGroupsStore(mock.drive)
+    mock.seed(BOOK_GROUPS_KEY, { schemaVersion: 99 })
+    await expect(store.load()).rejects.toThrow()
+    await expect(store.create('新组')).rejects.toThrow('分组读取失败')
+    expect(mock.set).not.toHaveBeenCalled()
+    mock.records.clear(); await store.load(); const id = await store.create('小说')
+    mock.set.mockRejectedValueOnce(new Error('网络中断'))
+    await expect(store.assign([2], id)).rejects.toThrow('分片保存失败')
+    const check = new BookGroupsStore(mock.drive); await check.load()
+    expect(check.groups[0]!.nodeIds).toEqual([])
+  })
+  it('重扫、改名移动、清理索引与暂时移除来源保留归属，查询可组合筛选', async () => {
+    const root = file(1, '/书', true), book = file(2, '/书/小说.txt'), other = file(3, '/书/指南.epub')
+    const mock = memoryDrive([root, book, other]); mock.seed(SOURCES_KEY, sources(root).config)
+    let library = new ReadingLibrary(mock.drive, 'books')
+    await library.initialize(); await library.refresh(); await library.bookGroups.load()
+    const id = await library.bookGroups.create('小说'); await library.bookGroups.assign([2, 99], id)
+    for (const view of ['works', 'files'] as const) {
+      expect(library.query({ groupId: id, view, query: '小说', format: 'txt', status: 'unread' }).total).toBe(1)
+      expect(library.query({ groupId: '', view }).items[0]!.units[0]!.nodeId).toBe(3)
+      expect(library.query({ groupId: id, format: 'epub' }).total).toBe(0)
+    }
+    library.destroy()
+    mock.nodes.set(2, file(2, '/书/改名.txt'))
+    for (const key of mock.records.keys()) if (key.startsWith('library:cache:')) mock.records.delete(key)
+    library = new ReadingLibrary(mock.drive, 'books')
+    await library.initialize(); await library.refresh(); await library.bookGroups.load()
+    expect(library.query({ groupId: id }).items[0]!.units[0]!.file.name).toBe('改名.txt')
+    await library.removeSource(1)
+    expect(library.bookGroups.groupFor(2)).toBe(id)
+    expect(library.bookGroups.groupFor(99)).toBe(id)
+    library.destroy()
+  })
+})
