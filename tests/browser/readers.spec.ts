@@ -165,6 +165,8 @@ test('漫画自然页序、两种模式、目录分章和有界归档读取', as
   await expect(frame.locator('.comic-page')).toHaveCount(1)
   await frame.locator('#next').click(); await expect(frame.locator('#position')).toHaveText('2 / 3')
   await frame.locator('#direction').selectOption('rtl')
+  // 偏好先异步保存再应用；必须等阅读器实际切到 RTL 后才发送方向键。
+  await expect(frame.locator('.comic-track')).toHaveCSS('flex-direction', 'row-reverse')
   await frame.locator('#viewport').focus(); await page.keyboard.press('ArrowLeft')
   await expect(frame.locator('#position')).toHaveText('3 / 3')
   await page.screenshot({ path: info.outputPath('漫画-单页.png') })

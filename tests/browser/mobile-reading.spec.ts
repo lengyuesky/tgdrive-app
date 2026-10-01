@@ -302,11 +302,18 @@ test('EPUB 同文档多目录锚点不重复章节，内部链接图片和旧进
   await expect.poll(async () => { const node = frame(page).locator('#position'); return Number(await node.getAttribute('data-page')) === Number(await node.getAttribute('data-pages')) - 1 }).toBe(true)
   await frame(page).locator('#next').click(); await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '1')
   await frame(page).locator('#back').click()
-  await frame(page).locator('body').evaluate(async () => {
+  // 退出的最后一次保存可能仍在途；夹具注入旧版记录遇到 CAS 冲突时重新读取版本。
+  await expect.poll(() => frame(page).locator('body').evaluate(async () => {
     const drive = (window as any).tgdrive
     const record = (await drive.storage.list({ prefix: 'progress:', limit: 20 })).records[0]
-    await drive.storage.set(record.key, { ...record.value, location: { format: 'epub', index: 1, entry: 'Book/one.xhtml#middle' } }, record.revision)
-  })
+    try {
+      await drive.storage.set(record.key, { ...record.value, location: { format: 'epub', index: 1, entry: 'Book/one.xhtml#middle' } }, record.revision)
+      return true
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'storage_conflict') throw error
+      return false
+    }
+  })).toBe(true)
   await open(page, '分页.epub')
   await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '0')
   await expect.poll(async () => Number(await frame(page).locator('#position').getAttribute('data-page'))).toBeGreaterThan(0)

@@ -65,7 +65,8 @@ test.afterEach(async ({ page }) => {
 
 async function open(page: Page, options: { count?: number; location?: Location; image?: number[]; odd?: number[]; overrides?: [number, number[]][]; blocked?: number[]; delays?: { head: number; full: number } } = {}) {
   // 直接注入打包脚本与内存 SDK；任何意外网络访问都阻断，测试不依赖宿主或外部资源。
-  await page.route('**/*', (route) => route.abort())
+  // WebKit 也会拦截内存 blob: 图片；只放行这类本地资源，外部请求仍全部阻断。
+  await page.route('**/*', (route) => route.request().url().startsWith('blob:') ? route.continue() : route.abort())
   await page.setContent('<meta name="viewport" content="width=device-width,initial-scale=1"><div id="app" class="immersive" data-kind="comics"><main id="viewport" class="reading-viewport" data-mode="scroll"></main></div>')
   await page.addStyleTag({ content: style })
   await page.addScriptTag({ content: bundle })
@@ -160,7 +161,8 @@ test('上方迟到图片大幅缩短布局后，当前画面不因 scrollTop 截
   await expect(imageAt(page, 96)).toHaveAttribute('height', '300')
   await expect(imageAt(page, 97)).toHaveAttribute('height', '300')
   expect((await current(page)).index).toBe(98)
-  expect(await imageAt(page, 98).evaluate((image) => image.getBoundingClientRect().top)).toBeCloseTo(top, 0)
+  // WebKit 的滚轮坐标与布局取整可能相差不足 1px，不应把亚像素舍入当成跳页。
+  expect(Math.abs(await imageAt(page, 98).evaluate((image) => image.getBoundingClientRect().top) - top)).toBeLessThanOrEqual(1)
 })
 
 test('六万像素长图优先保留解码，回看和调整视口仍保持页内位置', async ({ page }) => {
@@ -191,6 +193,33 @@ test('六万像素长图优先保留解码，回看和调整视口仍保持页�
 
 test.describe('手机触摸滚动', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  for (const height of [300, 5000]) test(`停在未加载页后，迟到的 ${height}px 图片不能使阅读位置跳几十页`, async ({ page }) => {
+    const strip = padded(390, height, [88, 120, 200], 200_000)
+    const blocked = Array.from({ length: 300 }, (_, index) => index)
+    await open(page, { count: 300, location: { format: 'comic', index: 100 }, image: strip, blocked })
+    await page.evaluate(async () => {
+      const { viewport } = window.comicFixture
+      for (let i = 0; i < 6; i++) {
+        viewport.scrollTop += 6000
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      }
+    })
+    const before = await current(page)
+    expect(before.index).toBeGreaterThan(115)
+    // 用户已经停下，没有任何新的滚动输入；只允许后台完成当前页与邻页的加载。
+    await page.waitForTimeout(250)
+    await page.evaluate(() => { for (let index = 0; index < 300; index++) window.comicFixture.release(index) })
+    await expect.poll(async () => (await current(page)).index).toBe(before.index)
+    await loaded(page, before.index)
+    expect((await current(page)).index).toBe(before.index)
+    const rect = await imageAt(page, before.index).evaluate((image) => {
+      const box = image.getBoundingClientRect(), viewport = image.closest('#viewport')!.getBoundingClientRect()
+      return { top: box.top - viewport.top, bottom: box.bottom - viewport.top }
+    })
+    expect(rect.top).toBeLessThanOrEqual(0)
+    expect(rect.bottom).toBeGreaterThan(0)
+  })
+
   test('连续触摸与松手后的惯性滚动跨页时单调前进', async ({ page }) => {
     await open(page, { image: [...png(1000, 2000, [80, 120, 180])], location: { format: 'comic', index: 449, ratio: .7 } })
     await loaded(page, 449); await loaded(page, 450); await loaded(page, 451)
@@ -228,7 +257,7 @@ test.describe('手机触摸滚动', () => {
     expect(await page.evaluate(() => window.comicFixture.writes)).toEqual([])
   })
 
-  test('探测先于整图到达时估高仍能学习，连续甩动穿越未探测区后的落点按真实页高回落而不是钉死虚高页码', async ({ page }) => {
+  test('探测先于整图到达时估高仍能学习，连续甩动到达的当前页不会被后台重新选择', async ({ page }) => {
     // 真实网络形态：64 KiB 头部探测 300ms、整图 1200ms；各页字节相同、真实高 5000（初始估高 ≈ 2.2 个视口高 ≈ 1857）。
     const strip = padded(390, 5000, [88, 120, 200], 200_000)
     await open(page, { count: 300, location: { format: 'comic', index: 0 }, image: strip, delays: { head: 300, full: 1200 } })
@@ -240,24 +269,24 @@ test.describe('手机触摸滚动', () => {
         await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
       }
     })
-    // 此刻页码只能按初始估高映射，被虚报到第 16 页上下。
-    expect((await current(page)).index).toBeGreaterThanOrEqual(12)
-    // 探测到达、估高学习后：物理滚动 30000px ÷ 真实页高 5000 = 第 6 页（0 基），
-    // 修复前保留虚高页码停在第 16 页，中间十页内容被永久跳过。
-    await expect.poll(async () => (await current(page)).index, { timeout: 10_000 }).toBe(6)
-    await page.waitForTimeout(1500)
-    expect((await current(page)).index).toBe(6)
-    expect(await page.evaluate(() => Math.round(window.comicFixture.viewport.scrollTop))).toBe(30_000)
-    await loaded(page, 6)
-    expect((await current(page)).index).toBe(6)
+    const before = await current(page)
+    expect(before.index).toBeGreaterThanOrEqual(12)
+    // 探测到达后必须保留当前页；旧像素锚会在没有输入时退回第 6 页。
+    await loaded(page, before.index)
+    expect((await current(page)).index).toBe(before.index)
+    const offset = await imageAt(page, before.index).evaluate((image) => -image.getBoundingClientRect().top)
+    expect(offset).toBeCloseTo(30_000 - before.index * 844 * 2.2, 0)
+    // 学习仍用于后续布局，不关闭探测或冻结所有未知页来掩盖跳动。
+    await page.mouse.move(195, 422); await page.mouse.wheel(0, 5000)
+    await expect.poll(async () => (await current(page)).index).toBe(before.index + 1)
   })
 
   test('惯性滚动中锚点上方页面陆续探测出真实尺寸时不改写 scrollTop、画面不往回跳，停稳后才一次结清', async ({ page }) => {
     // 长短交替的参差条漫（3000/7000，字节几乎相同）：估高只能落在中间，每一页探测到达都会修正锚点上方高度。
     // 真实网络形态：探测 300ms 先到、整图 1200ms 后到。
     const short = padded(390, 3000, [88, 120, 200], 200_000), long = padded(390, 7000, [200, 120, 88], 200_000)
-    await open(page, { count: 300, location: { format: 'comic', index: 40 }, image: short, odd: long, delays: { head: 300, full: 1200 } })
-    // 从保存的进度打开：第 40 页是像素锚基准，其上方十几页仍是估高占位，探测环会在接下来几秒内逐页修正。
+    await open(page, { count: 300, location: { format: 'comic', index: 40, ratio: .8 }, image: short, odd: long, delays: { head: 300, full: 1200 } })
+    // 从页尾附近打开确保触摸跨页；上方十几页仍是估高占位，探测环会在接下来几秒内逐页修正。
     await loaded(page, 40)
     await page.evaluate(() => {
       const fixture = window.comicFixture
@@ -289,20 +318,21 @@ test.describe('手机触摸滚动', () => {
       samples: window.comicFixture.samples, mismatch: window.comicFixture.mismatch, writeTimes: window.comicFixture.writeTimes,
       probed: [...(window.comicFixture.reader as unknown as { dimensions: Map<number, unknown> }).dimensions.keys()].filter((index) => index < 40).length,
     }))
-    // 惯性确实跨过了多页，且锚点上方确有页面在此期间探测出真实尺寸。
-    expect(samples.at(-1)! - samples[0]!).toBeGreaterThan(2500)
+    // 直接检查跨页，避免用依赖浏览器惯性曲线的固定 2500px 距离间接推断。
+    expect((await current(page)).index).toBeGreaterThan(40)
+    expect(samples.at(-1)! - samples[0]!).toBeGreaterThan(800)
     expect(probed).toBeGreaterThanOrEqual(3)
     // 阅读位置单调前进：任何一次“往回跳一点”都会在逐帧样本里留下回退。
     for (let i = 1; i < samples.length; i++) expect(samples[i]!).toBeGreaterThanOrEqual(samples[i - 1]! - 1)
     // 每一帧当前页节点在视口中的位置都与页码/页内比例一致：吸收进占位的修正没有让画面与页码脱节。
     expect(Math.max(...mismatch)).toBeLessThanOrEqual(2)
-    // 惯性进行中不得程序化改写 scrollTop（旧代码每批探测到达都改写一次，Chromium 里每次改写紧跟着上一帧的
-    // scroll 事件）：每一次改写都只能发生在 scrollend 的同步处理里，或最后一个 scroll 事件静默 150ms 之后。
+    // 惯性进行中不得程序化改写 scrollTop。scrollend 已晚于最近一次 scroll 时，
+    // 惯性已结束；后续后台重排均合法，不限于 scrollend 同一任务中的 5ms。
     await page.waitForTimeout(600)
     const late = await page.evaluate(() => window.comicFixture.writeTimes)
     expect(late.length).toBeGreaterThanOrEqual(writeTimes.length)
     expect(late.length).toBeGreaterThanOrEqual(1)
-    for (const write of late) expect(write.sinceEnd <= 5 || write.sinceScroll >= 150).toBe(true)
+    expect(late.filter(write => write.sinceEnd > write.sinceScroll && write.sinceScroll < 150)).toEqual([])
     // 结清后画面所在页与 DOM 位置一致。
     const location = await current(page)
     const box = await page.locator(`.comic-page[data-index="${location.index}"]`).evaluate((node) => {

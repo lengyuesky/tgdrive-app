@@ -445,28 +445,27 @@ describe('长漫画滚动定位', () => {
     expect(reader.current().index).toBe(0)
   })
 
-  it('快滚穿越占位页后估高才收敛时，落点按物理滚动距离回落到真实页码，不钉死虚高页码', async () => {
+  it('快滚穿越占位页后迟到的长图尺寸只改布局，不把当前页回退十几页', async () => {
     const { reader, viewport, finish, scrollBy, probe, scrollWrites, domTop, settle } = fixture(300, 1450, false, Array.from({ length: 300 }, () => 500_000))
     await finish(reader.open({ format: 'comic', index: 40 }))
-    // 打开后立即连续甩动 4 次共 24000px，全程都是初始估高 1450 的占位页：索引被虚报到第 56 页。
+    // 打开后立即连续甩动 4 次共 24000px，到达尚未加载的第 56 页、页内 800px。
     for (let i = 0; i < 4; i++) await scrollBy(6000)
     expect(reader.current().index).toBe(40 + Math.floor(24_000 / 1450))
-    // 探测结果在落点附近到达，真实页高 6000：物理只滚了 4 个真实页，落点回落到第 44 页，
-    // 而不是保留虚高的第 56 页、把中间十几页内容永久跳过。
+    // 此时不再有滚动输入。后台发现真实页高 6000，不能重解释历史距离并退回第 44 页。
     scrollWrites.length = 0
     probe([[54, 6000], [55, 6000], [56, 6000], [57, 6000], [58, 6000]])
-    expect(reader.current().index).toBe(44)
-    expect(reader.current().ratio ?? 0).toBeLessThan(.01)
-    expect(viewport.querySelector('.comic-page[data-index="44"]')).not.toBeNull()
-    // 惯性仍在进行：不改写 scrollTop，落点页在 DOM 里恰好位于视口顶部——差值吸收进上方占位。
+    expect(reader.current().index).toBe(56)
+    expect((reader.current().ratio ?? 0) * 6000).toBeCloseTo(800)
+    expect(viewport.querySelector('.comic-page[data-index="56"]')).not.toBeNull()
+    // 滑动期间通过上方占位吸收差值，页内像素偏移仍是 800。
     expect(scrollWrites).toEqual([])
-    expect(domTop(44)).toBe(viewport.scrollTop)
+    expect(domTop(56) + 800).toBe(viewport.scrollTop)
     // 停稳后结清：上方占位恢复真实高度并一次性补偿坐标，画面不动。
     settle()
     expect(scrollWrites).toHaveLength(1)
-    expect(viewport.scrollTop).toBe(24 * 6000)
-    expect(domTop(44)).toBe(viewport.scrollTop)
-    expect(reader.current().index).toBe(44)
+    expect(viewport.scrollTop).toBe(36 * 6000 + 800)
+    expect(domTop(56) + 800).toBe(viewport.scrollTop)
+    expect(reader.current().index).toBe(56)
   })
 
   it('停在已加载页上时，穿越区的估高修正滑动中吸收进上方占位、停稳后一次结清，画面始终不动', async () => {
@@ -543,16 +542,23 @@ describe('长漫画滚动定位', () => {
     expect(domTop(448) + 400).toBe(viewport.scrollTop)
   })
 
-  it('像素锚落点越出局部轨道时自动换段定位，不困在旧轨道边界', async () => {
-    const { reader, viewport, finish, scrollBy, probe } = fixture(500, 1450, false, Array.from({ length: 500 }, () => 500_000))
+  it('跨轨道后短页探测不能凭历史像素距离自动前进几十页', async () => {
+    const { reader, viewport, finish, scrollBy, probe, settle, domTop } = fixture(500, 1450, false, Array.from({ length: 500 }, () => 500_000))
     await finish(reader.open({ format: 'comic', index: 100 }))
     // 甩到以 100 为中心的轨道末端（估高 1450 × 20 页），换段后轨道以 120 为中心。
-    await scrollBy(29_000)
+    await scrollBy(29_800)
     expect(reader.current().index).toBe(120)
-    // 真实页高只有 300：同样的物理距离对应 96 个真实页，落点在第 196 页，已越出当前轨道。
+    settle()
+    // 停稳后真实页高缩成 300：原来的 800px 偏移只能收敛到当前页末尾，不能跨入下一页。
     probe([[118, 300], [119, 300], [120, 300], [121, 300], [122, 300]])
-    expect(reader.current().index).toBe(196)
-    expect(viewport.querySelector('.comic-page[data-index="196"]')).not.toBeNull()
-    expect((reader as unknown as { trackFirst: number }).trackFirst).toBe(176)
+    expect(reader.current().index).toBe(120)
+    expect(viewport.querySelector('.comic-page[data-index="120"]')).not.toBeNull()
+    expect((reader.current().ratio ?? 0) * 300).toBeCloseTo(299)
+    expect(domTop(120) + 299).toBe(viewport.scrollTop)
+    // 后续前进与回看仍由用户输入逐页推进。
+    await scrollBy(300)
+    expect(reader.current().index).toBe(121)
+    await scrollBy(-300)
+    expect(reader.current().index).toBe(120)
   })
 })
