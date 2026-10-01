@@ -17,7 +17,7 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
-async function fixture(options: { poster?: Promise<string>; preview?: (path: string) => Promise<string>; autoplayError?: string } = {}) {
+async function fixture(options: { poster?: Promise<string>; preview?: (path: string) => Promise<string>; autoplayError?: string; paged?: number } = {}) {
   document.body.innerHTML = new DOMParser().parseFromString(html, 'text/html').body.innerHTML
   const video = document.querySelector('video')!
   let paused = true, hidden = false, time = 0
@@ -36,7 +36,7 @@ async function fixture(options: { poster?: Promise<string>; preview?: (path: str
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
   vi.spyOn(Math, 'random').mockReturnValue(.99)
   const listeners = new Map<string, (value: unknown) => void>()
-  const files = Array.from({ length: 4 }, (_, index) => ({ id: index + 1, content_version: 'a'.repeat(64), path: `/视频/${index}.mp4`, name: `${index}.mp4`, size: 1000, favorite: false }))
+  const files = Array.from({ length: options.paged ?? 4 }, (_, index) => ({ id: index + 1, content_version: 'a'.repeat(64), path: `/视频/${index}.mp4`, name: `${index}.mp4`, size: 1000, favorite: false }))
   const patch = vi.fn(async () => ({})), close = vi.fn(async () => {})
   const urls = vi.fn(async (ref: string | { id: number }, kind?: string) => {
     const path = typeof ref === 'string' ? ref : files.find(file => file.id === ref.id)!.path
@@ -44,7 +44,7 @@ async function fixture(options: { poster?: Promise<string>; preview?: (path: str
   })
   window.tgdrive = {
     ready: Promise.resolve({ capabilities: [] }), media: { url: urls },
-    files: { search: vi.fn(async () => ({ results: files })) },
+    files: { search: vi.fn(async () => ({ results: files })), ...(options.paged ? { searchPage: vi.fn(async (params: { cursor?: string | null; limit?: number }) => { const start = Number(params.cursor ?? 0), end = start + (params.limit ?? 200); return { results: files.slice(start, end), has_more: end < files.length, next_cursor: end < files.length ? String(end) : null } }) } : {}) },
     settings: { get: async () => ({ source_dir: '/视频', muted: true }), patch, open: vi.fn() },
     favorites: { set: vi.fn(async () => ({ favorite: true })) },
     ui: { close, download: vi.fn(), setImmersive: vi.fn() },
@@ -54,7 +54,7 @@ async function fixture(options: { poster?: Promise<string>; preview?: (path: str
   window.eval(script)
   await settle()
   const click = async (id: string) => { document.getElementById(id)!.click(); await settle() }
-  return { video, play, patch, urls, close, click,
+  return { video, play, patch, urls, close, click, listeners, files,
     visibility: async (value: boolean) => { hidden = value; document.dispatchEvent(new Event('visibilitychange')); await settle() },
   }
 }
@@ -186,4 +186,25 @@ it('退出后清空媒体并忽略迟到地址，键盘监听也被移除', asyn
   expect(close).toHaveBeenCalledOnce()
   expect(video.hasAttribute('src')).toBe(false)
   expect(document.getElementById('video-name')!.textContent).toBe('0.mp4')
+})
+
+
+it('分页队列可以播放第 2001 条，首屏只请求 200 条且近期队列有界', async () => {
+  const { click, video } = await fixture({ paged: 2005 })
+  const search = vi.mocked(window.tgdrive.files.searchPage)
+  expect(search).toHaveBeenCalledTimes(1); expect(search.mock.calls[0]![0]?.limit).toBe(200)
+  for (let index = 0; index < 2001; index++) await click('next')
+  expect(video.src).toContain('/2001.mp4')
+  const text = document.getElementById('video-meta')!.textContent!
+  expect(Number(text.split('/')[1]!.trim().split(' ')[0])).toBeLessThanOrEqual(305)
+  expect(search).toHaveBeenCalledTimes(11)
+}, 15_000)
+
+it('无关文件事件不打断播放，相关变更在下一次切换更新队列', async () => {
+  const { click, listeners, video } = await fixture({ paged: 4 })
+  const search = vi.mocked(window.tgdrive.files.searchPage)
+  listeners.get('files.changed')?.({ paths: ['/其他'] }); await click('next')
+  expect(search).toHaveBeenCalledTimes(1); expect(video.src).toContain('/1.mp4')
+  listeners.get('files.changed')?.({ paths: ['/视频'] }); expect(search).toHaveBeenCalledTimes(1)
+  await click('next'); expect(search).toHaveBeenCalledTimes(2)
 })

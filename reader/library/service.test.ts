@@ -124,6 +124,7 @@ describe('ReadingLibrary 集中服务的真实 SDK 行为', () => {
     expect(mock.stat).not.toHaveBeenCalled()
     expect(library.query({ query: '作者', sourceId: 1, format: 'txt', status: 'read', favorite: true }, state.readings, state.flags).items[0]!.metadata.title).toBe('星河')
     expect(library.query({ sort: 'recent' }, state.readings, state.flags).items.map(item => item.units[0]!.nodeId)).toEqual([3, 2])
+    library.invalidateReadingState()
     mock.storageList.mockRejectedValueOnce(new Error('状态读取失败'))
     await expect(library.loadReadingState()).rejects.toThrow('状态读取失败')
     expect(state.readings.get(2)!.status).toBe('read'); library.destroy()

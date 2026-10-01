@@ -165,3 +165,7 @@
   min-height: 44px;
   min-width: 44px;
 }
+
+/* 展开正文搜索后整个面板可滚动，小屏也能访问结果、目录与关闭操作。 */
+.reader .reader-navigation:has(.body-search[open]) { overflow-y: auto; }
+.reader .reader-navigation:has(.body-search[open]) > * { flex-shrink: 0; }

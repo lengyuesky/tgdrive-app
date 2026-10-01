@@ -1,3 +1,5 @@
+import { matches, highlight } from './search'
+import type { SearchMatch } from './view'
 /** TXT/EPUB 只挂载当前内容单元；滚动和单列分页共用逻辑字符锚点。 */
 import { localFonts, type Location, type Preferences } from './state'
 import type { ReaderView, Section, ViewContext, NavigationState, NavigationItem } from './view'
@@ -50,6 +52,22 @@ export abstract class FlowReader implements ReaderView {
   protected abstract content(index: number, signal: AbortSignal): Promise<DocumentFragment>
   protected offsetFor(_index: number) { return 0 }
   protected indexFor(location: Location) { return boundedIndex(location.index, this.sections.length) }
+  protected async searchContent(index: number, signal: AbortSignal) { return (await this.content(index, signal)).textContent ?? '' }
+  async *search(query: string, signal: AbortSignal): AsyncIterable<SearchMatch> {
+    await this.loadNavigation()
+    let count = 0
+    for (let index = 0; index < this.sections.length; index++) {
+      signal.throwIfAborted(); this.check()
+      const text = await this.searchContent(index, signal)
+      signal.throwIfAborted(); this.check()
+      for (const match of matches(text, query, 100 - count)) {
+        yield { label: this.sections[index]!.label, excerpt: match.excerpt, length: match.length, location: { format: this.format, index, entry: this.sections[index]!.entry, offset: this.offsetFor(index) + match.offset } }
+        if (++count >= 100) return
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+    }
+  }
+  highlight(match: SearchMatch) { highlight(this.article, (match.location.offset ?? 0) - this.offsetBase, match.length) }
   protected afterContent(_signal: AbortSignal) {}
   protected afterLayout() {}
   private check() {

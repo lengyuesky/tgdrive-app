@@ -1,3 +1,5 @@
+import { matches } from '../reader/search'
+import type { SearchMatch } from '../reader/view'
 /** PDF 正文与缩略图复用受控 legacy 文档适配器，不开放网络、文字层或嵌套页面。 */
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import { MiB, isAbort } from '../reader/io'
@@ -93,6 +95,24 @@ export class PdfReader implements ReaderView {
     await this.loadNavigation()
     await this.restore(location?.format === 'pdf' ? location : { format: 'pdf', index: 0 })
     this.signal.throwIfAborted(); this.initialized = true
+  }
+  async *search(query: string, signal: AbortSignal): AsyncIterable<SearchMatch> {
+    await this.prepareOnce()
+    let count = 0
+    for (let index = 0; index < this.sections.length; index++) {
+      signal.throwIfAborted(); this.signal.throwIfAborted()
+      const page = await this.handle!.document.getPage(index + 1)
+      try {
+        const content = await page.getTextContent()
+        signal.throwIfAborted(); this.signal.throwIfAborted()
+        const text = content.items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : '') : '').join('')
+        for (const match of matches(text, query, 100 - count)) {
+          yield { label: '第 ' + (index + 1) + ' 页', excerpt: match.excerpt, length: match.length, location: { format: 'pdf', index } }
+          if (++count >= 100) return
+        }
+      } finally { if (index !== this.index) page.cleanup() }
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+    }
   }
   current(): Location { return { format: 'pdf', index: this.index } }
   navigationState() {

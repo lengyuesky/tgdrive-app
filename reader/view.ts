@@ -3,6 +3,7 @@ import type { Drive, FileEntry } from '../sdk/types'
 import type { Location, Preferences, ReaderFit, ReaderFont, ReadingMode } from './state'
 export interface Section { label: string; entry?: string }
 export interface NavigationItem { label: string; location: Location; depth?: number }
+export interface SearchMatch { label: string; excerpt: string; location: Location; length: number }
 export interface NavigationState {
   sectionIndex: number; sectionCount: number
   pageIndex?: number; pageCount?: number
@@ -38,6 +39,8 @@ export interface ReaderView {
   capabilities?: ReaderCapabilities
   /** 详情用独立实例按需读取目录，结束后 destroy；不会打开正文或发布进度。 */
   loadNavigation?(): Promise<NavigationItem[]>
+  search?(query: string, signal: AbortSignal): AsyncIterable<SearchMatch>
+  highlight?(match: SearchMatch): void
   thumbnail?(index: number, signal: AbortSignal): Promise<ReaderThumbnail>
   pan?(x: number, y: number): void
   open(location?: Location): Promise<void>

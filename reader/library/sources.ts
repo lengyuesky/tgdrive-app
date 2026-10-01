@@ -194,6 +194,16 @@ export class LibraryAccess {
     return { file: current, sourceIds }
   }
   /** 文件视图使用原生 SDK 游标，索引超限也仍可继续查找。 */
+  async directory(path: string, signal: AbortSignal) {
+    const ticket = this.ticket(signal), normalized = filePath(path)
+    const roots = await this.roots(ticket.signal)
+    if (!roots.roots.some(root => within(normalized, root.file.path))) throw new LibraryError('outside_sources', '目录不在当前来源范围内')
+    const found = await gate.run(ticket.signal, () => this.drive.files.stat({ path: normalized }, { signal: ticket.signal }))
+    ticket.check()
+    const checked = await this.file(found.id, ticket.signal)
+    if (!checked.file.is_dir || checked.file.path !== normalized) throw new LibraryError('directory_changed', '目录已移动，请重新刷新')
+    return checked.file
+  }
   async list(directoryId: number, cursor: string | null, signal: AbortSignal) {
     const ticket = this.ticket(signal), before = await this.file(directoryId, ticket.signal)
     if (!before.file.is_dir) throw new LibraryError('invalid_directory', '所选节点不是目录')

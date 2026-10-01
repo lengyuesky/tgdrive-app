@@ -61,7 +61,7 @@ export function aggregateFlags(work: Work, works: readonly Work[], flags: Readon
 }
 
 export class ReadingDataStore {
-  constructor(private drive: Drive, private access: LibraryAccess, private saved?: (record: RecordValue<LibraryProgress>) => Promise<void> | void) {}
+  constructor(private drive: Drive, private access: LibraryAccess, private saved?: (record: RecordValue<LibraryProgress>) => Promise<void> | void, private changed?: (key: string) => void) {}
   async flags(workId: string, signal?: AbortSignal): Promise<ValueSnapshot<WorkFlags>> {
     if (!/^[a-f0-9]{32}$/.test(workId)) throw new LibraryError('invalid_work', '作品标识无效')
     const record = await this.drive.storage.get(`library:flags:${workId}`, { signal }); signal?.throwIfAborted()
@@ -71,7 +71,7 @@ export class ReadingDataStore {
     if (!/^[a-f0-9]{32}$/.test(workId)) throw new LibraryError('invalid_work', '作品标识无效')
     const value = parseFlags({ ...parseFlags(base.value), ...patch })
     signal?.throwIfAborted()
-    const record = await this.drive.storage.set(`library:flags:${workId}`, value, base.revision, { signal }); signal?.throwIfAborted()
+    const record = await this.drive.storage.set(`library:flags:${workId}`, value, base.revision, { signal }); this.changed?.(record.key); signal?.throwIfAborted()
     return { value: parseFlags(record.value), revision: record.revision }
   }
   /** 合并作品的旧标志仍保留；切换汇总标志时对每个别名使用表单的 CAS 基线。 */
@@ -142,6 +142,7 @@ export class ReadingDataStore {
     if (!validProgress(progress)) throw new LibraryError('invalid_progress', '阅读进度或摘要无效')
     await this.access.file(progress.file.id, signal, progress.file.content_version)
     const record = await this.drive.storage.set(`progress:${progress.file.id}`, progress, revision, { signal })
+    this.changed?.(record.key)
     signal.throwIfAborted()
     // 最近阅读索引是可重建缓存，失败不能把已成功的进度误报成未保存。
     let historyWarning: string | undefined
@@ -152,7 +153,7 @@ export class ReadingDataStore {
     parseUnitState(base.value)
     await this.access.file(file.id, signal, file.content_version)
     const value = parseUnitState({ schemaVersion: 1, contentVersion: file.content_version, status })
-    const record = await this.drive.storage.set(`library:reading:${file.id}`, value, base.revision, { signal }); signal.throwIfAborted()
+    const record = await this.drive.storage.set(`library:reading:${file.id}`, value, base.revision, { signal }); this.changed?.(record.key); signal.throwIfAborted()
     return { value, revision: record.revision }
   }
   markRead(file: FileEntry, base: ValueSnapshot<UnitState>, signal: AbortSignal) { return this.setStatus(file, base, 'read', signal) }

@@ -132,6 +132,10 @@ export class EpubReader extends FlowReader {
     })
     this.sections = this.chapters
   }
+  protected async searchContent(index: number, signal: AbortSignal) {
+    const section = this.chapters[index]!
+    return cleanChapter((await this.archive.text(section.path, signal)), section.path).textContent ?? ''
+  }
   protected async content(index: number, signal: AbortSignal) {
     this.pictures?.destroy()
     const section = this.chapters[index]!

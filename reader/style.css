@@ -360,3 +360,10 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .btn-secondary { background: var(--surface); border-color: var(--line); }
 .btn-danger { background: #ef4444; color: #fff; border-color: #ef4444; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+.body-search { margin: 10px 0; padding: 10px; border: 1px solid currentColor; border-radius: 8px; }
+.body-search-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.body-search input { flex: 1; min-width: 120px; }
+.body-search [data-search-results] { max-height: 35vh; overflow: auto; }
+.body-search [data-search-results] button { display: flex; flex-direction: column; width: 100%; text-align: left; white-space: normal; padding: 10px; gap: 4px; }
+.body-search [data-search-results] span { overflow-wrap: anywhere; }

@@ -1,3 +1,4 @@
+import { BodySearch } from './search'
 /** 两个独立插件共用的阅读馆应用外壳与阅读器桥接，只依赖公开 SDK 与统一数据层。 */
 import { filesChangeAffectsSources } from './library/sources'
 import type { Drive, FileEntry } from '../sdk/types'
@@ -116,6 +117,7 @@ export async function startApp(options: AppOptions) {
         <div class="toc-search-bar">
           <input id="toc-filter" type="search" placeholder="筛选目录标题…" aria-label="筛选目录标题" />
         </div>
+        <details id="body-search" class="body-search" hidden><summary>搜索正文</summary><div class="body-search-controls"><input type="search" maxlength="100" aria-label="搜索正文" placeholder="输入正文关键词…" /><button type="button" data-search-run>搜索</button><button type="button" data-search-stop hidden>停止</button></div><p role="status"></p><div data-search-results></div></details>
         <div id="toc-tree" class="toc-tree" role="tree"></div>
         <div class="toc-quick-jump">
           <label class="toc-select-label">快速跳转<select id="toc" aria-label="快速跳转目录"></select></label>
@@ -293,6 +295,9 @@ export async function startApp(options: AppOptions) {
   }
 
   let noticeTimer: ReturnType<typeof setTimeout> | undefined
+  let bodySearch: BodySearch | undefined
+  let navigationSize = 0
+  let nextVolumeOpening = false
   let chrome: ReaderChrome | undefined
   let stopped = false
   const appLifecycle = new AbortController()
@@ -386,33 +391,46 @@ export async function startApp(options: AppOptions) {
       await libraryView?.render(true)
     } else if (currentView === 'home') {
       await homeView?.render()
+    } else if (currentView === 'me') {
+      await meView?.render()
     }
   }
-  /** 后台刷数据；只有文件树/范围变化才重绘当前视图，避免自身写入的回声扰动交互。 */
-  const scheduleLibraryRefresh = (rerender: boolean) => {
-    if (hostEventTimer) clearTimeout(hostEventTimer)
+  let pendingPaths = new Set<string>(), pendingFull = false, pendingSources = false, pendingWorks = false
+  const scheduleLibraryRefresh = (kind: 'state' | 'files' | 'sources' | 'works', paths?: string[]) => {
+    if (kind === 'sources') pendingSources = true
+    if (kind === 'works') pendingWorks = true
+    if (kind === 'files' || kind === 'sources') { if (!paths) pendingFull = true; else paths.forEach(path => pendingPaths.add(path)) }
+    clearTimeout(hostEventTimer)
     hostEventTimer = setTimeout(() => {
       hostEventTimer = undefined
-      if (reading()) return // 阅读中不打扰；退出正文时既有流程会刷新
-      void library.refresh()
-        .then(() => (rerender ? rerenderCurrentView() : undefined))
-        .catch(() => { /* 静默：下一次用户操作仍会刷新 */ })
+      if (reading()) return
+      const full = pendingFull, sources = pendingSources, works = pendingWorks, paths = [...pendingPaths]
+      pendingPaths.clear(); pendingFull = false; pendingSources = false; pendingWorks = false
+      void (async () => {
+        if (sources) await library.initialize()
+        else if (works) await library.reloadWorks()
+        if (full || paths.length) await library.refresh(undefined, full ? undefined : paths)
+        else await library.loadReadingState()
+        await rerenderCurrentView()
+      })().catch(report)
     }, 600)
   }
   const offStorageEvents = drive.on('storage.changed', (value) => {
     const key = typeof (value as { key?: string })?.key === 'string' ? (value as { key: string }).key : ''
-    // 只响应对用户可见的状态（进度/标记/来源/阅读态）；扫描缓存分片（works/cache）不触发重拉。
-    const visible = key === 'library:sources' || key.startsWith('library:flags:') || key.startsWith('library:reading:') || key.startsWith('progress:')
-    if (visible && !drive.storage.wroteRecently?.(key)) scheduleLibraryRefresh(false)
+    const visible = key.startsWith('library:flags:') || key.startsWith('library:reading:') || key.startsWith('progress:')
+    if (visible) library.invalidateReadingState(key)
+    if (drive.storage.wroteRecently?.(key)) return
+    if (key === 'library:sources') scheduleLibraryRefresh('sources')
+    else if (key === 'library:works') scheduleLibraryRefresh('works')
+    else if (visible) scheduleLibraryRefresh('state')
   })
   const offFileEvents = drive.on('files.changed', (value) => {
-    // 新宿主附带变更目录：与任何来源目录无关的变化不重扫；旧宿主无参数时照常刷新。
     const paths = (value as { paths?: unknown } | undefined)?.paths
     if (!filesChangeAffectsSources(library.access.sources, paths)) return
-    scheduleLibraryRefresh(true)
+    scheduleLibraryRefresh('files', Array.isArray(paths) && paths.every(path => typeof path === 'string') ? paths : undefined)
   })
-  const offSyncEvents = drive.on('sync.hint', () => scheduleLibraryRefresh(true))
-  const offScopeEvents = drive.on('scope.changed', () => scheduleLibraryRefresh(true))
+  const offSyncEvents = drive.on('sync.hint', () => { library.invalidateReadingState(); scheduleLibraryRefresh('sources') })
+  const offScopeEvents = drive.on('scope.changed', () => { library.invalidateReadingState(); scheduleLibraryRefresh('sources') })
 
   const openDetail = async (
     itemOrUnit: CatalogItem | { unit: ReadingUnit; work?: Work }
@@ -492,7 +510,7 @@ export async function startApp(options: AppOptions) {
       void navigate(() => view!.turn(actualDelta)).catch(report)
     },
     error: report,
-    onPanelChange: (panel) => readerNav?.onPanelChange(panel === 'navigation'),
+    onPanelChange: (panel) => { readerNav?.onPanelChange(panel === 'navigation'); if (panel !== 'navigation') bodySearch?.stop() },
   })
 
   readerNav = new ReaderNavigation({
@@ -505,6 +523,8 @@ export async function startApp(options: AppOptions) {
       jumpDirty = false
     },
   })
+
+  bodySearch = new BodySearch(get('body-search'), () => view, navigate, () => chrome?.closePanel())
 
   const applyTheme = () => {
     document.body.dataset.theme =
@@ -696,8 +716,13 @@ export async function startApp(options: AppOptions) {
             : undefined
         if (nextUnit && nextBtn) {
           nextBtn.hidden = false
+          nextBtn.disabled = nextVolumeOpening
           nextBtn.textContent = `读完并下一卷：${nextUnit.file.name.replace(/\.[^.]+$/, '')} →`
           nextBtn.onclick = async () => {
+            if (nextVolumeOpening) return
+            nextVolumeOpening = true
+            const generation = bookGeneration
+            nextBtn.disabled = true
             try {
               if (currentFile && currentUnitState) {
                 currentUnitState = await library.reading.markRead(
@@ -706,10 +731,10 @@ export async function startApp(options: AppOptions) {
                   bookController.signal
                 )
               }
-              await openReader(nextUnit.nodeId)
+              if (generation === bookGeneration) await openReader(nextUnit.nodeId)
             } catch (err) {
               report(err)
-            }
+            } finally { nextVolumeOpening = false; if (generation === bookGeneration) nextBtn.disabled = false }
           }
         } else if (nextBtn) {
           nextBtn.hidden = true
@@ -733,6 +758,7 @@ export async function startApp(options: AppOptions) {
     readerReady = false
     bookGeneration++
     bookController.abort()
+    bodySearch?.update()
     readerNav?.update(undefined)
     view?.destroy()
     previous?.stop()
@@ -754,6 +780,8 @@ export async function startApp(options: AppOptions) {
 
     // 恢复书库运行并刷新当前所在视图
     library.resume()
+    library.invalidateReadingState()
+    if (pendingFull || pendingSources || pendingWorks || pendingPaths.size) scheduleLibraryRefresh(pendingSources ? 'sources' : pendingWorks && !pendingFull && !pendingPaths.size ? 'works' : 'files', pendingFull ? undefined : [...pendingPaths])
     if (currentView === 'detail' && detailView && detailSection) {
       if (detailView['currentItem']) {
         await detailView.render(detailView['currentItem'])
@@ -783,6 +811,7 @@ export async function startApp(options: AppOptions) {
     canSave = false
     readerReady = false
     bookController.abort()
+    bodySearch?.stop()
     readerNav?.update(undefined)
     view?.destroy()
     oldStore?.stop()
@@ -877,10 +906,13 @@ export async function startApp(options: AppOptions) {
         viewport: get('viewport'),
         navigate,
         changed: () => {
-          if (active === bookGeneration) capture()
+          if (active === bookGeneration) {
+            if (readerReady && view && view.sections.length !== navigationSize) { navigationSize = view.sections.length; readerNav?.update(view) }
+            capture()
+          }
         },
         error: (err) => {
-          if (active === bookGeneration) report(err)
+          if (active === bookGeneration) { show('retry-reader', true); report(err) }
         },
       }
 
@@ -929,6 +961,8 @@ export async function startApp(options: AppOptions) {
       show('zoom-option', isComic || isPdf)
       show('download', !unit.file.is_dir)
 
+      bodySearch?.update()
+      navigationSize = view.sections.length
       readerReady = true
       canSave = true
       capture(true)

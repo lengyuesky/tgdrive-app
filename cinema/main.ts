@@ -1,3 +1,4 @@
+import { seriesOptions, SleepTimer, type SeriesOptions } from './play-options'
 import './style.css'
 import './libraries.css'
 import type { FileEntry, RecordValue } from '../sdk/types'
@@ -60,6 +61,10 @@ let captionWindowAt = -Infinity, captionLoading = false, selectedSubtitle = '', 
 let subtitleExplicit = false, failedPlayback = false
 let previousFocus: HTMLElement | null = null, nextTimer: ReturnType<typeof setInterval> | undefined
 const video = $<HTMLVideoElement>('video'), captions = new Captions(video)
+let series = seriesOptions(null), seriesKey = '', seriesRecord: RecordValue<SeriesOptions> | null = null, outroTriggered = false, introApplied = false
+const sleep = new SleepTimer(() => { cancelNext(); video.pause(); persist(true); text('play-message', '定时播放已停止'); show('play-message', true); $<HTMLSelectElement>('sleep-timer').value = '0' })
+let seriesSaving = Promise.resolve()
+let closingPlayback = Promise.resolve()
 const detail = $<HTMLDialogElement>('detail'), player = $('player')
 function showPlayer(visible: boolean) {
   show('player', visible)
@@ -233,6 +238,9 @@ async function downloadVideo(file: FileEntry, requiredId: string | undefined, si
   signal.throwIfAborted(); await drive.ui.download(current.file.path)
 }
 async function openDetail(file: FileEntry) {
+  const navigation = navigationGeneration
+  await closingPlayback.catch(() => {})
+  if (navigation !== navigationGeneration) return
   detailController.abort(); detailController = new AbortController(); detailArt?.clear()
   const signal = detailController.signal
   selected = file; detailLibraryId = activeLibraryId ?? undefined; episodes = []; episodesComplete = false; episodePage = 0; favoriteRecord = null
@@ -311,7 +319,7 @@ function savePreferences() {
 }
 function persist(immediate = false) {
   if (!playing || !store || !restored || !session?.canSave || !Number.isFinite(video.currentTime)) return
-  store.mark({ file: playing, seconds: video.currentTime, duration, completed: video.ended || duration > 0 && video.currentTime / duration >= .95, subtitle: selectedSubtitle, audio: session.selectedAudio }, immediate)
+  store.mark({ file: playing, seconds: video.currentTime, duration, completed: outroTriggered || video.ended || duration > 0 && video.currentTime / duration >= .95, subtitle: selectedSubtitle, audio: session.selectedAudio }, immediate)
 }
 function syncStatus(message: string, conflict: boolean) {
   text('sync-status', message); show('sync-remote', conflict); show('sync-local', conflict); show('sync-retry', !conflict && message.includes('未同步'))
@@ -337,6 +345,9 @@ async function startPlayback(file: FileEntry, restart = false, suppliedQueue?: F
   $('subtitle').replaceChildren(new Option('关闭字幕', '')); $('audio').replaceChildren(new Option('默认音轨', ''))
   $<HTMLButtonElement>('previous-episode').disabled = queue.findIndex(e => e.id === file.id) <= 0
   $<HTMLButtonElement>('next-episode').disabled = queue.findIndex(e => e.id === file.id) >= queue.length - 1
+  series = seriesOptions(null); seriesKey = ''; seriesRecord = null; outroTriggered = false; introApplied = false
+  $<HTMLFieldSetElement>('series-options').disabled = true
+  text('series-status', '正在读取本剧设置…')
   try {
     await immersive(true); signal.throwIfAborted()
     const { file: current, library: root } = await scopedVideo(file, signal, requiredId)
@@ -351,11 +362,21 @@ async function startPlayback(file: FileEntry, restart = false, suppliedQueue?: F
     try { progress = await store.load() } catch { syncStatus('无法读取历史，暂不保存进度；请关闭并重试', false) }
     signal.throwIfAborted()
     selectedSubtitle = progress?.subtitle ?? ''; subtitleExplicit = progress?.subtitle !== undefined; restoredAudio = progress?.audio
+    try {
+      const directory = await access.stat({ path: parentPath(current.path) }, signal)
+      requireDirectory(root.directoryPath, directory.path)
+      if (!directory.is_dir) throw new Error('本剧文件夹不可用')
+      const key = 'series:' + directory.id, record = await drive.storage.get<SeriesOptions>(key, { signal })
+      signal.throwIfAborted()
+      series = seriesOptions(record?.value); seriesRecord = record; seriesKey = key
+      $<HTMLInputElement>('skip-intro').value = String(series.intro); $<HTMLInputElement>('skip-outro').value = String(series.outro)
+      $<HTMLFieldSetElement>('series-options').disabled = false; text('series-status', '0 表示不跳过；设置适用于同文件夹内的视频')
+    } catch (error) { signal.throwIfAborted(); text('series-status', '设置读取失败，重新打开影片可重试') }
     const target = !restart && progress && !progress.completed ? progress.seconds : 0
     const sessionStore = store
     session = new PlaybackSession(drive, current, video, scheduler, {
       info: info => { if (active === playGeneration) updateInfo(info) },
-      ready: () => { if (active !== playGeneration) return; restored = true; sessionStore.restored(); show('play-message', false); applyPreferences(); handle(loadSelectedSubtitle()); },
+      ready: () => { if (active !== playGeneration) return; restored = true; sessionStore.restored(); show('play-message', false); applyPreferences(); handle(loadSelectedSubtitle()); if (sleep.check()) return; if (!introApplied && !target && series.intro && duration > series.intro + series.outro + 5 && session?.currentInfo.seekable) { introApplied = true; handle(seek(series.intro)); } },
       error: message => { if (active !== playGeneration) return; failedPlayback = true; text('play-message', message); show('play-message', true); show('big-play', true); video.pause() },
       note: message => { if (active === playGeneration) toast(message) },
     })
@@ -428,25 +449,31 @@ async function seek(seconds: number) {
 }
 async function closePlayer(reload = true, keepIntent = false) {
   if (!keepIntent) startIntent++
-  if (player.hidden && !session && !playing) return
+  if (player.hidden && !session && !playing) return closingPlayback
   cancelNext(); persist(true)
+  if (!keepIntent) { sleep.set(0); $<HTMLSelectElement>('sleep-timer').value = '0' }
   const oldStore = store
   restored = false; playGeneration++; subtitleController.abort(); playController.abort()
   session?.stop(); session = undefined; captions.clear(); oldStore?.stop(); store = undefined
   if (document.pictureInPictureElement) await document.exitPictureInPicture().catch(() => {})
   if (document.fullscreenElement) await document.exitFullscreen().catch(() => {})
   showPlayer(false); show('play-options', false); player.classList.remove('css-fullscreen'); playing = undefined; playingRoot = null; playingLibraryId = undefined
-  await Promise.all([oldStore?.flush(), immersive(false)])
-  if (reload) { await loadPage(); $('main').focus() }
+  closingPlayback = (async () => {
+    await Promise.all([oldStore?.flush(), immersive(false)])
+    if (reload) { await loadPage(); $('main').focus() }
+  })()
+  await closingPlayback
 }
 async function togglePlay() {
   cancelNext()
+  if (sleep.stopped) sleep.set(0)
   if ((!session || failedPlayback || video.error) && playing) return startPlayback(playing, false, queue)
   if (video.paused) await session?.play(); else video.pause()
 }
 async function goEpisode(delta: number) { const index = queue.findIndex(f => f.id === playing?.id), file = queue[index + delta]; if (file) await startPlayback(file, false, queue) }
 function cancelNext() { clearInterval(nextTimer); nextTimer = undefined; show('next-countdown', false) }
 function ended() {
+  if (sleep.check(true)) return
   persist(true)
   cancelNext()
   if (!pref.autoplay || queue.findIndex(f => f.id === playing?.id) >= queue.length - 1) return
@@ -503,6 +530,26 @@ on('seek', 'change', () => seek(Number(value('seek'))))
 on('previous-episode', 'click', () => goEpisode(-1)); on('next-episode', 'click', () => goEpisode(1))
 on('mute', 'click', () => { video.muted = !video.muted; $('mute').setAttribute('aria-pressed', String(video.muted)) })
 on('volume', 'input', () => { video.volume = Number(value('volume')); video.muted = false })
+on('sleep-timer', 'change', () => { sleep.set(Number(value('sleep-timer'))); toast(value('sleep-timer') === '0' ? '已取消定时停止' : '定时停止已设置') })
+on('save-series', 'click', () => {
+  if (!seriesKey) return
+  const generation = playGeneration, key = seriesKey, revision = seriesRecord?.revision ?? null
+  const next = seriesOptions({ schemaVersion: 1, intro: Number(value('skip-intro')), outro: Number(value('skip-outro')) })
+  $<HTMLFieldSetElement>('series-options').disabled = true
+  seriesSaving = (async () => {
+    try {
+      const saved = await drive.storage.set(key, next, revision)
+      if (generation !== playGeneration) return
+      series = next; seriesRecord = saved; text('series-status', '本剧设置已同步；片头在下次从头播放时生效')
+    } catch (error) {
+      if (generation !== playGeneration) return
+      if ((error as { code?: string }).code === 'storage_conflict') {
+        seriesKey = ''; text('series-status', '另一设备更改了本剧设置，请重新打开影片后调整')
+      } else text('series-status', '保存失败，点击保存重试')
+    } finally { if (generation === playGeneration) $<HTMLFieldSetElement>('series-options').disabled = !seriesKey }
+  })()
+  return seriesSaving
+})
 on('speed', 'change', () => { pref.speed = Number(value('speed')); return savePreferences() })
 on('fit', 'change', () => { pref.fit = value('fit') === 'cover' ? 'cover' : 'contain'; return savePreferences() })
 on('autoplay', 'change', () => { pref.autoplay = $<HTMLInputElement>('autoplay').checked; if (!pref.autoplay) cancelNext(); return savePreferences() })
@@ -530,9 +577,13 @@ on('sync-remote', 'click', async () => { const remote = await store?.resolve(tru
 on('sync-local', 'click', () => store?.resolve(false))
 video.addEventListener('timeupdate', () => {
   text('current-time', timeText(video.currentTime)); if (document.activeElement !== $('seek')) $<HTMLInputElement>('seek').value = String(video.currentTime)
+  if (sleep.check()) return
+  if (restored && !video.paused && !outroTriggered && series.outro > 0 && duration > series.intro + series.outro + 5 && video.currentTime >= duration - series.outro) {
+    outroTriggered = true; video.pause(); ended(); return
+  }
   persist(); handle(refreshEmbedded())
 })
-video.addEventListener('playing', () => { show('big-play', false); show('play-message', false); $('toggle-play').replaceChildren(icon('pause')) })
+video.addEventListener('playing', () => { if (sleep.check()) { video.pause(); return } show('big-play', false); show('play-message', false); $('toggle-play').replaceChildren(icon('pause')) })
 video.addEventListener('pause', () => { show('big-play', true); $('toggle-play').replaceChildren(icon('play')); persist(true) })
 video.addEventListener('waiting', () => { if (restored && !video.paused) { text('play-message', '正在缓冲…'); show('play-message', true) } })
 video.addEventListener('ended', ended)
@@ -571,8 +622,8 @@ player.addEventListener('keydown', event => {
   const action = actions[event.key] ?? actions[event.key.toLowerCase()]
   if (action) { event.preventDefault(); handle(action()) }
 })
-document.addEventListener('visibilitychange', () => { if (document.hidden && !document.pictureInPictureElement) { video.pause(); persist(true) } })
-drive.on('beforeClose', async () => { persist(true); const pending = store?.flush(); restored = false; session?.stop(); session = undefined; pageController.abort(); detailController.abort(); playController.abort(); await Promise.all([pending, manager.flush(), prefSaving]) })
+document.addEventListener('visibilitychange', () => { sleep.check(); if (document.hidden && !document.pictureInPictureElement) { video.pause(); persist(true) } })
+drive.on('beforeClose', async () => { persist(true); const pending = store?.flush(); restored = false; session?.stop(); session = undefined; pageController.abort(); detailController.abort(); playController.abort(); await Promise.all([pending, manager.flush(), prefSaving, seriesSaving]) })
 
 // —— 宿主事件：跨设备进度、媒体库与文件树变化时去抖刷新列表 ——
 let hostEventTimer: ReturnType<typeof setTimeout> | undefined
@@ -602,7 +653,7 @@ drive.on('files.changed', (value) => {
 })
 drive.on('sync.hint', refreshLists)
 drive.on('scope.changed', refreshLists)
-window.addEventListener('pagehide', () => { pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
+window.addEventListener('pagehide', () => { sleep.clear(); clearTimeout(hostEventTimer); pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
 async function boot() {
   await drive.ready
   const saved = await drive.storage.get<CinemaPreferences>('preferences')

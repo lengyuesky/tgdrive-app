@@ -1,4 +1,4 @@
-/** 有界完整 TXT 解码，保留真实字符位置，不沿用文件预览的 256 KiB 截断。 */
+/** 有界渐进 TXT 解码，保留真实字符位置，不沿用文件预览的 256 KiB 截断。 */
 import { FlowReader } from '../reader/flow'
 import { LIMITS, MiB, RangeFile } from '../reader/io'
 import type { NavigationItem, ViewContext } from '../reader/view'
@@ -58,26 +58,63 @@ export class TextReader extends FlowReader {
   private chunks: ReturnType<typeof textSections> = []
   encoding = 'utf-8'
   constructor(context: ViewContext) { super(context); this.source = new RangeFile(context.drive, context.file, context.signal, LIMITS.txt) }
+  private decoding = 0
+  private complete = false
+  private opened = false
+  private stoppedText = false
+  private finish?: () => Promise<void>
+  private background?: Promise<void>
+  private loadingFailed = false
   protected async prepare(location?: Location) {
+    const generation = ++this.decoding
     const sample = await this.source.read(0, Math.min(this.source.file.size, MiB))
-    let encoding = location?.encoding ?? detectEncoding(sample), text: string
-    try { text = await this.decode(encoding) }
-    catch (error) {
-      if (encoding !== 'utf-8' || location?.encoding || this.context.signal.aborted) throw error
-      encoding = 'gb18030'; text = await this.decode(encoding)
-    }
-    if (!text.trim()) throw new Error('文本文件为空')
-    const chunks = textSections(text)
-    this.encoding = encoding; this.text = text; this.chunks = chunks; this.sections = chunks; this.navigation = textNavigation(chunks)
-  }
-  private async decode(encoding: string) {
+    const encoding = location?.encoding ?? detectEncoding(sample)
     const decoder = new TextDecoder(encoding, { fatal: encoding === 'utf-8' })
-    const chunks: string[] = []
-    for (let at = 0; at < this.source.file.size; at += MiB) {
-      chunks.push(decoder.decode(await this.source.read(at, Math.min(MiB, this.source.file.size - at)), { stream: true }))
+    let raw = '', at = 0
+    this.complete = false; this.loadingFailed = false; this.encoding = encoding
+    const step = async () => {
+      const bytes = at === 0 ? sample : await this.source.read(at, Math.min(MiB, this.source.file.size - at))
+      this.context.signal.throwIfAborted()
+      if (generation !== this.decoding || this.stoppedText) throw new DOMException('文本加载已取消', 'AbortError')
+      at += bytes.length
+      const complete = at >= this.source.file.size
+      raw += decoder.decode(bytes, { stream: !complete })
+      const text = raw.replace(/\r\n?/g, '\n')
+      const chunks = textSections(text)
+      // 未读完时隐藏最后一个尚可能增长的窗口，后台追加不会改变当前正文的几何。
+      if (!complete) chunks.pop()
+      if (complete && !text.trim()) throw new Error('文本文件为空')
+      this.complete = complete; this.text = text; this.chunks = chunks; this.sections = chunks; this.navigation = textNavigation(chunks)
     }
-    chunks.push(decoder.decode())
-    return chunks.join('').replace(/\r\n?/g, '\n')
+    do { await step() } while (!this.complete && (!this.chunks.length || (location?.offset ?? 0) >= this.chunks.at(-1)!.end || (location?.offset === undefined && (location?.index ?? 0) >= this.chunks.length)))
+    let pending: Promise<void> | undefined
+    this.finish = () => pending ??= (async () => {
+      while (!this.complete && generation === this.decoding && !this.stoppedText) {
+        await step()
+        if (this.opened) this.context.changed()
+        await new Promise<void>(resolve => setTimeout(resolve, 0))
+      }
+    })()
+  }
+  async open(location?: Location) {
+    await super.open(location)
+    this.opened = true
+    this.background = this.finish?.()
+    void this.background?.catch(error => {
+      if (this.stoppedText || this.context.signal.aborted) return
+      this.loadingFailed = true; this.context.changed(); this.report(error)
+    })
+  }
+  async loadNavigation() {
+    await super.loadNavigation()
+    await this.finish?.()
+    this.context.signal.throwIfAborted()
+    if (this.stoppedText) throw new DOMException('阅读器已关闭', 'AbortError')
+    return structuredClone(this.navigation)
+  }
+  navigationState() {
+    const state = super.navigationState()
+    return { ...state, atEnd: this.complete && state.atEnd, layoutNotice: this.complete ? undefined : this.loadingFailed ? '后续内容加载失败，请重试打开或选择正确编码' : '正文可读，正在加载后续章节…' }
   }
   protected async content(index: number) {
     const chunk = this.chunks[index]!
@@ -97,9 +134,11 @@ export class TextReader extends FlowReader {
   current(): Location { return { ...super.current(), encoding: this.encoding } }
   async setEncoding(encoding: string) {
     if (!['utf-8','utf-16le','utf-16be','gb18030'].includes(encoding)) return
+    await this.background?.catch(() => {})
     const old = this.current(), ratio = (old.offset ?? 0) / Math.max(1, this.text.length)
     await this.prepare({ format: 'txt', index: 0, encoding })
+    await this.finish?.()
     await this.restore({ format: 'txt', index: 0, offset: Math.floor(ratio * this.text.length), encoding })
   }
-  destroy() { super.destroy(); this.source.destroy(); this.text = ''; this.chunks = []; this.navigation = [] }
+  destroy() { this.stoppedText = true; this.decoding++; super.destroy(); this.source.destroy(); this.text = ''; this.chunks = []; this.navigation = [] }
 }

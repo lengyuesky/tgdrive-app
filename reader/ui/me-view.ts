@@ -404,97 +404,39 @@ export class MeView {
     }
   }
 
-  /** 想读清单 */
-  private async renderWantSubView() {
-    const subview = this.container.querySelector<HTMLElement>('#subview-want')
-    if (!subview) return
+  private renderWantSubView() { return this.renderFlagList('want') }
+  private renderFavSubView() { return this.renderFlagList('fav') }
 
-    subview.innerHTML = `
-      <div class="want-subview-container">
-        <h3 class="card-title">想读清单</h3>
-        <div id="want-items-list" class="simple-cards-list">
-          <div class="loading-placeholder">正在加载想读作品…</div>
-        </div>
-      </div>
-    `
-
-    const listEl = subview.querySelector<HTMLElement>('#want-items-list')
+  /** 收藏和想读使用有界分页，列表失败保留重试入口。 */
+  private async renderFlagList(kind: 'want' | 'fav', offset = 0): Promise<void> {
+    const container = this.container.querySelector<HTMLElement>('#subview-' + kind)
+    if (!container) return
+    const signal = this.lifecycle.signal
+    container.replaceChildren()
+    const title = document.createElement('h3'), list = document.createElement('div'), controls = document.createElement('div')
+    title.textContent = kind === 'want' ? '想读清单' : '我的收藏'
+    list.id = kind + '-items-list'; list.className = 'simple-cards-list'
+    controls.className = 'pagination'; controls.setAttribute('aria-label', title.textContent + '分页')
+    container.append(title, list, controls)
+    list.textContent = '正在加载…'
+    const button = (label: string, action: () => void) => { const el = document.createElement('button'); el.type = 'button'; el.textContent = label; el.onclick = action; controls.append(el); return el }
     try {
-      const readingState = await this.context.library.loadReadingState(
-        this.lifecycle.signal
-      )
-      const result = this.context.library.query(
-        { wantToRead: true, limit: 100 },
-        readingState.readings,
-        readingState.flags
-      )
-
-      if (!listEl) return
-      listEl.replaceChildren()
-
-      if (!result.items.length) {
-        listEl.innerHTML = '<p class="empty-state">尚未添加任何想读作品</p>'
-        return
-      }
-
-      result.items.forEach((item) => {
-        const row = this.createSimpleRow(item)
-        listEl.append(row)
-      })
-    } catch (err) {
-      if (listEl) {
-        const p = document.createElement('p')
-        p.className = 'error-text'
-        p.textContent = `加载失败：${err instanceof Error ? err.message : String(err)}`
-        listEl.replaceChildren(p)
-      }
-    }
-  }
-
-  /** 收藏夹 */
-  private async renderFavSubView() {
-    const subview = this.container.querySelector<HTMLElement>('#subview-fav')
-    if (!subview) return
-
-    subview.innerHTML = `
-      <div class="fav-subview-container">
-        <h3 class="card-title">我的收藏</h3>
-        <div id="fav-items-list" class="simple-cards-list">
-          <div class="loading-placeholder">正在加载收藏作品…</div>
-        </div>
-      </div>
-    `
-
-    const listEl = subview.querySelector<HTMLElement>('#fav-items-list')
-    try {
-      const readingState = await this.context.library.loadReadingState(
-        this.lifecycle.signal
-      )
-      const result = this.context.library.query(
-        { favorite: true, limit: 100 },
-        readingState.readings,
-        readingState.flags
-      )
-
-      if (!listEl) return
-      listEl.replaceChildren()
-
-      if (!result.items.length) {
-        listEl.innerHTML = '<p class="empty-state">尚未收藏任何作品</p>'
-        return
-      }
-
-      result.items.forEach((item) => {
-        const row = this.createSimpleRow(item)
-        listEl.append(row)
-      })
-    } catch (err) {
-      if (listEl) {
-        const p = document.createElement('p')
-        p.className = 'error-text'
-        p.textContent = `加载失败：${err instanceof Error ? err.message : String(err)}`
-        listEl.replaceChildren(p)
-      }
+      const state = await this.context.library.loadReadingState(signal)
+      if (signal.aborted || !container.contains(list)) return
+      const result = this.context.library.query({ [kind === 'want' ? 'wantToRead' : 'favorite']: true, offset, limit: 40 }, state.readings, state.flags)
+      if (offset && !result.items.length && result.total) return this.renderFlagList(kind, Math.floor((result.total - 1) / 40) * 40)
+      list.replaceChildren(...result.items.map(item => this.createSimpleRow(item)))
+      if (!result.items.length) list.textContent = kind === 'want' ? '尚未添加任何想读作品' : '尚未收藏任何作品'
+      const count = document.createElement('span')
+      count.textContent = '共 ' + result.total + ' 项 · 第 ' + (Math.floor(offset / 40) + 1) + ' / ' + Math.max(1, Math.ceil(result.total / 40)) + ' 页' + (result.complete ? '' : '（仅已整理范围）')
+      controls.append(count)
+      button('上一页', () => { void this.renderFlagList(kind, Math.max(0, offset - 40)) }).disabled = offset === 0
+      button('下一页', () => { void this.renderFlagList(kind, result.nextOffset ?? offset) }).disabled = result.nextOffset === null
+    } catch (error) {
+      if (signal.aborted || !container.contains(list)) return
+      const message = document.createElement('p'); message.className = 'error-text'
+      message.textContent = '加载失败：' + (error instanceof Error ? error.message : String(error)); list.replaceChildren(message)
+      button('重试', () => { this.context.library.invalidateReadingState(); void this.renderFlagList(kind, offset) })
     }
   }
 

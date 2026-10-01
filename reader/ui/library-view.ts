@@ -62,6 +62,7 @@ export class LibraryView {
 
     const isBooks = this.context.kind === 'books'
     const snapshot = this.context.library.snapshot
+    if (this.state.sourceId !== undefined && !snapshot.sources.config.sources.some(source => source.nodeId === this.state.sourceId)) this.state.sourceId = snapshot.indexedSourceId
 
     this.container.innerHTML = `
       <div class="library-view-container">
@@ -173,6 +174,7 @@ export class LibraryView {
     )
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => {
+        this.context.library.invalidateReadingState()
         this.showScanning(true, '正在扫描新增内容…')
         this.context.library
           .refresh(this.lifecycle.signal)
@@ -242,7 +244,8 @@ export class LibraryView {
         this.state.sourceId = sourceSelect.value ? Number(sourceSelect.value) : undefined
         this.state.offset = 0
         this.sdkPageCursors.clear()
-        void this.loadItems()
+        void this.context.library.selectSource(this.state.sourceId, this.lifecycle.signal)
+          .then(() => this.loadItems()).catch(error => this.context.reportError(error))
       }
     }
 
@@ -363,7 +366,6 @@ export class LibraryView {
 
     if (!itemsContainer || !statusMsg) return
     statusMsg.textContent = '正在加载书库…'
-    itemsContainer.replaceChildren()
 
     try {
       const readingState = await this.context.library.loadReadingState(
@@ -488,6 +490,7 @@ export class LibraryView {
         statusMsg.textContent = ''
       }
 
+      itemsContainer.replaceChildren()
       displayItems.forEach((item) => {
         const card = this.renderCard(item)
         itemsContainer.append(card)
@@ -501,6 +504,7 @@ export class LibraryView {
       if (prevBtn) prevBtn.disabled = this.state.offset === 0
       if (nextBtn) nextBtn.disabled = !this.hasMore
     } catch (error) {
+      if (activeGen !== this.loadGeneration || this.lifecycle.signal.aborted) return
       statusMsg.textContent = '加载失败，请刷新重试'
       this.context.reportError(error)
     }

@@ -10,6 +10,7 @@ import { HistoryStore } from './history'
 import { MetadataService, metadataKey, validMetadataResult, type PdfOpener } from './metadata'
 import { LibraryError, errorMessage, parseUnit, unitFormat, uniqueUnits, within, type BibliographicMetadata, type LibraryIssue, type LibraryKind, type ReadingUnit, type UnitReading, type WorkFlags } from './model'
 import { ReadingDataStore } from './reading'
+import { ReadingStateCache } from './reading-cache'
 import { LibraryScanner, mergeScan, type ScanHandle, type ScanProgress, type ScanResult } from './scanner'
 import { ShardedStore, type ShardedSnapshot } from './snapshot'
 import { LibraryAccess, SourcesStore, sourcesIdentity, type SourceRoots, type SourcesMigration, type SourcesSnapshot } from './sources'
@@ -32,6 +33,7 @@ export interface LibrarySnapshot {
   fromCache: boolean
   issues: LibraryIssue[]
   progress?: ScanProgress
+  indexedSourceId?: number
 }
 export interface LibraryCallbacks {
   changed?: (snapshot: LibrarySnapshot) => void
@@ -58,11 +60,15 @@ export class ReadingLibrary {
   private generation = 0
   private initialized = false
   private paused = false
+  private indexedSourceId?: number
+  private readingCache: ReadingStateCache
+  private initialization?: Promise<LibrarySnapshot>
   constructor(readonly drive: Drive, readonly kind: LibraryKind, private callbacks: LibraryCallbacks = {}, private openPdf?: PdfOpener) {
     this.sources = new SourcesStore(drive); this.access = new LibraryAccess(drive); this.works = new WorksStore(drive)
     this.metadata = new MetadataService(drive, this.access, new BudgetCache(drive, 'metadata', CACHE_BUDGETS.metadata, validMetadataResult, status => callbacks.cacheStatus?.('metadata', status)), this.openPdf)
     this.covers = new CoverService(drive, this.access, new ThumbnailCache(new CoverStore(drive)), this.openPdf)
-    this.history = new HistoryStore(drive, this.access); this.reading = new ReadingDataStore(drive, this.access, record => this.history.record(record, this.controller.signal))
+    this.readingCache = new ReadingStateCache(drive, this.controller.signal)
+    this.history = new HistoryStore(drive, this.access); this.reading = new ReadingDataStore(drive, this.access, record => this.history.record(record, this.controller.signal), key => this.invalidateReadingState(key))
     this.scanner = new LibraryScanner(this.access, kind)
     const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
     this.index = new ShardedStore(drive, 'library:cache:index', parseUnit, indexMeta, empty, 2000)
@@ -76,11 +82,22 @@ export class ReadingLibrary {
     return units.filter(unit => this.roots.roots.some(root => unit.sourceIds.includes(root.source.nodeId) || within(unit.file.path, root.file.path)))
       .map(unit => ({ ...unit, sourceIds: this.roots.roots.filter(root => unit.sourceIds.includes(root.source.nodeId) || within(unit.file.path, root.file.path)).map(root => root.source.nodeId) }))
   }
-  async initialize(signal = this.controller.signal): Promise<LibrarySnapshot> {
+  initialize(signal = this.controller.signal): Promise<LibrarySnapshot> {
+    const pending = this.initializeData(signal).finally(() => { if (this.initialization === pending) this.initialization = undefined })
+    this.initialization = pending
+    return pending
+  }
+  private async initializeData(signal: AbortSignal): Promise<LibrarySnapshot> {
     const current = AbortSignal.any([signal, this.controller.signal]), generation = ++this.generation
-    this.initialized = false; this.scanner.cancel()
+    this.initialized = false; this.scanner.cancel(); this.invalidateReadingState()
     const migrated = await this.sources.migrate(current)
     this.current(generation, current)
+    if (this.indexedSourceId !== undefined && !migrated.snapshot.config.sources.some(source => source.nodeId === this.indexedSourceId)) {
+      this.indexedSourceId = undefined; this.state.indexedSourceId = undefined
+      const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
+      this.index = new ShardedStore(this.drive, 'library:cache:index', parseUnit, indexMeta, empty, 2000)
+      this.indexSnapshot = { rows: [], meta: empty(), revision: null }
+    }
     this.state.sources = migrated.snapshot; this.state.migration = migrated.migration; this.access.setSources(migrated.snapshot)
     const roots = await this.access.roots(current); this.current(generation, current); this.roots = roots
     this.state.issues = this.roots.unavailable.map(item => ({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message }))
@@ -124,15 +141,18 @@ export class ReadingLibrary {
     this.requireReady()
     const saved = await this.sources.remove(base, nodeId, signal)
     await this.changeSources(saved, signal)
+    if (this.indexedSourceId === nodeId) await this.selectSource(undefined, signal)
     return this.snapshot
   }
-  refresh(signal = this.controller.signal): Promise<ScanResult> {
+  refresh(signal = this.controller.signal, changedPaths?: readonly string[]): Promise<ScanResult> {
+    if (this.initialization) return this.initialization.then(() => this.refresh(signal, changedPaths))
     this.requireReady()
     const generation = ++this.generation, sourceIdentity = this.access.identity
+    const wasComplete = this.indexSnapshot.meta.complete
     const previous = this.indexSnapshot.rows, current = AbortSignal.any([signal, this.controller.signal])
     const check = () => { this.current(generation, current); if (sourceIdentity !== this.access.identity) throw new LibraryError('source_changed', '来源已变化，旧索引不会发布') }
     const firstIndexedAt = new Map(this.state.works.rows.flatMap(work => work.members.map(member => [member.unitId, member.firstIndexedAt ?? work.firstIndexedAt] as const)))
-    const handle = this.scanner.start({ signal: current, previous, firstIndexedAt,
+    const handle = this.scanner.start({ signal: current, previous, firstIndexedAt, sourceId: this.indexedSourceId, changedPaths,
       onProgress: progress => {
         if (generation !== this.generation) return
         this.state.progress = progress
@@ -158,7 +178,8 @@ export class ReadingLibrary {
         if (!roots.unavailable.length) scan.issues.push({ code: 'source_changed', message: '来源在扫描结束后变化，旧索引保留，请重新刷新' })
       }
       const merged = mergeScan(previous, scan)
-      this.state.units = this.visible(merged.units); this.state.complete = merged.complete
+      this.state.units = this.visible(merged.units); this.state.complete = merged.complete && (!changedPaths || wasComplete)
+      this.invalidateReadingState()
       this.state.issues = [...scan.issues]; this.state.fromCache = false
       await this.updateWorks(generation, current); check()
       const draft = { rows: merged.units, meta: { schemaVersion: 1 as const, sourceIdentity, roots: rootVersions(roots), complete: this.state.complete, indexedAt: Date.now() }, revision: this.indexSnapshot.revision }
@@ -168,11 +189,34 @@ export class ReadingLibrary {
       return scan
     })()
   }
+  /** 每个来源独立缓存 2000 个单元，切换只驻留一份索引；不提高全局内存上限。 */
+  async selectSource(sourceId?: number, signal = this.controller.signal) {
+    await this.initialization
+    this.requireReady()
+    if (sourceId === this.indexedSourceId) return
+    if (sourceId !== undefined && !this.state.sources.config.sources.some(source => source.nodeId === sourceId)) throw new LibraryError('source_removed', '所选来源已移除')
+    this.scanner.cancel(); const generation = ++this.generation
+    const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
+    const store = new ShardedStore(this.drive, 'library:cache:index' + (sourceId === undefined ? '' : ':source:' + sourceId), parseUnit, indexMeta, empty, 2000)
+    const index = await store.load(signal); this.current(generation, signal)
+    const roots = await this.access.roots(signal); this.current(generation, signal)
+    this.roots = roots; this.index = store; this.indexedSourceId = sourceId; this.state.indexedSourceId = sourceId
+    this.indexSnapshot = index; this.state.units = this.visible(index.rows)
+    this.state.complete = index.meta.complete && index.meta.sourceIdentity === this.access.identity && JSON.stringify(index.meta.roots) === JSON.stringify(rootVersions(roots)) && !roots.unavailable.length
+    this.invalidateReadingState(); this.emit()
+    if (!this.state.complete) await this.refresh(signal)
+  }
+
   private updateWorks(generation: number, signal: AbortSignal) {
     const task = this.workQueue.catch(() => {}).then(async () => {
       const check = () => this.current(generation, signal)
       check()
-      const rows = reconcileWorks(this.state.works.rows, this.state.units, this.kind, this.names)
+      let rows = reconcileWorks(this.state.works.rows, this.state.units, this.kind, this.names)
+      if (this.indexedSourceId !== undefined) {
+        const visible = new Set(this.state.units.map(unit => unit.nodeId))
+        const partial = new Map(this.state.works.rows.filter(work => work.members.some(member => !visible.has(member.unitId))).map(work => [work.id, work]))
+        rows = rows.map(work => partial.get(work.id) ?? work)
+      }
       if (JSON.stringify(rows) === JSON.stringify(this.state.works.rows)) return
       const works = await this.works.save({ ...this.state.works, rows }, signal, check)
       check(); this.state.works = works
@@ -201,16 +245,27 @@ export class ReadingLibrary {
     return result
   }
   async loadReadingState(signal = this.controller.signal, onProgress?: (records: number) => void) {
+    await this.initialization
     this.requireReady()
     const generation = this.generation, current = AbortSignal.any([signal, this.controller.signal])
-    const state = await this.reading.loadCatalogState(this.state.units, this.state.works.rows, current, count => { if (generation === this.generation) onProgress?.(count) })
+    const state = await this.readingCache.load(`${generation}:${this.state.works.revision}`, this.state.units,
+      () => this.reading.loadCatalogState(this.state.units, this.state.works.rows, this.controller.signal, count => { if (generation === this.generation) onProgress?.(count) }), current)
     this.current(generation, current)
     return state
   }
+  invalidateReadingState(key?: string) { this.readingCache.invalidate(key) }
+  async reloadWorks(signal = this.controller.signal) {
+    await this.initialization
+    const generation = this.generation
+    await this.workQueue.catch(() => {})
+    const works = await this.works.load(signal)
+    this.current(generation, signal); this.state.works = works; this.invalidateReadingState(); this.emit()
+  }
   query(query: LibraryQuery = {}, readings?: ReadonlyMap<number, UnitReading>, flags?: ReadonlyMap<string, WorkFlags>) {
-    return queryLibrary({ units: this.state.units, works: this.state.works.rows, metadata: this.names, readings, flags, complete: this.state.complete }, query)
+    return queryLibrary({ units: this.state.units, works: this.state.works.rows, metadata: this.names, readings, flags, complete: this.state.complete && (this.indexedSourceId === undefined || query.sourceId === this.indexedSourceId) }, query)
   }
   async openUnit(nodeId: number, signal = this.controller.signal) {
+    await this.initialization
     this.requireReady()
     const checked = await this.access.file(nodeId, signal), format = unitFormat(checked.file, this.kind)
     if (!format) throw new LibraryError('unsupported_file', '文件不再是此应用支持的阅读格式')
@@ -250,7 +305,7 @@ export class ReadingLibrary {
     return removed
   }
   pause() { this.paused = true; this.scanner.pause(); this.metadata.pause(); this.covers.pause() }
-  resume() { this.requireReady(); this.paused = false; this.metadata.resume(); this.covers.resume(); this.scanner.resume() }
+  resume() { this.controller.signal.throwIfAborted(); this.paused = false; this.metadata.resume(); this.covers.resume(); this.scanner.resume() }
   cancelScan() { this.scan?.cancel() }
   destroy() { this.generation++; this.controller.abort(); this.scanner.cancel(); this.history.cancel(); this.metadata.destroy(); this.covers.destroy(); this.access.destroy() }
 }

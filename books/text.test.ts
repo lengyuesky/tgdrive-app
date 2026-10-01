@@ -89,3 +89,35 @@ describe('TXT 分层目录与独立准备', () => {
     expect(mock.readRange).not.toHaveBeenCalled()
   })
 })
+
+describe('TXT 渐进首屏与正文搜索', () => {
+  it('首屏不等待后续慢 Range，后台完成后当前字符位置与正文不变', async () => {
+    const text = '第1章 起点\n' + 'abcd\n'.repeat(450000) + '\n第2章 终点\n搜索目标'
+    const { reader, mock, viewport } = fixture(text), gate = deferred(), original = mock.readRange.getMockImplementation()!
+    mock.readRange.mockImplementation(async (...args) => { if (args[1] >= 1048576) await gate.promise; return original(...args) })
+    await reader.open({ format: 'txt', index: 0, offset: 120 })
+    const before = viewport.textContent, location = reader.current()
+    expect(before).toContain('第1章'); expect(reader.navigationState().atEnd).toBe(false)
+    expect(reader.navigationState().layoutNotice).toContain('加载后续')
+    gate.resolve()
+    await vi.waitFor(() => expect(reader.navigationState().layoutNotice).toBeUndefined())
+    expect(reader.current().offset).toBe(location.offset); expect(viewport.textContent).toBe(before)
+    expect(reader.navigation.some(item => item.label === '第2章 终点')).toBe(true)
+  })
+  it('搜索跨章节返回真实字符位置，跳转和高亮不更改正文', async () => {
+    const text = '第1章 起点\n中文 [a+b] 开头\n第2章 终点\n另一个 [a+b] 结尾'
+    const { reader, viewport } = fixture(text); await reader.open()
+    const results = []
+    for await (const item of reader.search('[a+b]', new AbortController().signal)) results.push(item)
+    expect(results).toHaveLength(2); expect(results[1]!.location.offset).toBe(text.lastIndexOf('[a+b]'))
+    await reader.restore(results[1]!.location); reader.highlight(results[1]!)
+    expect(window.getSelection()?.toString()).toBe('[a+b]'); expect(viewport.textContent).toContain('另一个 [a+b] 结尾')
+  })
+  it('后台慢读取销毁后不能继续修改正文或发布位置', async () => {
+    const { reader, mock, context } = fixture('abc\n'.repeat(600000)), gate = deferred(), original = mock.readRange.getMockImplementation()!
+    mock.readRange.mockImplementation(async (...args) => { if (args[1] >= 1048576) await gate.promise; return original(...args) })
+    await reader.open(); reader.destroy(); const calls = vi.mocked(context.changed).mock.calls.length
+    gate.resolve(); await new Promise(resolve => setTimeout(resolve, 10))
+    expect(context.changed).toHaveBeenCalledTimes(calls); expect(context.error).not.toHaveBeenCalled()
+  })
+})

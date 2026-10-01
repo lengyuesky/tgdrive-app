@@ -7,6 +7,8 @@
   const lifetime = new AbortController()
   const listen = (target, event, listener, options = {}) => target.addEventListener(event, listener, { ...options, signal: lifetime.signal })
   const mobileQuery = window.matchMedia('(max-width: 767px), (pointer: coarse)')
+  let cursor = null, more = false, filling, filesDirty = false
+  const recent = new Set(), cursors = new Set(), subscriptions = []
   let queue = [], index = 0, directory = '/', muted = true
   let generation = 0, listGeneration = 0, disposed = false, listController
   let wantsPlay = true, scrubbing = false, resumeAfterSeek = false
@@ -144,8 +146,10 @@
     buffering(true)
     get('video-name').textContent = item.name
     get('video-name').title = item.path
-    get('video-meta').textContent = `${index + 1} / ${queue.length} · ${sizeText(item.size)}${queue.length === 2000 ? ' · 本次最多载入 2000 条' : ''}`
-    for (const id of ['previous', 'next', 'skip-error']) get(id).disabled = queue.length < 2
+    get('video-meta').textContent = `${index + 1} / ${queue.length} · ${sizeText(item.size)}${more ? ' · 更多视频待载入' : ''}`
+    for (const id of ['previous', 'next', 'skip-error']) get(id).disabled = queue.length < 2 && !more
+    recent.delete(itemKey(item)); recent.add(itemKey(item)); if (recent.size > 512) recent.delete(recent.values().next().value)
+    if (more && queue.length - index < 6) handle(fillQueue())
     syncFavorite(); syncMute(); syncPlay()
     const cached = !fresh && prepared?.key === itemKey(item) && Date.now() - prepared.at < 30_000 ? prepared.promise : undefined
     prepared = undefined
@@ -167,7 +171,7 @@
     const active = ++listGeneration
     listController?.abort(); listController = new AbortController()
     const signal = AbortSignal.any([lifetime.signal, listController.signal])
-    stopVideo(); queue = []; prepared = undefined
+    stopVideo(); queue = []; prepared = undefined; cursor = null; more = true; filling = undefined; filesDirty = false; cursors.clear()
     for (const id of ['player', 'actions', 'video-info', 'empty', 'list-error']) hide(id, true)
     hide('loading-list', false)
     try {
@@ -178,9 +182,9 @@
       directory = settings.source_dir || '/'; muted = settings.muted !== false
       get('source-label').textContent = directory === '/' ? '整库 · 更换' : directory
       get('source-label').title = `取材文件夹：${directory}，点击更换`
-      const result = await drive.files.search({ under: directory, kind: 'file', extensions, limit: 2000 }, { signal })
+      index = 0
+      await fillQueue()
       if (disposed || active !== listGeneration) return
-      queue = shuffled(result.results); index = 0
       hide('loading-list', true)
       if (queue.length) await play()
       else {
@@ -194,10 +198,38 @@
       hide('list-error', false)
     }
   }
-  function go(delta) {
-    if (disposed || queue.length < 2) return
+  async function fillQueue() {
+    if (disposed || !more) return
+    if (filling) return filling
+    const active = listGeneration, signal = AbortSignal.any([lifetime.signal, listController.signal])
+    const task = (async () => {
+      const params = { under: directory, kind: 'file', extensions: extensions.split(','), limit: 200, cursor }
+      const paged = typeof drive.files.searchPage === 'function'
+      const result = await (paged ? drive.files.searchPage(params, { signal }) : drive.files.search({ ...params, extensions, limit: 2000 }, { signal }))
+      if (disposed || active !== listGeneration) return
+      if (result.has_more && (!result.next_cursor || cursors.has(result.next_cursor))) throw new Error('视频列表已变化，请重新加载')
+      more = paged && result.has_more === true; cursor = result.next_cursor || null
+      if (cursor) { cursors.add(cursor); if (cursors.size > 64) cursors.delete(cursors.values().next().value) }
+      const known = new Set(queue.map(itemKey)), fresh = shuffled(result.results).filter(item => !known.has(itemKey(item)))
+      // 新内容排在近期看过的内容之前；旧队列最多保留 100 条用于回看。
+      queue.push(...fresh.filter(item => !recent.has(itemKey(item))), ...fresh.filter(item => recent.has(itemKey(item))))
+      if (index > 100) { queue.splice(0, index - 100); index = 100 }
+      for (const id of ['previous', 'next', 'skip-error']) get(id).disabled = queue.length < 2 && !more
+    })()
+    filling = task
+    try { await task } finally { if (filling === task) filling = undefined }
+  }
+  async function go(delta) {
+    if (disposed) return
+    if (filesDirty) { await load(); return }
+    if (delta > 0 && index === queue.length - 1 && more) {
+      const active = listGeneration
+      await fillQueue()
+      if (disposed || active !== listGeneration) return
+    }
+    if (queue.length < 2) return
     index = (index + delta + queue.length) % queue.length
-    handle(play())
+    await play()
   }
   async function togglePlay() {
     if (disposed || !video.hasAttribute('src')) return
@@ -240,7 +272,7 @@
   function dispose() {
     if (disposed) return
     disposed = true; listGeneration++; prepared = undefined
-    listController?.abort(); lifetime.abort(); unsubscribe()
+    listController?.abort(); lifetime.abort(); unsubscribe(); subscriptions.forEach(off => off())
     clearTimeout(messageTimer); stopVideo()
   }
   async function close() { dispose(); await drive.ui.close() }
@@ -255,9 +287,9 @@
     if (queue[0] === previous) [queue[0], queue[1]] = [queue[1], queue[0]]
     index = 0; handle(play())
   })
-  listen(get('previous'), 'click', () => go(-1))
-  listen(get('next'), 'click', () => go(1))
-  listen(get('skip-error'), 'click', () => go(1))
+  listen(get('previous'), 'click', () => handle(go(-1)))
+  listen(get('next'), 'click', () => handle(go(1)))
+  listen(get('skip-error'), 'click', () => handle(go(1)))
   listen(get('retry-video'), 'click', () => handle(play(true)))
   for (const id of ['open-settings', 'source-label']) listen(get(id), 'click', () => handle(drive.settings.open()))
   listen(get('retry-list'), 'click', () => handle(load()))
@@ -290,7 +322,7 @@
     if (wheelConsumed) return
     wheelTotal += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? innerHeight : 1)
     if (Math.abs(wheelTotal) < 48) return
-    wheelConsumed = true; go(wheelTotal > 0 ? 1 : -1)
+    wheelConsumed = true; handle(go(wheelTotal > 0 ? 1 : -1))
   }, { passive: false })
   listen(get('player'), 'touchstart', event => {
     if (event.target.closest('button, input, select')) { touchStart = null; return }
@@ -305,7 +337,7 @@
     const end = event.changedTouches[0]
     if (touchStart && end && !touchMultiple) {
       const dy = end.clientY - touchStart.y, dx = end.clientX - touchStart.x
-      if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.4) { suppressClickUntil = performance.now() + 400; go(dy < 0 ? 1 : -1) }
+      if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.4) { suppressClickUntil = performance.now() + 400; handle(go(dy < 0 ? 1 : -1)) }
     }
     touchStart = null
   }, { passive: true })
@@ -313,7 +345,7 @@
     if (event.key === 'Escape') { event.preventDefault(); handle(close()); return }
     if (event.target.closest('button,input,textarea,select,a,[contenteditable="true"]') || event.altKey || event.ctrlKey || event.metaKey) return
     if (['ArrowDown', 'PageDown', 'ArrowUp', 'PageUp'].includes(event.key)) {
-      event.preventDefault(); if (!event.repeat) go(['ArrowDown', 'PageDown'].includes(event.key) ? 1 : -1)
+      event.preventDefault(); if (!event.repeat) handle(go(['ArrowDown', 'PageDown'].includes(event.key) ? 1 : -1))
     } else if (event.key === ' ') { event.preventDefault(); if (!event.repeat) handle(togglePlay()) }
     else if (event.key.toLowerCase() === 'm' && !event.repeat) handle(toggleMute())
     else if (['ArrowLeft', 'ArrowRight'].includes(event.key) && !seek.disabled) {
@@ -324,6 +356,12 @@
     if ((settings.source_dir || '/') !== directory) handle(load())
     else { muted = settings.muted !== false; syncMute() }
   })
+  subscriptions.push(drive.on('files.changed', value => {
+    const paths = value?.paths
+    if (!Array.isArray(paths) || paths.some(path => directory === '/' || path === directory || path.startsWith(directory + '/') || directory.startsWith(path === '/' ? '/' : path + '/'))) filesDirty = true
+  }))
+  subscriptions.push(drive.on('sync.hint', () => { filesDirty = true }))
+  subscriptions.push(drive.on('scope.changed', () => handle(load())))
   listen(window, 'pagehide', dispose)
   listen(mobileQuery, 'change', () => handle(syncImmersive()))
   listen(document, 'visibilitychange', () => {

@@ -6,9 +6,11 @@ import { LIBRARY_LIMITS, LibraryError, errorMessage, timeSlice, unitFormat, with
 export type ScanPhase = 'scanning' | 'paused' | 'complete' | 'incomplete'
 export type ScanEnd = 'complete' | 'cancelled' | 'unit-limit' | 'directory-limit' | 'failed'
 export interface ScanProgress { phase: ScanPhase; nodes: number; directories: number; units: number; complete: boolean; issues: LibraryIssue[] }
-export interface ScanResult extends ScanProgress { unitsFound: ReadingUnit[]; sourceIdentity: string; sourceRoots: { nodeId: number; path: string; contentVersion: string }[]; end: ScanEnd }
+export interface ScanResult extends ScanProgress { unitsFound: ReadingUnit[]; sourceIdentity: string; sourceRoots: { nodeId: number; path: string; contentVersion: string }[]; end: ScanEnd; scannedPaths?: string[] }
 export interface ScanOptions {
   signal?: AbortSignal
+  sourceId?: number
+  changedPaths?: readonly string[]
   previous?: readonly ReadingUnit[]
   firstIndexedAt?: ReadonlyMap<number, number>
   onProgress?: (progress: ScanProgress) => void
@@ -29,6 +31,7 @@ export class LibraryScanner {
     const old = new Map((options.previous ?? []).map(unit => [unit.nodeId, unit]))
     let roots: SourceRoots = { roots: [], unavailable: [] }, nodes = 0, end: ScanEnd = 'complete'
     const issues: LibraryIssue[] = []
+    let scannedPaths: string[] | undefined
     const progress = (phase: ScanPhase): ScanProgress => ({ phase, nodes, directories: directories.size, units: units.size, complete: phase === 'complete', issues: [...issues] })
     const notify = (phase: ScanPhase) => options.onProgress?.(progress(phase))
     const stop = () => { request.abort(); wake?.(); wake = undefined }
@@ -56,7 +59,23 @@ export class LibraryScanner {
       try {
         roots = await readRoots()
         for (const item of roots.unavailable) issues.push({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message })
-        for (const root of roots.roots) enqueue(root.file.id)
+        const selected = roots.roots.filter(root => (options.sourceId === undefined || root.source.nodeId === options.sourceId)
+          && (!options.changedPaths || options.changedPaths.some(path => within(path, root.file.path) || within(root.file.path, path))))
+        if (options.changedPaths || options.sourceId !== undefined) scannedPaths = []
+        for (const root of selected) {
+          const paths = options.changedPaths?.filter(path => within(path, root.file.path))
+          if (!paths?.length || options.changedPaths?.some(path => within(root.file.path, path))) {
+            enqueue(root.file.id); scannedPaths?.push(root.file.path); continue
+          }
+          for (const path of paths.filter(path => !paths.some(other => other !== path && within(path, other)))) {
+            try { const folder = await this.access.directory(path, signal); enqueue(folder.id); scannedPaths?.push(folder.path) }
+            catch (error) {
+              signal.throwIfAborted()
+              // 删除、移动或权限变化时从已核验的来源根重扫，不把不可访问的目录当成空目录。
+              enqueue(root.file.id); scannedPaths?.push(root.file.path)
+            }
+          }
+        }
         notify('scanning')
         while (queue.length && end === 'complete') {
           const directory = queue[0]!
@@ -120,7 +139,7 @@ export class LibraryScanner {
       if (outcome === 'cancelled') issues.push({ code: outcome, message: '扫描已取消，旧记录保留，索引尚未完整' })
       const state = progress(outcome === 'complete' ? 'complete' : 'incomplete')
       options.onProgress?.(state)
-      return { ...state, unitsFound: [...units.values()], sourceIdentity, sourceRoots: roots.roots.map(root => ({ nodeId: root.source.nodeId, path: root.file.path, contentVersion: root.file.content_version })), end: outcome }
+      return { ...state, unitsFound: [...units.values()], sourceIdentity, sourceRoots: roots.roots.map(root => ({ nodeId: root.source.nodeId, path: root.file.path, contentVersion: root.file.content_version })), end: outcome, scannedPaths }
     })()
     const handle: ScanHandle = { result,
       pause: () => { if (!paused) { paused = true; request.abort(); notify('paused') } },
@@ -138,7 +157,12 @@ export class LibraryScanner {
 
 /** 只有全扫描成功才核对消失项；局部扫描永远不能把旧缓存误当成空库清除。 */
 export function mergeScan(previous: readonly ReadingUnit[], scan: ScanResult): { units: ReadingUnit[]; complete: boolean } {
-  if (scan.complete) return { units: scan.unitsFound, complete: true }
+  if (scan.complete) {
+    const preserved = scan.scannedPaths ? previous.filter(unit => !scan.scannedPaths!.some(path => within(unit.file.path, path))) : []
+    const units = new Map(preserved.map(unit => [unit.nodeId, unit]))
+    for (const unit of scan.unitsFound) units.set(unit.nodeId, unit)
+    return { units: [...units.values()].slice(0, LIBRARY_LIMITS.units), complete: units.size <= LIBRARY_LIMITS.units }
+  }
   const units = new Map(previous.map(unit => [unit.nodeId, unit]))
   for (const unit of scan.unitsFound) if (units.has(unit.nodeId) || units.size < LIBRARY_LIMITS.units) units.set(unit.nodeId, unit)
   return { units: [...units.values()].slice(0, LIBRARY_LIMITS.units), complete: false }

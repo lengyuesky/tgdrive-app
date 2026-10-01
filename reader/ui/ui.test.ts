@@ -89,7 +89,7 @@ describe('阅读馆 UI 模块', () => {
       settings: { get: async () => ({ source_dir: '/书库' }) },
       storage: {
         get: async (key: string) =>
-          storageStore.has(key) ? { value: storageStore.get(key), revision: 'r1' } : null,
+          storageStore.has(key) ? { key, value: storageStore.get(key), revision: 'r1', updated_at: 1000 } : null,
         set: vi.fn(async (key: string, value: any) => {
           storageStore.set(key, value)
           return { key, value, revision: 'r1' }
@@ -176,6 +176,7 @@ describe('阅读馆 UI 模块', () => {
       summary: { label: '第一章 疯狂年代' },
     })
 
+    library.invalidateReadingState(`progress:${mockFile1.id}`)
     await homeView.render()
 
     // 续读卡应展示标题与进度

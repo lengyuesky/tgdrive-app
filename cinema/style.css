@@ -6,3 +6,6 @@
 @media(max-width:359px){#main{padding:17px 13px 4px}.hero-content{padding:21px 18px}.hero h2{font-size:25px}.poster-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar h1{font-size:20px}.control-row .icon-button{min-width:31px;padding:6px}.control-row svg{width:17px}.player-header h2{font-size:11px}.detail-top{display:block}.detail-poster{width:105px;margin-bottom:18px}.episodes{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-height:500px) and (orientation:landscape){.player-header{padding:3px 10px}.player-header h2{font-size:11px}.player-header .muted{display:none}.player-controls{padding:2px 12px}.control-row{margin-top:0}.control-row .icon-button{min-height:30px;padding:5px}.sync-bar{min-height:15px;padding-bottom:2px}.play-options{bottom:90px;max-height:calc(100% - 130px)}.timeline{font-size:9px}.big-play{width:48px;height:48px}.next-countdown{bottom:110px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+
+#series-options { border: 1px solid #41414f; border-radius: 8px; padding: 12px; margin: 12px 0; min-width: 0; }
+#series-status { font-size: 12px; overflow-wrap: anywhere; }
