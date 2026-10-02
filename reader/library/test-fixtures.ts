@@ -107,6 +107,11 @@ export function memoryDrive(initial: FileEntry[] = [], legacy: Record<string, st
     can, batch,
   } as unknown as Drive
   const seed = (key: string, value: unknown, updated_at = ++clock) => { const record = { key, value: structuredClone(value), revision: String(++revision), updated_at }; records.set(key, record); return structuredClone(record) }
+  if (typeof legacy.source === 'string') {
+    const directory = initial.find(file => file.path === legacy.source && file.is_dir)
+    if (!directory) throw new Error('测试来源目录不存在')
+    seed('library:sources', sources(directory).config)
+  }
   const binary = (entry: FileEntry, bytes: Uint8Array) => { nodes.set(entry.id, { ...entry, size: bytes.length }); data.set(entry.id, bytes); return nodes.get(entry.id)! }
   return { drive, nodes, records, data, get, set, remove, storageList, stat, list, searchPage, readRange, batch, can, seed, binary, coverRecords, coverGet, coverPut, coverDelete, coverStats }
 }

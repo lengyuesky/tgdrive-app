@@ -294,6 +294,8 @@ async function setupApp(
   await page.addInitScript(
     ({ kind, entries, serializedList, readDelay, proportionalRead }) => {
       const storageStore = new Map<string, { key: string; value: any; revision: string; updated_at: number }>()
+      const source = entries.find((file: any) => file.path === '/书库' && file.is_dir)!
+      storageStore.set('library:sources', { key: 'library:sources', value: { schemaVersion: 1, sources: [{ nodeId: source.id, path: source.path, contentVersion: source.content_version, addedAt: 1, rootConfirmed: false }] }, revision: 'sources-1', updated_at: 1 })
       let revCount = 0
 
       const dataEntries = new Map<number, Uint8Array>()

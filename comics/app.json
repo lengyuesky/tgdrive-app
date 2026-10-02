@@ -1,9 +1,9 @@
 {
   "id": "comics",
   "name": "漫画",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "api_version": 2,
-  "min_host_version": "0.3.0",
+  "min_host_version": "0.3.1",
   "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
   "author": "tgdrive",
   "entry": "index.html",
@@ -12,22 +12,14 @@
     "files.read",
     "media.read"
   ],
-  "settings": [
-    {
-      "key": "source_dir",
-      "label": "漫画目录",
-      "description": "过渡期保留作旧版配置迁移入口，新设置请在应用内管理来源；直属图片组成一章，子目录保留为章节。",
-      "type": "directory",
-      "default": "/"
-    }
-  ],
+  "settings": [],
   "integration": {
     "file_types": [
       "cbz",
       "zip"
     ],
     "directories": true,
-    "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+    "changelog": "统一使用应用内来源管理，移除旧目录设置和过渡迁移入口；保留阅读进度、书签及现有来源。",
     "formats": [
       "图片目录",
       "CBZ",

@@ -7,7 +7,6 @@ export const SOURCES_KEY = 'library:sources'
 export interface LibrarySource { nodeId: number; path: string; contentVersion: string; addedAt: number; rootConfirmed: boolean }
 export interface SourcesConfig { schemaVersion: 1; sources: LibrarySource[] }
 export interface SourcesSnapshot { config: SourcesConfig; revision: string | null }
-export interface SourcesMigration { snapshot: SourcesSnapshot; migration: 'existing' | 'none' | 'migrated' | 'confirm-root' }
 export interface ResolvedSource { source: LibrarySource; file: FileEntry }
 export interface SourceRoots { roots: ResolvedSource[]; unavailable: { source: LibrarySource; message: string }[] }
 /** 宿主批量信封的单次上限；更多节点分批核对。 */
@@ -79,17 +78,6 @@ export class SourcesStore {
     const config = parseSources(base.config)
     if (!config.sources.some(source => source.nodeId === nodeId)) throw new LibraryError('source_removed', '此来源已移除，请重新读取配置')
     return this.save({ ...config, sources: config.sources.filter(source => source.nodeId !== nodeId) }, base.revision, signal)
-  }
-  async migrate(signal?: AbortSignal, confirmRoot = false): Promise<SourcesMigration> {
-    const snapshot = await this.load(signal)
-    if (snapshot.revision !== null) return { snapshot, migration: 'existing' }
-    const settings = await this.drive.settings.get()
-    signal?.throwIfAborted()
-    const legacy = settings.source_dir
-    if (legacy === undefined || legacy === '') return { snapshot, migration: 'none' }
-    if (typeof legacy !== 'string') throw new LibraryError('invalid_legacy_source', '旧版来源设置无效，未创建新来源')
-    if (filePath(legacy) === '/' && !confirmRoot) return { snapshot, migration: 'confirm-root' }
-    return { snapshot: await this.add(snapshot, legacy, confirmRoot, signal), migration: 'migrated' }
   }
 }
 function sameNode(a: FileEntry, b: FileEntry) {

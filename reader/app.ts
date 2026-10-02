@@ -1459,8 +1459,8 @@ export async function startApp(options: AppOptions) {
     // 旧版封面缩略图占用私有存储配额，后台回收；失败不影响阅读馆使用。
     void library.purgeLegacyCovers(appLifecycle.signal).catch(() => {})
 
-    // 如果未配置任何来源或根目录迁移待确认，优先切到“我的”进行来源引导
-    if (snapshot.sources.config.sources.length === 0 || snapshot.migration === 'confirm-root') {
+    // 未配置来源时进入“我的”，只使用当前来源管理
+    if (snapshot.sources.config.sources.length === 0) {
       await switchView('me')
     } else {
       // 如果已有来源，缓存优先展示；如果缓存为空，自动触发轻扫描发现新增

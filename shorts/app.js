@@ -180,6 +180,11 @@
       await drive.lifecycle?.migrate(context.data_schema ?? 1, async () => { await drive.settings.get() })
       if (disposed || active !== listGeneration) return
       const settings = await drive.settings.get()
+      if (context.scope?.mode === 'selected' && !context.scope.paths.some(path => path === '/' || settings.source_dir === path || String(settings.source_dir).startsWith(path + '/'))) {
+        settings.source_dir = context.scope.paths[0]
+        if (!settings.source_dir) throw new Error('请先授权取材目录')
+        await drive.settings.patch({ source_dir: settings.source_dir })
+      }
       if (disposed || active !== listGeneration) return
       directory = launchPending && context.launch?.file ? context.launch.file.path.slice(0, context.launch.file.path.lastIndexOf('/')) || '/' : settings.source_dir || '/'; muted = settings.muted !== false
       get('source-label').textContent = directory === '/' ? '整库 · 更换' : directory

@@ -12,7 +12,7 @@ it('最近阅读包含取材目录本身的图片章节，但不混入同名前�
   const outside = file(3, '/漫画/第一章节外部', true)
   const outsidePage = file(31, '/漫画/第一章节外部/01.jpg', false)
   const mock = memoryDrive([rootDir, chapter, page, outside, outsidePage], {
-    source_dir: chapter.path,
+    source: chapter.path,
   })
 
   mock.seed(
@@ -146,10 +146,10 @@ it('图书阅读设置中的字号与行距支持加减按钮精确调控与边�
       api_version: 2,
       dark: false,
     }),
-    settings: { get: async () => ({ source_dir: '/书库' }) },
+    settings: { get: async () => ({ source: '/书库' }) },
     storage: {
       get: async (key: string) =>
-        key === 'preferences' && savedStoragePref
+        key === 'library:sources' ? { key, value: { schemaVersion: 1, sources: [{ nodeId: rootDir.id, path: rootDir.path, contentVersion: rootDir.content_version, addedAt: 1, rootConfirmed: false }] }, revision: 'sources-1' } : key === 'preferences' && savedStoragePref
           ? { value: savedStoragePref, revision: 'r1' }
           : null,
       set: vi.fn(async (key: string, value: any) => {
@@ -264,7 +264,7 @@ it('目录按钮通过 ReaderChrome 正确打开导航面板，支持关闭按�
   document.body.innerHTML = '<div id="app"></div>'
   const rootDir = file(1, '/书库', true)
   const bookFile = file(10, '/书库/示例文本.txt', false, 'v1', 1024)
-  const mock = memoryDrive([rootDir, bookFile], { source_dir: '/书库' })
+  const mock = memoryDrive([rootDir, bookFile], { source: '/书库' })
 
   const mockView: ReaderView = {
     title: '示例文本',
@@ -350,7 +350,7 @@ it('真实末端出现读完并下一卷按钮，点击后使用正确节点标�
   const rootDir = file(1, '/漫画', true)
   const vol1 = file(101, '/漫画/星河 第1卷.cbz', false)
   const vol2 = file(102, '/漫画/星河 第2卷.cbz', false)
-  const mock = memoryDrive([rootDir, vol1, vol2], { source_dir: '/漫画' })
+  const mock = memoryDrive([rootDir, vol1, vol2], { source: '/漫画' })
 
   let atEnd = false
   let notifyChanged: (() => void) | undefined
@@ -445,7 +445,7 @@ it('快捷跳转在有效提交后复位脏标记以同步翻页，未提交时�
   document.body.innerHTML = '<div id="app"></div>'
   const rootDir = file(1, '/图书', true)
   const bookFile = file(10, '/图书/测试书.txt', false, 'v1', 1024)
-  const mock = memoryDrive([rootDir, bookFile], { source_dir: '/图书' })
+  const mock = memoryDrive([rootDir, bookFile], { source: '/图书' })
 
   let currentIndex = 0
   let notifyChanged: (() => void) | undefined
@@ -552,7 +552,7 @@ it('桌面端更多操作入口真实可见，支持下载与从头重读入口�
   document.body.innerHTML = '<div id="app"></div>'
   const rootDir = file(1, '/图书', true)
   const bookFile = file(10, '/图书/长篇.txt', false, 'v1', 2048)
-  const mock = memoryDrive([rootDir, bookFile], { source_dir: '/图书' })
+  const mock = memoryDrive([rootDir, bookFile], { source: '/图书' })
 
   const mockView: ReaderView = {
     title: '长篇',

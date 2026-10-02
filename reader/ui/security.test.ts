@@ -81,7 +81,7 @@ describe('UI-02: 界面文本防注入与安全显示回归', () => {
     evilBook.name = `${XSS_RAW_NAME}.epub`
 
     mockDrive = memoryDrive([rootDir, evilSourceDir, evilBook], {
-      source_dir: '/书库',
+      source: '/书库',
     })
 
     const drive = Object.assign(mockDrive.drive, {
@@ -93,7 +93,7 @@ describe('UI-02: 界面文本防注入与安全显示回归', () => {
         dark: false,
       }),
       settings: {
-        get: async () => ({ source_dir: '/书库' }),
+        get: async () => ({ source: '/书库' }),
         patch: vi.fn(),
         open: vi.fn(),
       },

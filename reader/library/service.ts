@@ -14,7 +14,7 @@ import { ReadingDataStore } from './reading'
 import { ReadingStateCache } from './reading-cache'
 import { LibraryScanner, mergeScan, type ScanHandle, type ScanProgress, type ScanResult } from './scanner'
 import { ShardedStore, type ShardedSnapshot } from './snapshot'
-import { LibraryAccess, SourcesStore, sourcesIdentity, type SourceRoots, type SourcesMigration, type SourcesSnapshot } from './sources'
+import { LibraryAccess, SourcesStore, sourcesIdentity, type SourceRoots, type SourcesSnapshot } from './sources'
 import { WorksStore, type WorksSnapshot } from './works'
 
 interface IndexMeta { schemaVersion: 1; sourceIdentity: string; roots: { nodeId: number; path: string; contentVersion: string }[]; complete: boolean; indexedAt: number }
@@ -27,7 +27,6 @@ const indexMeta = (raw: unknown): IndexMeta => {
 }
 export interface LibrarySnapshot {
   sources: SourcesSnapshot
-  migration: SourcesMigration['migration']
   units: ReadingUnit[]
   works: WorksSnapshot
   complete: boolean
@@ -76,7 +75,7 @@ export class ReadingLibrary {
     const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
     this.index = new ShardedStore(drive, 'library:cache:index', parseUnit, indexMeta, empty, 2000)
     this.indexSnapshot = { rows: [], meta: empty(), revision: null }
-    this.state = { sources: { config: { schemaVersion: 1, sources: [] }, revision: null }, migration: 'none', units: [], works: { rows: [], meta: { schemaVersion: 1 }, revision: null }, complete: false, fromCache: false, issues: [] }
+    this.state = { sources: { config: { schemaVersion: 1, sources: [] }, revision: null }, units: [], works: { rows: [], meta: { schemaVersion: 1 }, revision: null }, complete: false, fromCache: false, issues: [] }
   }
   get snapshot(): LibrarySnapshot { return structuredClone(this.state) }
   private emit() { this.callbacks.changed?.(this.snapshot) }
@@ -93,15 +92,15 @@ export class ReadingLibrary {
   private async initializeData(signal: AbortSignal): Promise<LibrarySnapshot> {
     const current = AbortSignal.any([signal, this.controller.signal]), generation = ++this.generation
     this.initialized = false; this.scanner.cancel(); this.invalidateReadingState()
-    const migrated = await this.sources.migrate(current)
+    const loadedSources = await this.sources.load(current)
     this.current(generation, current)
-    if (this.indexedSourceId !== undefined && !migrated.snapshot.config.sources.some(source => source.nodeId === this.indexedSourceId)) {
+    if (this.indexedSourceId !== undefined && !loadedSources.config.sources.some(source => source.nodeId === this.indexedSourceId)) {
       this.indexedSourceId = undefined; this.state.indexedSourceId = undefined
       const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
       this.index = new ShardedStore(this.drive, 'library:cache:index', parseUnit, indexMeta, empty, 2000)
       this.indexSnapshot = { rows: [], meta: empty(), revision: null }
     }
-    this.state.sources = migrated.snapshot; this.state.migration = migrated.migration; this.access.setSources(migrated.snapshot)
+    this.state.sources = loadedSources; this.access.setSources(loadedSources)
     const roots = await this.access.roots(current); this.current(generation, current); this.roots = roots
     this.state.issues = this.roots.unavailable.map(item => ({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message }))
     const works = await this.works.load(current); this.current(generation, current); this.state.works = works
@@ -124,7 +123,7 @@ export class ReadingLibrary {
   private requireReady() { if (!this.initialized) throw new LibraryError('not_initialized', '请先初始化阅读馆；读取失败时不能用空配置覆盖原数据'); this.controller.signal.throwIfAborted() }
   private async changeSources(snapshot: SourcesSnapshot, signal: AbortSignal) {
     this.scanner.cancel(); this.metadata.pause(); this.covers.pause(); const generation = ++this.generation
-    this.access.setSources(snapshot); this.state.sources = snapshot; this.state.complete = false; this.state.migration = 'existing'
+    this.access.setSources(snapshot); this.state.sources = snapshot; this.state.complete = false
     const roots = await this.access.roots(signal); this.current(generation, signal); this.roots = roots
     this.state.units = this.visible(this.indexSnapshot.rows)
     this.state.issues = this.roots.unavailable.map(item => ({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message }))

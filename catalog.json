@@ -6,9 +6,9 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.6.1",
+        "version": "1.6.2",
         "api_version": 2,
-        "min_host_version": "0.3.0",
+        "min_host_version": "0.3.1",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -17,15 +17,7 @@
           "files.read",
           "media.read"
         ],
-        "settings": [
-          {
-            "key": "source_dir",
-            "label": "图书目录",
-            "description": "过渡期保留作旧版配置迁移入口，新设置请在应用内管理来源；根目录表示整库。",
-            "type": "directory",
-            "default": "/"
-          }
-        ],
+        "settings": [],
         "integration": {
           "file_types": [
             "txt",
@@ -33,7 +25,7 @@
             "pdf"
           ],
           "directories": false,
-          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "changelog": "统一使用应用内来源管理，移除旧目录设置和过渡迁移入口；保留阅读进度、书签及现有来源。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -51,9 +43,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "af1b624b8e078590327cafebdb31f223b130d2b6ab07df3259d3a92b6101421b",
-      "size": 2330951,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.1.tgapp"
+      "sha256": "376793094d28b52835143f8a430a38f89545053022464bdbfce998097c1adced",
+      "size": 2330401,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.2.tgapp"
     },
     {
       "manifest": {
@@ -114,9 +106,9 @@
       "manifest": {
         "id": "comics",
         "name": "漫画",
-        "version": "1.4.1",
+        "version": "1.4.2",
         "api_version": 2,
-        "min_host_version": "0.3.0",
+        "min_host_version": "0.3.1",
         "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -125,22 +117,14 @@
           "files.read",
           "media.read"
         ],
-        "settings": [
-          {
-            "key": "source_dir",
-            "label": "漫画目录",
-            "description": "过渡期保留作旧版配置迁移入口，新设置请在应用内管理来源；直属图片组成一章，子目录保留为章节。",
-            "type": "directory",
-            "default": "/"
-          }
-        ],
+        "settings": [],
         "integration": {
           "file_types": [
             "cbz",
             "zip"
           ],
           "directories": true,
-          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "changelog": "统一使用应用内来源管理，移除旧目录设置和过渡迁移入口；保留阅读进度、书签及现有来源。",
           "formats": [
             "图片目录",
             "CBZ",
@@ -158,17 +142,17 @@
           "data_schema": 1
         }
       },
-      "sha256": "2b68a9e8ef2245af3a81b62ed31a3e045049cf7095ccf0864080e60a41322035",
-      "size": 342608,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.4.1.tgapp"
+      "sha256": "54118bb58504ec378c21226399fcc69ca3b87cd4b41ddaf512325bd4e71730f1",
+      "size": 342056,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.4.2.tgapp"
     },
     {
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "1.4.1",
+        "version": "1.4.2",
         "api_version": 2,
-        "min_host_version": "0.3.0",
+        "min_host_version": "0.3.1",
         "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -211,7 +195,7 @@
             "ogv"
           ],
           "directories": false,
-          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "changelog": "取材设置由应用直接管理，从已授权目录初始化；移除对宿主旧目录设置桥接的依赖。",
           "formats": [
             "网盘视频"
           ],
@@ -227,9 +211,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "e3e6d1bb0a68bb4327a978c1920df2aa19bf134a8340926d9731971d1940ea24",
-      "size": 339991,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.4.1.tgapp"
+      "sha256": "b1e2ae9dde56998a93c882bf9175c91147fd0c02cb32b93bf8e9fb1803641677",
+      "size": 340057,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.4.2.tgapp"
     }
   ]
 }

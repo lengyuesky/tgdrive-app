@@ -6,9 +6,9 @@
 
 应用持有一个 `ReadingLibrary(drive, 'books' | 'comics', callbacks)`，不要为每张卡片建立实例。
 
-1. `await library.initialize(signal)`：校验或迁移来源，加载人工作品和轻索引缓存，不主动枚举文件、不提取正文或封面。检查 `snapshot.migration`、`issues`、`complete`。初始化失败时不可用空配置继续保存。
+1. `await library.initialize(signal)`：校验并加载现行来源，加载人工作品和轻索引缓存，不主动枚举文件、不提取正文或封面。检查 `issues`、`complete`。初始化失败时不可用空配置继续保存。
 2. 无来源时展示来源管理。`addSource(path, { base, confirmedRoot, signal })` 保存成功后立即启动扫描，返回 `{ sources, scan }`；必须处理 `scan` 的成功或失败。`base` 是打开表单时的来源快照，避免覆盖其他设备的修改。根目录必须有显式确认。
-3. 启动缓存优先；需要发现新增文件时调用 `refresh(signal)`。来源移除用 `removeSource(nodeId, base, signal)`，不会删除作品、进度、书签或标志。旧 `source_dir` 只作迁移入口，原设置不改写；根目录旧值返回 `confirm-root`，不会自动授权。
+3. 启动缓存优先；需要发现新增文件时调用 `refresh(signal)`。来源移除用 `removeSource(nodeId, base, signal)`，不会删除作品、进度、书签或标志。来源只保存在 `library:sources`，不读取旧目录设置；根目录通过现行来源选择显式确认。
 4. `await library.loadReadingState(signal, onProgress)` 批量读取当前索引对应的进度、显式阅读状态和标志，再将结果传入 `query(query, state.readings, state.flags)`。不要把读取失败或尚未加载的空 Map 当成“全库未读”。此接口按 200 条遍历用户状态，不为每个单元重复执行文件 stat。
 5. 卡片进入视口才请求封面。详情请求 `library.getMetadata(unit, signal)`；该方法更新名称信息，并串行发布必要的自动归组变化。应用不要绕过它直接用 `library.metadata.get()`，否则只有提取结果，没有作品归组更新。
 6. 进入阅读前 `library.pause()`；先 `openUnit(nodeId, signal)` 重新取得范围内的当前文件，再 `reading.load(file, signal)`。继续阅读只能使用该次返回的 `reading.location`，不能直接恢复缓存列表里的旧位置。打开新版本时旧位置不会返回。

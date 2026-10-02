@@ -94,7 +94,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
   it('桌面端与移动端初始关闭、支持明确打开/关闭按钮/ESC/焦点恢复与手机圈定焦点', async () => {
     const rootDir = file(1, '/书库', true)
     const bookFile = file(10, '/书库/示例文本.txt', false, 'v1', 1024)
-    const mock = memoryDrive([rootDir, bookFile], { source_dir: '/书库' })
+    const mock = memoryDrive([rootDir, bookFile], { source: '/书库' })
 
     const mockView: ReaderView = {
       title: '示例文本',
@@ -166,7 +166,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
   it('层级目录支持嵌套折叠、箭头只展开不跳转，父标签跳转保留完整 Location', async () => {
     const rootDir = file(1, '/书库', true)
     const bookFile = file(20, '/书库/层级图书.epub', false, 'v1', 2048)
-    const mock = memoryDrive([rootDir, bookFile], { source_dir: '/书库' })
+    const mock = memoryDrive([rootDir, bookFile], { source: '/书库' })
 
     const restoredLocations: any[] = []
     const navItems: NavigationItem[] = [
@@ -275,7 +275,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
   it('文本筛选搜索匹配条目，清空后恢复已有折叠状态而不被破坏', async () => {
     const rootDir = file(1, '/书库', true)
     const bookFile = file(20, '/书库/层级图书.epub', false, 'v1', 2048)
-    const mock = memoryDrive([rootDir, bookFile], { source_dir: '/书库' })
+    const mock = memoryDrive([rootDir, bookFile], { source: '/书库' })
 
     const navItems: NavigationItem[] = [
       { label: '第一卷 启程', depth: 0, location: { format: 'epub', index: 0 } },
@@ -348,7 +348,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
   it('缩略图在目录未打开时0请求，打开后仅可见项触发有界并发（最多2），隐藏项0请求', async () => {
     const rootDir = file(1, '/漫画', true)
     const comicFile = file(30, '/漫画/画册.cbz', false, 'v1', 4096)
-    const mock = memoryDrive([rootDir, comicFile], { source_dir: '/漫画' })
+    const mock = memoryDrive([rootDir, comicFile], { source: '/漫画' })
 
     // 合成 50 个目录项
     const syntheticItems: NavigationItem[] = Array.from({ length: 50 }, (_, i) => ({
@@ -468,7 +468,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
   it('缩略图离视口/折叠/关闭面板取消在途与释放已加载，迟到结果安全丢弃不写DOM', async () => {
     const rootDir = file(1, '/漫画', true)
     const comicFile = file(30, '/漫画/画册.cbz', false, 'v1', 4096)
-    const mock = memoryDrive([rootDir, comicFile], { source_dir: '/漫画' })
+    const mock = memoryDrive([rootDir, comicFile], { source: '/漫画' })
 
     const syntheticItems: NavigationItem[] = Array.from({ length: 10 }, (_, i) => ({
       label: `第 ${i + 1} 页`,
@@ -595,7 +595,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     try {
       const rootDir = file(1, '/书库', true)
       const bookFile = file(10, '/书库/示例文本.txt', false, 'v1', 1024)
-      const mock = memoryDrive([rootDir, bookFile], { source_dir: '/书库' })
+      const mock = memoryDrive([rootDir, bookFile], { source: '/书库' })
 
       const mockView: ReaderView = {
         title: '示例文本',
@@ -677,7 +677,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     const rootDir = file(1, '/漫画', true)
     const comic1 = file(30, '/漫画/第1卷.cbz', false, 'v1', 4096)
     const comic2 = file(31, '/漫画/第2卷.cbz', false, 'v1', 4096)
-    const mock = memoryDrive([rootDir, comic1, comic2], { source_dir: '/漫画' })
+    const mock = memoryDrive([rootDir, comic1, comic2], { source: '/漫画' })
 
     const releasedList: number[] = []
     const abortSignals: boolean[] = []
@@ -754,7 +754,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
 
     const rootDir = file(1, '/漫画', true)
     const comicFile = file(30, '/漫画/画册.cbz', false, 'v1', 4096)
-    const mock = memoryDrive([rootDir, comicFile], { source_dir: '/漫画' })
+    const mock = memoryDrive([rootDir, comicFile], { source: '/漫画' })
 
     const mockView: ReaderView = {
       title: '画册',
@@ -803,7 +803,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
   it('缩略图请求严格遵守在途所有权与并发上界：及时 reject 关重开不突破 2，未 settle 关重开/切书不提前并发', async () => {
     const rootDir = file(1, '/漫画', true)
     const comicFile = file(30, '/漫画/画册.cbz', false, 'v1', 4096)
-    const mock = memoryDrive([rootDir, comicFile], { source_dir: '/漫画' })
+    const mock = memoryDrive([rootDir, comicFile], { source: '/漫画' })
 
     const syntheticItems: NavigationItem[] = Array.from({ length: 12 }, (_, i) => ({
       label: `第 ${i + 1} 页`,
@@ -948,7 +948,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
   it('同条目快速离视口又进入，旧finally不得覆盖当前状态，返回资源最终正确展示与释放', async () => {
     const rootDir = file(1, '/漫画', true)
     const comicFile = file(30, '/漫画/画册.cbz', false, 'v1', 4096)
-    const mock = memoryDrive([rootDir, comicFile], { source_dir: '/漫画' })
+    const mock = memoryDrive([rootDir, comicFile], { source: '/漫画' })
 
     const syntheticItems: NavigationItem[] = Array.from({ length: 4 }, (_, i) => ({
       label: `第 ${i + 1} 页`,
@@ -1064,7 +1064,7 @@ describe('统一目录面板与有界按需缩略图调度', () => {
     const rootDir = file(1, '/漫画', true)
     const comic1 = file(10, '/漫画/画册1.cbz', false)
     const comic2 = file(20, '/漫画/画册2.cbz', false)
-    const mock = memoryDrive([rootDir, comic1, comic2], { source_dir: '/漫画' })
+    const mock = memoryDrive([rootDir, comic1, comic2], { source: '/漫画' })
 
     const book1Items: NavigationItem[] = [
       { label: '书1-第1页', depth: 0, location: { format: 'comic', index: 0 } },

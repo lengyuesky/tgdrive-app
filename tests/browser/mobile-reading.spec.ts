@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
-import { revealReader, closeReaderPanel } from './reader-helpers'
+import { seedReaderSource, revealReader, closeReaderPanel } from './reader-helpers'
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 const frame = (page: Page) => page.frameLocator('iframe')
@@ -72,7 +72,7 @@ test.beforeEach(async ({ page }) => {
   const book = index.available.find((item: any) => item.manifest.id === 'books')
   expect(book.manifest.version).toBe(JSON.parse(readFileSync(new URL('../../books/app.json', import.meta.url), 'utf8')).version)
   expect((await page.request.post('/api/apps/catalog/books/install', { data: { digest: book.digest } })).ok()).toBe(true)
-  expect((await page.request.patch('/api/apps/books/settings', { data: { source_dir: '/测试图书' } })).ok()).toBe(true)
+  await seedReaderSource(page, 'books', '/测试图书')
 })
 
 test('手机只显示正文，菜单不挤压页面，真实轻点与横向滑动按页前进', async ({ page }, info) => {
@@ -415,7 +415,7 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   const comic = index.available.find((item: any) => item.manifest.id === 'comics')
   expect(comic).toBeTruthy()
   expect((await page.request.post('/api/apps/catalog/comics/install', { data: { digest: comic.digest } })).ok()).toBe(true)
-  expect((await page.request.patch('/api/apps/comics/settings', { data: { source_dir: '/测试漫画' } })).ok()).toBe(true)
+  await seedReaderSource(page, 'comics', '/测试漫画')
   expect((await page.request.patch('/api/apps/comics/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto('/apps/comics')
   await expect(frame(page).locator('#btn-home-view-all')).toBeVisible()

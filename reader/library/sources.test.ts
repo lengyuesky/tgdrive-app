@@ -2,40 +2,33 @@ import { describe, expect, it, vi } from 'vitest'
 import { LibraryAccess, SOURCES_KEY, SourcesStore, filesChangeAffectsSources, parseSources } from './sources'
 import { deferred, file, memoryDrive, signal, sources } from './test-fixtures'
 
-describe('SourcesStore 来源与旧值迁移', () => {
+describe('SourcesStore 来源使用当前配置', () => {
   it('没有来源不枚举，配置读取失败或未知版本绝不回退根目录或覆盖旧记录', async () => {
     const mock = memoryDrive([file(0, '/', true)])
     const store = new SourcesStore(mock.drive), access = new LibraryAccess(mock.drive)
-    const empty = await store.migrate(signal()); access.setSources(empty.snapshot)
-    expect(empty.migration).toBe('none')
+    const empty = await store.load(signal()); access.setSources(empty)
+    expect(empty.config.sources).toEqual([])
     expect(await access.roots(signal())).toEqual({ roots: [], unavailable: [] })
     await expect(access.file(5, signal())).rejects.toMatchObject({ code: 'no_sources' })
     expect(mock.list).not.toHaveBeenCalled(); expect(mock.searchPage).not.toHaveBeenCalled(); expect(mock.stat).not.toHaveBeenCalled()
     mock.get.mockRejectedValueOnce(new Error('读取失败'))
-    await expect(store.migrate(signal())).rejects.toThrow('读取失败')
+    await expect(store.load(signal())).rejects.toThrow('读取失败')
     const old = mock.seed(SOURCES_KEY, { schemaVersion: 42, sources: ['/'] })
-    await expect(store.migrate(signal())).rejects.toMatchObject({ code: 'unknown_sources' })
+    await expect(store.load(signal())).rejects.toMatchObject({ code: 'unknown_sources' })
     expect(mock.records.get(SOURCES_KEY)).toEqual(old); expect(mock.set).not.toHaveBeenCalled()
   })
-  it('非根旧目录校验两次后 CAS 迁移，旧设置保持；根目录必须二次确认', async () => {
-    const directory = file(1, '/旧书库', true)
+  it('只读取现行来源，不读取或迁移旧目录设置', async () => {
+    const directory = file(1, '/书库', true)
     const mock = memoryDrive([directory], { source_dir: '/旧书库' }), store = new SourcesStore(mock.drive)
-    const migration = await store.migrate(signal())
-    expect(migration.migration).toBe('migrated')
-    expect(migration.snapshot.config.sources).toEqual([expect.objectContaining({ nodeId: 1, path: '/旧书库', contentVersion: 'v1' })])
-    expect(mock.stat.mock.calls.map(call => call[0])).toEqual([{ path: '/旧书库' }, { id: 1 }])
-    expect(mock.set.mock.calls[0]?.[2]).toBeNull()
-    expect(mock.drive.settings.patch).not.toHaveBeenCalled()
-    expect((await store.migrate(signal())).migration).toBe('existing')
-    const root = memoryDrive([file(0, '/', true)], { source_dir: '/' }), rootStore = new SourcesStore(root.drive)
-    expect((await rootStore.migrate(signal())).migration).toBe('confirm-root')
-    expect(root.stat).not.toHaveBeenCalled(); expect(root.set).not.toHaveBeenCalled()
-    await expect(rootStore.add((await rootStore.load()), '/', false, signal())).rejects.toMatchObject({ code: 'confirm_root' })
-    expect((await rootStore.migrate(signal(), true)).snapshot.config.sources[0]).toMatchObject({ nodeId: 0, rootConfirmed: true })
+    expect((await store.load(signal())).config.sources).toEqual([])
+    expect(mock.drive.settings.get).not.toHaveBeenCalled()
+    const saved = await store.add(await store.load(), directory.path, false, signal())
+    expect(await store.load()).toEqual(saved)
+    expect(mock.drive.settings.get).not.toHaveBeenCalled()
   })
   it('旧目录删除或选择过程中重建不会误绑定，同 ID 拒绝，父子允许，最多 16 个', async () => {
     const mock = memoryDrive([], { source_dir: '/旧书库' }), store = new SourcesStore(mock.drive)
-    await expect(store.migrate(signal())).rejects.toMatchObject({ code: 'not_found' })
+    await expect(store.add(await store.load(), '/旧书库', false, signal())).rejects.toMatchObject({ code: 'not_found' })
     expect(mock.set).not.toHaveBeenCalled()
     const parent = file(1, '/书', true), child = file(2, '/书/子目录', true)
     mock.nodes.set(1, parent); mock.nodes.set(2, child)

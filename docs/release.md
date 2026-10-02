@@ -10,18 +10,18 @@
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
-  - `apps/shorts-1.4.1.tgapp`
-  - `apps/books-1.6.1.tgapp`
-  - `apps/comics-1.4.1.tgapp`
+  - `apps/shorts-1.4.2.tgapp`
+  - `apps/books-1.6.2.tgapp`
+  - `apps/comics-1.4.2.tgapp`
   - `apps/cinema-1.4.1.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/books-1.6.1.tgapp
+<sha256>  apps/books-1.6.2.tgapp
 <sha256>  apps/cinema-1.4.1.tgapp
-<sha256>  apps/comics-1.4.1.tgapp
-<sha256>  apps/shorts-1.4.1.tgapp
+<sha256>  apps/comics-1.4.2.tgapp
+<sha256>  apps/shorts-1.4.2.tgapp
 <sha256>  catalog.json
 ```
 
@@ -43,9 +43,9 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.6.1",
+        "version": "1.6.2",
         "api_version": 2,
-        "min_host_version": "0.3.0",
+        "min_host_version": "0.3.1",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -54,15 +54,7 @@
           "files.read",
           "media.read"
         ],
-        "settings": [
-          {
-            "key": "source_dir",
-            "label": "图书目录",
-            "description": "过渡期保留作旧版配置迁移入口，新设置请在应用内管理来源；根目录表示整库。",
-            "type": "directory",
-            "default": "/"
-          }
-        ],
+        "settings": [],
         "integration": {
           "file_types": [
             "txt",
@@ -70,7 +62,7 @@
             "pdf"
           ],
           "directories": false,
-          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "changelog": "统一使用应用内来源管理，移除旧目录设置和过渡迁移入口；保留阅读进度、书签及现有来源。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -90,7 +82,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.1.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.2.tgapp"
     }
   ]
 }

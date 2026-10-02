@@ -112,18 +112,6 @@ export class MeView {
 
     subview.innerHTML = `
       <div class="sources-subview-container">
-        <!-- 旧迁移提示 -->
-        ${
-          snapshot.migration === 'confirm-root'
-            ? `
-          <div class="migration-banner">
-            <p class="migration-text">检测到旧版设置的根目录来源。添加根目录将扫描整个网盘，需显式确认。</p>
-            <button id="btn-confirm-migration" class="btn-primary">确认迁移根目录</button>
-          </div>
-        `
-            : ''
-        }
-
         <!-- 扫描控制条 -->
         <div class="card-box scan-control-card">
           <div class="scan-control-header">
@@ -165,21 +153,6 @@ export class MeView {
         </div>
       </div>
     `
-
-    // 绑定旧迁移确认
-    const confirmMigrationBtn = subview.querySelector<HTMLButtonElement>(
-      '#btn-confirm-migration'
-    )
-    if (confirmMigrationBtn) {
-      confirmMigrationBtn.onclick = async () => {
-        try {
-          await this.context.library.addSource('/', { confirmedRoot: true })
-          await this.renderSourcesSubView()
-        } catch (err) {
-          this.context.reportError(err)
-        }
-      }
-    }
 
     // 绑定扫描控制
     const refreshBtn = subview.querySelector<HTMLButtonElement>('#btn-me-refresh')

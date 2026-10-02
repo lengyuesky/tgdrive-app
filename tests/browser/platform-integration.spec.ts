@@ -72,7 +72,7 @@ test('应用详情截图来自真实渲染的合成测试库', async ({ page }) 
   for (const [id, directory] of [['books', '/测试图书'], ['comics', '/测试漫画'], ['cinema', '/测试影视'], ['shorts', '/测试视频']]) {
     const app = await install(page, id!)
     expect((await page.request.post(`/api/apps/${id}/authorize`, { data: { path: directory, expected_revision: app.revision } })).ok()).toBe(true)
-    if (id !== 'cinema') expect((await page.request.patch(`/api/apps/${id}/settings`, { data: { source_dir: directory } })).ok()).toBe(true)
+    if (id === 'shorts') expect((await page.request.patch(`/api/apps/${id}/settings`, { data: { source_dir: directory } })).ok()).toBe(true)
     await page.goto(`/apps/${id}`)
     const frame = page.frameLocator('iframe')
     if (id === 'books' || id === 'comics') { await expect(frame.locator('#btn-home-view-all')).toBeVisible(); await frame.locator('#btn-home-view-all').click(); await expect(frame.locator('#items button').first()).toBeVisible() }

@@ -1,9 +1,9 @@
 {
   "id": "shorts",
   "name": "短视频",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "api_version": 2,
-  "min_host_version": "0.3.0",
+  "min_host_version": "0.3.1",
   "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
   "author": "tgdrive",
   "entry": "index.html",
@@ -46,7 +46,7 @@
       "ogv"
     ],
     "directories": false,
-    "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+    "changelog": "取材设置由应用直接管理，从已授权目录初始化；移除对宿主旧目录设置桥接的依赖。",
     "formats": [
       "网盘视频"
     ],

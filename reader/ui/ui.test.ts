@@ -73,6 +73,7 @@ describe('阅读馆 UI 模块', () => {
     document.body.innerHTML = '<div id="app"><div id="modal-container"></div><div id="test-container"></div></div>'
     container = document.getElementById('test-container')!
     storageStore.clear()
+    storageStore.set('library:sources', { schemaVersion: 1, sources: [{ nodeId: mockRootDir.id, path: mockRootDir.path, contentVersion: mockRootDir.content_version, addedAt: 1, rootConfirmed: false }] })
     openedReaderNodeId = undefined
     openedReaderLocation = undefined
     openedDetailItem = undefined
@@ -86,7 +87,7 @@ describe('阅读馆 UI 模块', () => {
         api_version: 2,
         dark: false,
       }),
-      settings: { get: async () => ({ source_dir: '/书库' }) },
+      settings: { get: async () => ({ source: '/书库' }) },
       storage: {
         get: async (key: string) =>
           storageStore.has(key) ? { key, value: storageStore.get(key), revision: 'r1', updated_at: 1000 } : null,

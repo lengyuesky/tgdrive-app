@@ -10,7 +10,7 @@ test('可安装应用详情与已安装详情均展示真实包内截图和格�
   await page.locator('[data-app-id="books"]').getByRole('button', { name: '应用详情', exact: true }).click()
   const detail = page.getByRole('dialog', { name: '图书', exact: true })
   await expect(detail).toContainText('EPUB 2/3')
-  await expect(detail).toContainText('需要宿主 0.3.0')
+  await expect(detail).toContainText('需要宿主 0.3.1')
   await expect.poll(() => detail.getByRole('img', { name: '图书界面 1' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await detail.getByRole('button', { name: '关闭', exact: true }).click()
   const book = index.available.find((app: any) => app.manifest.id === 'books')

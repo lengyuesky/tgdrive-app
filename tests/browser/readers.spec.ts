@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { revealReader, closeReaderPanel } from './reader-helpers'
+import { seedReaderSource, revealReader, closeReaderPanel } from './reader-helpers'
 const base = 'http://127.0.0.1:4187'
 async function authenticate(page: Page) {
   expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
@@ -10,7 +10,7 @@ async function install(page: Page, id: string, directory: string) {
   const app = index.available.find((item: any) => item.manifest.id === id)
   expect(app).toBeTruthy()
   expect((await page.request.post(`/api/apps/catalog/${id}/install`, { data: { digest: app.digest } })).ok()).toBe(true)
-  expect((await page.request.patch(`/api/apps/${id}/settings`, { data: { source_dir: directory } })).ok()).toBe(true)
+  await seedReaderSource(page, id, directory)
   expect((await page.request.patch(`/api/apps/${id}/scope`, { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto(`/apps/${id}`)
   await expect(page.locator('.host-status')).toHaveCount(0)
