@@ -5,7 +5,8 @@ export interface Page { next_cursor: string | null; has_more: boolean }
 export interface CallOptions { signal?: AbortSignal }
 export interface RecordValue<T = unknown> { key: string; value: T; revision: string; updated_at: number }
 export interface Search { under?: string; q?: string; kind?: 'file' | 'dir' | 'all'; extensions?: string[]; limit?: number; cursor?: string | null }
-export interface ReadyContext { id: string; name: string; version: string; api_version: number; dark: boolean; capabilities?: string[] }
+export interface TaskProgress { id: string; title: string; completed: number; total?: number; state: 'running' | 'done' | 'cancelled' | 'failed' }
+export interface ReadyContext { launch?: { action: 'open'; file: FileEntry }; scope?: { mode: 'none' | 'all' | 'selected'; paths: string[] }; data_schema?: number; id: string; name: string; version: string; api_version: number; dark: boolean; capabilities?: string[] }
 export interface ByteGrant { url: string; expires_at: number }
 /** 批量信封中的一项调用；可批量的能力见 docs/sdk.md，界面交互、字节读取与批量本身不可用。 */
 export interface BatchCall { method: string; params?: object }
@@ -17,6 +18,7 @@ export interface Drive {
   ready: Promise<ReadyContext>
   /** 能力探测：宿主未声明的功能需降级到消息通道。 */
   can(capability: string): boolean
+  lifecycle?: { migrate(version: number, migration: (signal: AbortSignal) => Promise<void>): Promise<void>; report(phase: 'ready' | 'failed', message?: string): Promise<void> }
   files: {
     list(params: { path: string; cursor?: string | null; limit?: number }, options?: CallOptions): Promise<Page & { entries: FileEntry[]; path: string; total?: number }>
     searchPage(params?: Search, options?: CallOptions): Promise<Page & { results: FileEntry[] }>
@@ -48,7 +50,7 @@ export interface Drive {
   /** 批量调用：一次往返执行最多 16 项服务端能力，逐项独立返回；需 rpc.batch 能力。 */
   batch(calls: BatchCall[], options?: CallOptions): Promise<BatchResult[]>
   settings: { get(): Promise<Record<string, string | boolean | number>>; patch(values: object): Promise<object>; open(): Promise<void> }
-  ui: { pickDirectory(initial?: string): Promise<string | null>; download(path: string): Promise<void>; close(): Promise<void>; setImmersive(active: boolean, options?: { background: string }): Promise<void> }
+  ui: { authorizeDirectory?(initial?: string): Promise<string | null>; showFile?(ref: Ref): Promise<void>; fileDetails?(ref: Ref): Promise<void>; setTitle?(title: string): Promise<void>; setExitMessage?(message: string): Promise<void>; task?(value: TaskProgress): Promise<void>; pickDirectory(initial?: string): Promise<string | null>; download(path: string): Promise<void>; close(): Promise<void>; setImmersive(active: boolean, options?: { background: string }): Promise<void> }
   on(name: string, callback: (value?: any) => unknown): () => void
 }
 declare global { interface Window { tgdrive: Drive } }

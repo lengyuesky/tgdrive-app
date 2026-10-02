@@ -10,18 +10,18 @@
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
-  - `apps/shorts-1.3.1.tgapp`
-  - `apps/books-1.5.5.tgapp`
-  - `apps/comics-1.3.8.tgapp`
-  - `apps/cinema-1.3.1.tgapp`
+  - `apps/shorts-1.4.1.tgapp`
+  - `apps/books-1.6.1.tgapp`
+  - `apps/comics-1.4.1.tgapp`
+  - `apps/cinema-1.4.1.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/books-1.5.5.tgapp
-<sha256>  apps/cinema-1.3.1.tgapp
-<sha256>  apps/comics-1.3.8.tgapp
-<sha256>  apps/shorts-1.3.1.tgapp
+<sha256>  apps/books-1.6.1.tgapp
+<sha256>  apps/cinema-1.4.1.tgapp
+<sha256>  apps/comics-1.4.1.tgapp
+<sha256>  apps/shorts-1.4.1.tgapp
 <sha256>  catalog.json
 ```
 
@@ -43,14 +43,17 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.5.5",
+        "version": "1.6.1",
         "api_version": 2,
-        "min_host_version": "0.2.0",
+        "min_host_version": "0.3.0",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
         "icon": "icon.svg",
-        "permissions": ["files.read", "media.read"],
+        "permissions": [
+          "files.read",
+          "media.read"
+        ],
         "settings": [
           {
             "key": "source_dir",
@@ -59,11 +62,35 @@
             "type": "directory",
             "default": "/"
           }
-        ]
+        ],
+        "integration": {
+          "file_types": [
+            "txt",
+            "epub",
+            "pdf"
+          ],
+          "directories": false,
+          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "formats": [
+            "TXT",
+            "EPUB 2/3",
+            "PDF"
+          ],
+          "limitations": [
+            "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
+            "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。"
+          ],
+          "homepage": "https://github.com/lengyuesky/tgdrive-app",
+          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+          "screenshots": [
+            "screenshots/home.png"
+          ],
+          "data_schema": 1
+        }
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.5.5.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.1.tgapp"
     }
   ]
 }
@@ -75,7 +102,7 @@
 - **条目字段**：每个 entry 仅允许 `manifest`、`sha256`、`size`、`url` 四个字段，严禁多余字段。
 - **单版本限制**：**每个应用 ID 最多一条最新记录**。禁止同一 ID 出现多个版本条目。
 - **URL 规范**：条目 `url` 必须精确为 `https://raw.githubusercontent.com/<repository>/main/apps/<id>-<version>.tgapp`。拒绝任何其他域名、IP、端口、凭据、协议混淆（如 `http://`）或路径变体。
-- **清单要求**：保留完整的 `AppManifest` 字段（`id`, `name`, `version`, `api_version`, `min_host_version`, `description`, `author`, `entry`, 可选 `icon`, `permissions`, `settings`）；`icon` 必须是包内以 `.svg` 结尾的合法资源路径。版本使用无前导零的合法稳定 SemVer `X.Y.Z`。
+- **清单要求**：保留完整的 `AppManifest` 字段（`id`, `name`, `version`, `api_version`, `min_host_version`, `description`, `author`, `entry`, 可选 `icon`、`integration`, `permissions`, `settings`）；`icon` 必须是包内以 `.svg` 结尾的合法资源路径。版本使用无前导零的合法稳定 SemVer `X.Y.Z`。
 - **数值与安全**：`number` 默认值必须在 JavaScript 安全整数范围（绝对值不超过 `9007199254740991`）。
 - **容量上限**：`entries` 最多 512 条；目录序列化后大小不得超过 1 MiB。单个插件包不超过 16 MiB（解压后不超过 32 MiB，单文件不超过 8 MiB，总文件数不超过 256）。
 
@@ -103,3 +130,7 @@ sha256sum -c SHA256SUMS
 `catalog.mjs verify` 会同时核验 `catalog.json` 的 schema 格式与本地 `apps/` 目录中真实插件包的摘要、大小与完整 manifest；包目录缺失或不可读时失败，不降级为只校验 JSON。
 
 手动生成目录可执行 `npm run catalog generate ./apps .`，包目录必须位于分发输出目录内。生成器自动读取目标已有索引并检查版本与内容绑定；显式 `--previous` 只能增加基线校验，不能绕过目标目录已有记录。索引、校验清单与安装包必须在同一次 Git 提交中更新。
+
+## 系统集成版本
+
+`integration` 的字段与能力参见 [平台集成说明](platform-integration.md)。本版支持包内真实截图、文件入口和数据版本；完整清单仍参与同版本摘要绑定，新增字段必须随新版本发布。

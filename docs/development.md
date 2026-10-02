@@ -151,3 +151,7 @@ TGDRIVE_HOST_DIR=/path/to/tgdrive npm run test:e2e
   ```
 
 - 集成日志、截图和 trace 仅在获授权的本机保留，不上传公开 CI；没有宿主权限时运行独立门禁，不把未执行的 E2E 声称为通过。
+
+## 独立脚手架与模拟宿主
+
+参见 [平台集成说明](platform-integration.md)，使用 `npm run create`、`npm run dev:host` 与 `npm run test:dev-host` 验证无真实网盘的开发流程。

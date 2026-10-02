@@ -23,6 +23,7 @@ export interface AppManifest {
   entry: string
   /** 包内可选 SVG 图标路径；仅安装后由宿主展示。 */
   icon?: string
+  integration?: { file_types: string[]; directories: boolean; changelog: string; formats: string[]; limitations: string[]; homepage: string; support: string; screenshots: string[]; data_schema: number }
   permissions: AppPermission[]
   settings: AppSetting[]
 }

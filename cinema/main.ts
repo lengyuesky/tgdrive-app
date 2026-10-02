@@ -6,7 +6,7 @@ import { VIDEO_EXTENSIONS, extension, isVideo, naturalOrder, parentPath, prefere
 import { ReadScheduler, RangeFile, isAbort } from './io'
 import { Library, ArtLoader } from './library'
 import { ProgressStore } from './storage'
-import { LibrariesStore, LibraryAccess, requireDirectory, withinDirectory, type CinemaLibrary, type LibrariesSnapshot, type SavedVideo, filesChangeAffectsLibraries } from './libraries'
+import { newLibraryId, LibrariesStore, LibraryAccess, requireDirectory, withinDirectory, type CinemaLibrary, type LibrariesSnapshot, type SavedVideo, filesChangeAffectsLibraries } from './libraries'
 import { LibraryManager } from './libraries-ui'
 import { PlaybackSession, type PlaybackInfo } from './media'
 import { Captions, readSubtitle, type SubtitleTrack } from './subtitles'
@@ -322,6 +322,7 @@ function persist(immediate = false) {
   store.mark({ file: playing, seconds: video.currentTime, duration, completed: outroTriggered || video.ended || duration > 0 && video.currentTime / duration >= .95, subtitle: selectedSubtitle, audio: session.selectedAudio }, immediate)
 }
 function syncStatus(message: string, conflict: boolean) {
+  if (drive.can?.('ui.setExitMessage')) void drive.ui.setExitMessage?.(message.includes('未同步') ? '观看进度尚未同步，确定离开？' : '').catch(() => {})
   text('sync-status', message); show('sync-remote', conflict); show('sync-local', conflict); show('sync-retry', !conflict && message.includes('未同步'))
 }
 async function immersive(active: boolean) {
@@ -506,6 +507,7 @@ on('previous-page', 'click', () => { if (pageIndex) { pageIndex--; return loadPa
 on('hero-play', 'click', () => heroFile && startPlayback(heroFile)); on('hero-detail', 'click', () => heroFile && openDetail(heroFile))
 on('detail-close', 'click', closeDetail)
 on('detail', 'cancel', event => { event.preventDefault(); closeDetail(); previousFocus?.focus() })
+on('detail-show-file', 'click', () => selected && drive.ui.showFile?.(selected)); on('detail-file-info', 'click', () => selected && drive.ui.fileDetails?.(selected))
 on('detail-play', 'click', () => selected && startPlayback(selected, false, episodesComplete ? episodes : []))
 on('detail-restart', 'click', () => selected && startPlayback(selected, true, episodesComplete ? episodes : []))
 on('detail-favorite', 'click', toggleFavorite)
@@ -655,9 +657,22 @@ drive.on('sync.hint', refreshLists)
 drive.on('scope.changed', refreshLists)
 window.addEventListener('pagehide', () => { sleep.clear(); clearTimeout(hostEventTimer); pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
 async function boot() {
-  await drive.ready
+  const context = await drive.ready
+  show('detail-show-file', !!drive.can?.('ui.showFile')); show('detail-file-info', !!drive.can?.('ui.fileDetails'))
+  await drive.lifecycle?.migrate(context.data_schema ?? 1, async signal => { await librariesStore.load(signal) })
+  let libraries = await librariesStore.load()
+  const file = context.launch?.file ? await drive.files.stat({ id: context.launch.file.id, content_version: context.launch.file.content_version }) : undefined
+  const paths = file ? [parentPath(file.path)] : !libraries.config.libraries.length && context.scope?.mode === 'selected' ? context.scope.paths : []
+  for (const path of paths) {
+    if (libraries.config.libraries.some(root => withinDirectory(file?.path ?? path, root.directoryPath))) continue
+    const directory = await drive.files.stat({ path })
+    const name = (directory.name || '网盘') + ' · ' + (libraries.config.libraries.length + 1)
+    libraries = await librariesStore.save({ schemaVersion: 1, libraries: [...libraries.config.libraries, { id: newLibraryId(), name, directoryId: directory.id, directoryPath: directory.path }] }, libraries.revision)
+  }
   const saved = await drive.storage.get<CinemaPreferences>('preferences')
   prefRecord = saved; pref = preferences(saved?.value); applyPreferences()
   show('app', true); show('boot-status', false); await loadPage()
+  if (file) await startPlayback(file)
+  await drive.lifecycle?.report('ready')
 }
-void boot().catch(error => text('boot-status', `影院暂时无法打开：${(error as Error).message}。请从应用中心重新打开。`))
+void boot().catch(error => { void drive.lifecycle?.report('failed', (error as Error).message).catch(() => {}); show('app', true); show('boot-status', false); text('list-status', (error as Error).message) })

@@ -90,8 +90,22 @@
       localWrites.set(key, Date.now())
     }
   }
+  async function migrate(version, migration) {
+    if (!capabilities.has('app.lifecycle')) { await migration(new AbortController().signal); return }
+    const owner = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
+    const invoke = (action, message = '') => request('app.lifecycle', { action, version, owner, message })
+    const lease = await invoke('begin')
+    if (!lease.needed) return
+    const lifetime = new AbortController()
+    let leaseError
+    const timer = setInterval(() => { invoke('heartbeat').catch(error => { leaseError = error; lifetime.abort(error) }) }, 20_000)
+    try { await migration(lifetime.signal); if (leaseError) throw leaseError; await invoke('complete') }
+    catch (error) { await invoke('failed', String(error?.message || error).slice(0, 350)).catch(() => {}); throw error }
+    finally { clearInterval(timer) }
+  }
   window.tgdrive = Object.freeze({
     ready,
+    lifecycle: Object.freeze({ migrate, report: (phase, message = '') => capabilities.has('app.lifecycle') ? request('ui.report', { phase, message: message.slice(0, 350) }) : Promise.resolve() }),
     /** 能力探测：旧宿主不声明新能力，插件据此降级到消息通道读取。 */
     can: (capability) => capabilities.has(capability),
     files: Object.freeze({
@@ -131,7 +145,14 @@
     }),
     favorites: Object.freeze({ set: (path, favorite) => request('favorites.set', { path, favorite }) }),
     settings: Object.freeze({ get: () => request('settings.get'), patch: (values) => request('settings.patch', values), open: () => request('ui.openSettings') }),
-    ui: Object.freeze({ pickDirectory: (initial = '/') => request('ui.pickDirectory', { initial }), download: (path) => request('ui.download', { path }), close: () => request('ui.close'), setImmersive: (active, options) => request('ui.setImmersive', options === undefined ? { active } : { active, background: options.background }) }),
+    ui: Object.freeze({
+      authorizeDirectory: (initial = '/') => request('ui.authorizeDirectory', { initial }),
+      showFile: (ref) => request('ui.showFile', { id: ref.id, content_version: ref.content_version }),
+      fileDetails: (ref) => request('ui.fileDetails', { id: ref.id, content_version: ref.content_version }),
+      setTitle: (title) => request('ui.setTitle', { title }),
+      setExitMessage: (message) => request('ui.setExitMessage', { message }),
+      task: (value) => request('ui.task', value),
+      pickDirectory: (initial = '/') => request('ui.pickDirectory', { initial }), download: (path) => request('ui.download', { path }), close: () => request('ui.close'), setImmersive: (active, options) => request('ui.setImmersive', options === undefined ? { active } : { active, background: options.background }) }),
     on(name, listener) {
       if (!listeners.has(name)) listeners.set(name, new Set())
       listeners.get(name).add(listener)

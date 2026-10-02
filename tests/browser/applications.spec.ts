@@ -43,6 +43,7 @@ async function installShorts(page: Page) {
   await expect(dialog).not.toBeVisible()
   await expect(page.locator('[data-app-id="shorts"] .tile-launch')).toHaveAttribute('aria-label', /打开/)
   // 测试库还包含横屏影视与故意损坏的文件；短视频用例只随机选取自己的竖屏夹具。
+  expect((await page.request.patch('/api/apps/shorts/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   expect((await page.request.patch('/api/apps/shorts/settings', { data: { source_dir: '/测试视频' } })).ok()).toBe(true)
 }
 
@@ -139,5 +140,5 @@ test('短视频暂停后调节声音与拖动进度不误播放，手机可直�
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.host-toolbar')).not.toBeVisible()
   await frame.getByRole('button', { name: '更换取材文件夹', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: '短视频设置', exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '选择允许应用读取的目录', exact: true })).toBeVisible()
 })

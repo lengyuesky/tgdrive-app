@@ -57,6 +57,11 @@ async function buildReader(name, destination) {
 
   await copyFile(`${root}/${name}/app.json`, `${output}/app.json`)
   await copyFile(`${root}/${name}/icon.svg`, `${output}/icon.svg`)
+  const manifest = JSON.parse(await readFile(`${root}/${name}/app.json`, 'utf8'))
+  for (const path of manifest.integration?.screenshots ?? []) {
+    await mkdir(dirname(`${output}/${path}`), { recursive: true })
+    await copyFile(`${root}/${name}/${path}`, `${output}/${path}`)
+  }
   await mkdir(`${output}/licenses`, { recursive: true })
 
   if (name === 'cinema') {

@@ -1,9 +1,9 @@
 {
   "id": "shorts",
   "name": "短视频",
-  "version": "1.3.1",
+  "version": "1.4.1",
   "api_version": 2,
-  "min_host_version": "0.2.0",
+  "min_host_version": "0.3.0",
   "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
   "author": "tgdrive",
   "entry": "index.html",
@@ -28,5 +28,37 @@
       "type": "boolean",
       "default": true
     }
-  ]
+  ],
+  "integration": {
+    "file_types": [
+      "mp4",
+      "mov",
+      "m4v",
+      "mkv",
+      "webm",
+      "avi",
+      "wmv",
+      "flv",
+      "ts",
+      "mts",
+      "m2ts",
+      "3gp",
+      "ogv"
+    ],
+    "directories": false,
+    "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+    "formats": [
+      "网盘视频"
+    ],
+    "limitations": [
+      "播放能力取决于浏览器；不提供转码。",
+      "列表分页加载；切换或关闭时取消旧视频读取。"
+    ],
+    "homepage": "https://github.com/lengyuesky/tgdrive-app",
+    "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+    "screenshots": [
+      "screenshots/home.png"
+    ],
+    "data_schema": 1
+  }
 }

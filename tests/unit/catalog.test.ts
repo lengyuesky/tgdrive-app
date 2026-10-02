@@ -520,8 +520,7 @@ describe('catalog CLI、真实 ZIP 与 SHA256SUMS', () => {
   it('真实归档中的非法清单、错误文件名和超限包均被拒绝', async () => {
     const manifest: Record<string, unknown> = { ...sampleManifest() }
     delete manifest.author
-    const invalid = await fixture(manifest)
-    await expect(collectPackages(invalid.packages)).rejects.toThrow('缺少必填字段')
+    await expect(fixture(manifest)).rejects.toThrow('缺少必填字段')
     const valid = await fixture()
     await rename(`${valid.packages}/test-plugin-1.0.0.tgapp`, `${valid.packages}/wrong-1.0.0.tgapp`)
     await expect(collectPackages(valid.packages)).rejects.toThrow('包文件名')

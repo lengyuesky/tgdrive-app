@@ -65,7 +65,7 @@ export class LibraryManager {
     const signal = this.controller.signal
     this.busy(true); this.status.textContent = ''
     try {
-      const path = await this.drive.ui.pickDirectory(this.binding?.directoryPath ?? '/')
+      const path = await (this.drive.can?.('ui.authorizeDirectory') && this.drive.ui.authorizeDirectory ? this.drive.ui.authorizeDirectory(this.binding?.directoryPath ?? '/') : this.drive.ui.pickDirectory(this.binding?.directoryPath ?? '/'))
       signal.throwIfAborted()
       if (path !== null) {
         this.binding = await this.access.directory({ path }, signal)

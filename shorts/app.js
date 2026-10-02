@@ -7,6 +7,7 @@
   const lifetime = new AbortController()
   const listen = (target, event, listener, options = {}) => target.addEventListener(event, listener, { ...options, signal: lifetime.signal })
   const mobileQuery = window.matchMedia('(max-width: 767px), (pointer: coarse)')
+  let launchPending = true
   let cursor = null, more = false, filling, filesDirty = false
   const recent = new Set(), cursors = new Set(), subscriptions = []
   let queue = [], index = 0, directory = '/', muted = true
@@ -175,15 +176,22 @@
     for (const id of ['player', 'actions', 'video-info', 'empty', 'list-error']) hide(id, true)
     hide('loading-list', false)
     try {
-      await drive.ready
+      const context = await drive.ready
+      await drive.lifecycle?.migrate(context.data_schema ?? 1, async () => { await drive.settings.get() })
       if (disposed || active !== listGeneration) return
       const settings = await drive.settings.get()
       if (disposed || active !== listGeneration) return
-      directory = settings.source_dir || '/'; muted = settings.muted !== false
+      directory = launchPending && context.launch?.file ? context.launch.file.path.slice(0, context.launch.file.path.lastIndexOf('/')) || '/' : settings.source_dir || '/'; muted = settings.muted !== false
       get('source-label').textContent = directory === '/' ? '整库 · 更换' : directory
       get('source-label').title = `取材文件夹：${directory}，点击更换`
       index = 0
       await fillQueue()
+      if (launchPending && context.launch?.file) {
+        const file = await drive.files.stat({ id: context.launch.file.id, content_version: context.launch.file.content_version }, { signal })
+        queue = [file, ...queue.filter(item => item.id !== file.id)]
+      }
+      launchPending = false
+      await drive.lifecycle?.report('ready')
       if (disposed || active !== listGeneration) return
       hide('loading-list', true)
       if (queue.length) await play()
@@ -194,6 +202,7 @@
     } catch (error) {
       if (disposed || active !== listGeneration || error.name === 'AbortError') return
       hide('loading-list', true)
+      void drive.lifecycle?.report('failed', error.message).catch(() => {})
       get('list-error-message').textContent = error.message
       hide('list-error', false)
     }
@@ -291,7 +300,18 @@
   listen(get('next'), 'click', () => handle(go(1)))
   listen(get('skip-error'), 'click', () => handle(go(1)))
   listen(get('retry-video'), 'click', () => handle(play(true)))
-  for (const id of ['open-settings', 'source-label']) listen(get(id), 'click', () => handle(drive.settings.open()))
+  listen(get('open-settings'), 'click', () => handle(drive.settings.open()))
+  listen(get('source-label'), 'click', () => handle((async () => {
+    if (!drive.can?.('ui.authorizeDirectory')) return drive.settings.open()
+    const path = await drive.ui.authorizeDirectory(directory)
+    if (path != null) { await drive.settings.patch({ source_dir: path }); await load() }
+  })()))
+  for (const [label, method] of [['在文件中显示', 'showFile'], ['文件信息', 'fileDetails']]) {
+    const button = document.createElement('button'); button.textContent = label
+    button.onclick = () => { if (current()) handle(drive.ui[method](current())) }
+    get('actions').append(button)
+    drive.ready.then(() => { button.hidden = !drive.can?.('ui.' + method) })
+  }
   listen(get('retry-list'), 'click', () => handle(load()))
   for (const id of ['play-prompt', 'play-toggle']) listen(get(id), 'click', () => handle(togglePlay()))
   listen(video, 'click', () => { if (performance.now() >= suppressClickUntil) handle(togglePlay()) })

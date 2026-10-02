@@ -101,6 +101,8 @@ export async function startApp(options: AppOptions) {
         <div id="reader-more" class="reader-more" aria-label="更多操作" hidden>
           <div class="panel-heading mobile-only"><strong>更多操作</strong><button data-close-panel>关闭</button></div>
           <button id="download">下载原文件</button>
+          <button id="host-show-file">在文件中显示</button>
+          <button id="host-file-details">文件信息</button>
           <button id="btn-reader-detail">作品详情</button>
           <button id="btn-reader-restart">从头重读</button>
           <button id="btn-reader-settings">目录设置</button>
@@ -319,6 +321,11 @@ export async function startApp(options: AppOptions) {
   }
 
   const context = await drive.ready
+  let taskAt = 0, scanCancelled = false
+  get('host-show-file').hidden = !drive.can?.('ui.showFile')
+  get('host-file-details').hidden = !drive.can?.('ui.fileDetails')
+  get('host-show-file').onclick = () => { if (currentFile) void drive.ui.showFile?.(currentFile).catch(report) }
+  get('host-file-details').onclick = () => { if (currentFile) void drive.ui.fileDetails?.(currentFile).catch(report) }
   let dark = context.dark
 
   root.dataset.kind = options.kind
@@ -331,12 +338,19 @@ export async function startApp(options: AppOptions) {
     {
       progress: (prog) => {
         libraryView?.onScanProgress(prog)
+        if (prog.phase === 'scanning' && prog.nodes === 0) scanCancelled = false
+        if (drive.can?.('ui.task') && (Date.now() - taskAt > 500 || prog.phase !== 'scanning')) {
+          taskAt = Date.now()
+          void drive.ui.task?.({ id: 'library-scan', title: '整理内容库', completed: prog.nodes, state: prog.phase === 'scanning' ? 'running' : prog.phase === 'complete' ? 'done' : prog.phase === 'paused' || scanCancelled ? 'cancelled' : 'failed' }).catch(() => {})
+        }
       },
       changed: () => {},
     },
     options.openPdf
   )
   const unbindLibrary = bindLibraryLifecycle(library)
+  const offTaskCancel = drive.on('task.cancel', value => { if (value?.id === 'library-scan') { scanCancelled = true; library.cancelScan(); void drive.ui.task?.({ id: 'library-scan', title: '整理内容库', completed: library.snapshot.progress?.nodes ?? 0, state: 'cancelled' }).catch(() => {}) } })
+  appLifecycle.signal.addEventListener('abort', offTaskCancel, { once: true })
 
   // 路由与视图管理
   let currentView: UiView | undefined = undefined
@@ -434,7 +448,16 @@ export async function startApp(options: AppOptions) {
     if (!filesChangeAffectsSources(library.access.sources, paths)) return
     scheduleLibraryRefresh('files', Array.isArray(paths) && paths.every(path => typeof path === 'string') ? paths : undefined)
   })
-  const offSyncEvents = drive.on('sync.hint', () => { library.invalidateReadingState(); scheduleLibraryRefresh('sources') })
+  const offSyncEvents = drive.on('sync.hint', async value => {
+    library.invalidateReadingState()
+    if (!value?.filesRecovered) { scheduleLibraryRefresh('sources'); return }
+    const before = JSON.stringify(library.snapshot.sources.config)
+    try {
+      await library.initialize()
+      if (before !== JSON.stringify(library.snapshot.sources.config)) scheduleLibraryRefresh('sources')
+      else scheduleLibraryRefresh('state')
+    } catch (error) { report(error) }
+  })
   const offScopeEvents = drive.on('scope.changed', () => { library.invalidateReadingState(); scheduleLibraryRefresh('sources') })
 
   const openDetail = async (
@@ -861,6 +884,7 @@ export async function startApp(options: AppOptions) {
       signal.throwIfAborted()
       currentFile = unit.file
       text('book-title', unit.file.name)
+      if (drive.can?.('ui.setTitle')) void drive.ui.setTitle?.(unit.file.name).catch(() => {})
 
       // 解析对应 Work 及作品级覆盖
       const worksSnapshot = library.snapshot.works
@@ -891,6 +915,7 @@ export async function startApp(options: AppOptions) {
       const activeStore = new ProgressStore(drive, unit.file, (message: string, conflict: boolean) => {
         if (active === bookGeneration) {
           text('sync', message)
+          if (drive.can?.('ui.setExitMessage')) void drive.ui.setExitMessage?.((conflict || message.includes('失败')) ? '阅读进度尚未同步，离开后可能需要重试保存。' : '').catch(() => {})
           show('conflict', conflict)
           if (conflict || message.includes('失败')) chrome?.reveal()
         }
@@ -1410,7 +1435,27 @@ export async function startApp(options: AppOptions) {
     syncPreferences()
 
     // 初始化统一阅读馆数据层
-    const snapshot = await library.initialize(appLifecycle.signal)
+    await drive.lifecycle?.migrate(context.data_schema ?? 1, async signal => { await library.initialize(signal) })
+    let snapshot = await library.initialize(appLifecycle.signal)
+    const launchFile = context.launch?.file
+    if (launchFile) {
+      const file = await drive.files.stat({ id: launchFile.id, content_version: launchFile.content_version }, { signal: appLifecycle.signal })
+      const sourcePath = file.is_dir ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) || '/'
+      if (!snapshot.sources.config.sources.some(source => source.path === '/' || file.path === source.path || file.path.startsWith(source.path + '/'))) {
+        const added = await library.addSource(sourcePath, { confirmedRoot: sourcePath === '/', signal: appLifecycle.signal })
+        void added.scan.catch(report)
+      }
+      await openReader(file.id)
+      await drive.lifecycle?.report('ready')
+      return
+    }
+    if (!snapshot.sources.config.sources.length && context.scope?.mode === 'selected') {
+      for (const path of context.scope.paths.slice(0, 16)) {
+        const added = await library.addSource(path, { confirmedRoot: path === '/', signal: appLifecycle.signal })
+        await added.scan
+      }
+      snapshot = library.snapshot
+    }
     // 旧版封面缩略图占用私有存储配额，后台回收；失败不影响阅读馆使用。
     void library.purgeLegacyCovers(appLifecycle.signal).catch(() => {})
 
@@ -1424,8 +1469,10 @@ export async function startApp(options: AppOptions) {
       }
       await switchView('home')
     }
+    await drive.lifecycle?.report('ready')
   } catch (error) {
     report(error)
+    void drive.lifecycle?.report('failed', errorText(error)).catch(() => {})
     text('notice', '阅读馆初始化失败，请返回应用中心重新打开。')
     show('notice', true)
   }

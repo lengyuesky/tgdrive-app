@@ -1,9 +1,9 @@
 {
   "id": "comics",
   "name": "漫画",
-  "version": "1.3.8",
+  "version": "1.4.1",
   "api_version": 2,
-  "min_host_version": "0.2.0",
+  "min_host_version": "0.3.0",
   "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
   "author": "tgdrive",
   "entry": "index.html",
@@ -20,5 +20,28 @@
       "type": "directory",
       "default": "/"
     }
-  ]
+  ],
+  "integration": {
+    "file_types": [
+      "cbz",
+      "zip"
+    ],
+    "directories": true,
+    "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+    "formats": [
+      "图片目录",
+      "CBZ",
+      "ZIP"
+    ],
+    "limitations": [
+      "不支持加密归档、RAR、CBR 或 7Z。",
+      "归档上限 2 GiB，图片章最多 10000 页；按可见范围读取图片。"
+    ],
+    "homepage": "https://github.com/lengyuesky/tgdrive-app",
+    "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+    "screenshots": [
+      "screenshots/home.png"
+    ],
+    "data_schema": 1
+  }
 }

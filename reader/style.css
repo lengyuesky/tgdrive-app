@@ -30,8 +30,8 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 #source { flex:1; overflow-wrap:anywhere; }
 #library-status { text-align:center; color:var(--muted); padding:16px 0; font-size:14px; }
 #library-status:empty { display:none; }
-.library-grid { max-width:1200px; margin:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(205px,1fr)); gap:16px; }
-.library-card { display:flex; flex-direction:column; text-align:left; min-height:165px; padding:20px; gap:10px; overflow:hidden; transition:border-color .15s; }
+.library-grid { width:100%; max-width:1200px; margin:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(205px,1fr)); gap:16px; }
+.library-card { position:relative; display:flex; flex-direction:column; text-align:left; min-height:165px; padding:20px; gap:10px; overflow:hidden; transition:border-color .15s; }
 .file-mark { background:var(--soft); color:var(--accent); font-size:12px; font-weight:700; padding:7px 9px; border-radius:6px; width:fit-content; }
 .library-card strong { line-height:1.6; overflow-wrap:anywhere; font-size:15px; }
 .file-meta { color:var(--muted); font-size:11px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
@@ -159,7 +159,7 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .immersive .reader-panel .panel-heading { position:sticky; top:-16px; width:100%; align-items:center; justify-content:space-between; background:var(--surface); padding:0 0 8px; margin:0 0 8px; gap:12px; z-index:1; }
 .immersive .preferences, .immersive .reader-navigation { display:flex; flex-direction:column; align-items:stretch; gap:12px; }
 /* 更多菜单在横屏/小屏也要一屏内完整可点：两列网格避免纵向溢出被裁剪。 */
-.immersive .reader-more { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px 12px; }
+.immersive .reader-more { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:6px 12px; }
 .immersive .reader-more .panel-heading, .immersive .reader-more #reader-close { grid-column:1 / -1; }
 .immersive .reader-panel label { display:flex; align-items:center; justify-content:space-between; width:100%; gap:12px; font-size:14px; }
 .immersive .reader-panel input[type="range"] { width:60%; }
@@ -186,7 +186,7 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 /* ==================== 阅读馆模块化界面样式 ==================== */
 .app-ui-layout { display: flex; flex-direction: row; height: 100%; width: 100%; overflow: hidden; background: var(--bg); }
 /* overflow-y 为 auto 时未声明的 overflow-x 会被计算成 auto，整个内容区就变成双向滚动容器，手机上能被左右拖动；显式 hidden 后首页/书库/详情/我的只能上下滚动。 */
-.ui-content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; overscroll-behavior: contain; }
+.ui-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; overscroll-behavior: contain; }
 .ui-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* 桌面端侧边栏 */

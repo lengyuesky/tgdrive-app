@@ -11,6 +11,7 @@ async function install(page: Page, id: string, directory: string) {
   expect(app).toBeTruthy()
   expect((await page.request.post(`/api/apps/catalog/${id}/install`, { data: { digest: app.digest } })).ok()).toBe(true)
   expect((await page.request.patch(`/api/apps/${id}/settings`, { data: { source_dir: directory } })).ok()).toBe(true)
+  expect((await page.request.patch(`/api/apps/${id}/scope`, { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto(`/apps/${id}`)
   await expect(page.locator('.host-status')).toHaveCount(0)
   // 阅读馆重构后应用先落在首页；先进入「书库」视图再等待完整列表。

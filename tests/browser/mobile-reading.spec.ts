@@ -5,6 +5,7 @@ import { revealReader, closeReaderPanel } from './reader-helpers'
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 const frame = (page: Page) => page.frameLocator('iframe')
 async function install(page: Page) {
+  expect((await page.request.patch('/api/apps/books/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto('/apps/books')
   // 阅读馆重构后应用先落在首页；先进入「书库」视图再等待完整列表。
   await expect(frame(page).locator('#btn-home-view-all')).toBeVisible()
@@ -415,6 +416,7 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   expect(comic).toBeTruthy()
   expect((await page.request.post('/api/apps/catalog/comics/install', { data: { digest: comic.digest } })).ok()).toBe(true)
   expect((await page.request.patch('/api/apps/comics/settings', { data: { source_dir: '/测试漫画' } })).ok()).toBe(true)
+  expect((await page.request.patch('/api/apps/comics/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto('/apps/comics')
   await expect(frame(page).locator('#btn-home-view-all')).toBeVisible()
   await frame(page).locator('#btn-home-view-all').click()

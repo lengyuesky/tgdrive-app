@@ -6,9 +6,9 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.5.5",
+        "version": "1.6.1",
         "api_version": 2,
-        "min_host_version": "0.2.0",
+        "min_host_version": "0.3.0",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -25,19 +25,43 @@
             "type": "directory",
             "default": "/"
           }
-        ]
+        ],
+        "integration": {
+          "file_types": [
+            "txt",
+            "epub",
+            "pdf"
+          ],
+          "directories": false,
+          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "formats": [
+            "TXT",
+            "EPUB 2/3",
+            "PDF"
+          ],
+          "limitations": [
+            "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
+            "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。"
+          ],
+          "homepage": "https://github.com/lengyuesky/tgdrive-app",
+          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+          "screenshots": [
+            "screenshots/home.png"
+          ],
+          "data_schema": 1
+        }
       },
-      "sha256": "295f14b01961ebaa8ab1112f330755c1d25fb7ccb60d98b5bcc5a254096d3aab",
-      "size": 2253521,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.5.5.tgapp"
+      "sha256": "af1b624b8e078590327cafebdb31f223b130d2b6ab07df3259d3a92b6101421b",
+      "size": 2330951,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.1.tgapp"
     },
     {
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.3.1",
+        "version": "1.4.1",
         "api_version": 2,
-        "min_host_version": "0.2.0",
+        "min_host_version": "0.3.0",
         "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -46,19 +70,53 @@
           "files.read",
           "media.read"
         ],
-        "settings": []
+        "settings": [],
+        "integration": {
+          "file_types": [
+            "mp4",
+            "mov",
+            "m4v",
+            "mkv",
+            "webm",
+            "avi",
+            "wmv",
+            "flv",
+            "ts",
+            "mts",
+            "m2ts",
+            "3gp",
+            "ogv"
+          ],
+          "directories": false,
+          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "formats": [
+            "浏览器支持的视频",
+            "MKV 客户端解封装",
+            "SRT/VTT/ASS 字幕"
+          ],
+          "limitations": [
+            "播放能力取决于浏览器支持的编码；不提供服务端转码。",
+            "媒体库按需加载，不联网刮削；不支持的编码可下载原文件。"
+          ],
+          "homepage": "https://github.com/lengyuesky/tgdrive-app",
+          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+          "screenshots": [
+            "screenshots/home.png"
+          ],
+          "data_schema": 1
+        }
       },
-      "sha256": "e671be9817c42923ec27d32428ea035d5fa3575462b90b7cfa4253191e4af4f3",
-      "size": 121402,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.3.1.tgapp"
+      "sha256": "f8fb4c7a77700dd6f00b4fbfcec4657c2626622ef62bfc176669c3dfe1e87c33",
+      "size": 221384,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.4.1.tgapp"
     },
     {
       "manifest": {
         "id": "comics",
         "name": "漫画",
-        "version": "1.3.8",
+        "version": "1.4.1",
         "api_version": 2,
-        "min_host_version": "0.2.0",
+        "min_host_version": "0.3.0",
         "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -75,19 +133,42 @@
             "type": "directory",
             "default": "/"
           }
-        ]
+        ],
+        "integration": {
+          "file_types": [
+            "cbz",
+            "zip"
+          ],
+          "directories": true,
+          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "formats": [
+            "图片目录",
+            "CBZ",
+            "ZIP"
+          ],
+          "limitations": [
+            "不支持加密归档、RAR、CBR 或 7Z。",
+            "归档上限 2 GiB，图片章最多 10000 页；按可见范围读取图片。"
+          ],
+          "homepage": "https://github.com/lengyuesky/tgdrive-app",
+          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+          "screenshots": [
+            "screenshots/home.png"
+          ],
+          "data_schema": 1
+        }
       },
-      "sha256": "fc760e00bd0387f8d260088f5f2e1d58094e9fa0e0c42d7473f8c874c620ce56",
-      "size": 139343,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.3.8.tgapp"
+      "sha256": "2b68a9e8ef2245af3a81b62ed31a3e045049cf7095ccf0864080e60a41322035",
+      "size": 342608,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.4.1.tgapp"
     },
     {
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "1.3.1",
+        "version": "1.4.1",
         "api_version": 2,
-        "min_host_version": "0.2.0",
+        "min_host_version": "0.3.0",
         "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
         "author": "tgdrive",
         "entry": "index.html",
@@ -112,11 +193,43 @@
             "type": "boolean",
             "default": true
           }
-        ]
+        ],
+        "integration": {
+          "file_types": [
+            "mp4",
+            "mov",
+            "m4v",
+            "mkv",
+            "webm",
+            "avi",
+            "wmv",
+            "flv",
+            "ts",
+            "mts",
+            "m2ts",
+            "3gp",
+            "ogv"
+          ],
+          "directories": false,
+          "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+          "formats": [
+            "网盘视频"
+          ],
+          "limitations": [
+            "播放能力取决于浏览器；不提供转码。",
+            "列表分页加载；切换或关闭时取消旧视频读取。"
+          ],
+          "homepage": "https://github.com/lengyuesky/tgdrive-app",
+          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+          "screenshots": [
+            "screenshots/home.png"
+          ],
+          "data_schema": 1
+        }
       },
-      "sha256": "880e1f12dffe39192cc6a3b69140e54012ec5f37f9f097cffaf27041dadba3a7",
-      "size": 14250,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.3.1.tgapp"
+      "sha256": "e3e6d1bb0a68bb4327a978c1920df2aa19bf134a8340926d9731971d1940ea24",
+      "size": 339991,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.4.1.tgapp"
     }
   ]
 }

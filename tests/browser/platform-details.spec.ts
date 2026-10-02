@@ -1,0 +1,22 @@
+import { expect, test } from '@playwright/test'
+
+test('可安装应用详情与已安装详情均展示真实包内截图和格式说明', async ({ page }) => {
+  expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
+  expect((await page.request.post('/api/auth/login', { data: { username: 'apps-test', password: 'apps-test-only' } })).ok()).toBe(true)
+  const index = await (await page.request.get('/api/apps')).json()
+  for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
+  await page.goto('/apps')
+  await page.getByRole('tab', { name: /可安装/ }).click()
+  await page.locator('[data-app-id="books"]').getByRole('button', { name: '应用详情', exact: true }).click()
+  const detail = page.getByRole('dialog', { name: '图书', exact: true })
+  await expect(detail).toContainText('EPUB 2/3')
+  await expect(detail).toContainText('需要宿主 0.3.0')
+  await expect.poll(() => detail.getByRole('img', { name: '图书界面 1' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await detail.getByRole('button', { name: '关闭', exact: true }).click()
+  const book = index.available.find((app: any) => app.manifest.id === 'books')
+  expect((await page.request.post('/api/apps/catalog/books/install', { data: { digest: book.digest } })).ok()).toBe(true)
+  await page.reload()
+  await page.locator('[data-app-id="books"]').getByRole('button', { name: '应用详情', exact: true }).click()
+  await expect(detail).toContainText('未授权')
+  await expect.poll(() => detail.getByRole('img', { name: '图书界面 1' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+})

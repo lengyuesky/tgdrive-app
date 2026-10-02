@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { verifyFixtureBuilds } from '../browser/fixture-preflight.mjs'
@@ -23,6 +23,11 @@ async function fixture() {
     await mkdir(source)
     const manifest = await readFile(`${root}/${id}/app.json`, 'utf8')
     await writeFile(`${source}/app.json`, manifest)
+    const metadata = JSON.parse(manifest)
+    for (const asset of [metadata.icon, ...(metadata.integration?.screenshots ?? [])].filter(Boolean)) {
+      await mkdir(dirname(`${source}/${asset}`), { recursive: true })
+      await copyFile(`${root}/${id}/${asset}`, `${source}/${asset}`)
+    }
     await writeFile(`${source}/index.html`, '<!doctype html><html><body>合成插件构建产物</body></html>')
     await run(process.execPath, [`${root}/package.mjs`, source, catalogDir])
     packages[id] = `${catalogDir}/${id}-${JSON.parse(manifest).version}.tgapp`

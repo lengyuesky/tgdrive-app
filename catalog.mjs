@@ -20,7 +20,7 @@ const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((
 const MAX_SEMVER_COMPONENT = (1n << 64n) - 1n
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u
 const PERMISSIONS = ['files.read', 'media.read', 'favorites.write']
-const MANIFEST_FIELDS = ['id', 'name', 'version', 'api_version', 'min_host_version', 'description', 'author', 'entry', 'icon', 'permissions', 'settings']
+const MANIFEST_FIELDS = ['id', 'name', 'version', 'api_version', 'min_host_version', 'description', 'author', 'entry', 'icon', 'permissions', 'settings', 'integration']
 
 function matches(pattern, value) {
   return typeof value === 'string' && pattern.exec(value)?.[0] === value
@@ -71,7 +71,7 @@ export function compareStableVersions(left, right) {
 
 /** 只校验 schema，不按本机 API/宿主版本过滤未来兼容性条目。 */
 export function validateManifest(manifest) {
-  validateObject(manifest, 'manifest', MANIFEST_FIELDS, MANIFEST_FIELDS.filter((key) => key !== 'icon'))
+  validateObject(manifest, 'manifest', MANIFEST_FIELDS, MANIFEST_FIELDS.filter((key) => !['icon', 'integration'].includes(key)))
   if (!matches(APP_ID_PATTERN, manifest.id)) throw new Error('应用 ID 无效')
   for (const [key, limit] of [['name', 120], ['description', 1600], ['author', 160]]) {
     const text = manifest[key]
@@ -85,6 +85,20 @@ export function validateManifest(manifest) {
   }
   if (manifest.icon !== undefined && (!validText(manifest.icon, 240) || !manifest.icon.endsWith('.svg') || !manifest.icon.split('/').every(part => matches(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/, part)))) {
     throw new Error('icon 必须为包内合法 SVG 资源路径')
+  }
+  if (manifest.integration !== undefined) {
+    const i = manifest.integration
+    validateObject(i, 'integration', ['file_types', 'directories', 'changelog', 'formats', 'limitations', 'homepage', 'support', 'screenshots', 'data_schema'])
+    if (manifest.api_version !== 2 || compareStableVersions(manifest.min_host_version, '0.3.0') < 0) throw new Error('系统集成需要宿主 0.3.0 和 API v2')
+    if (!Array.isArray(i.file_types) || i.file_types.length > 32 || i.file_types.some(v => typeof v !== 'string' || !/^[a-z0-9]{1,16}$/.test(v)) || new Set(i.file_types).size !== i.file_types.length || typeof i.directories !== 'boolean') throw new Error('文件入口声明无效')
+    if ((i.directories || i.file_types.length) && !manifest.permissions?.includes('files.read')) throw new Error('文件入口需要 files.read')
+    if (!validText(i.changelog, 4000) || !Array.isArray(i.formats) || i.formats.length > 24 || i.formats.some(v => !validText(v, 160) || !v || CONTROL_PATTERN.test(v)) || !Array.isArray(i.limitations) || i.limitations.length > 12 || i.limitations.some(v => !validText(v, 800) || !v || CONTROL_PATTERN.test(v))) throw new Error('应用详情文本无效')
+    for (const link of [i.homepage, i.support]) {
+      if (!validText(link, 2048)) throw new Error('应用链接无效')
+      if (link) { const u = new URL(link); if (u.protocol !== 'https:' || u.username || u.password) throw new Error('应用链接必须使用无凭据的 HTTPS') }
+    }
+    if (!Array.isArray(i.screenshots) || i.screenshots.length > 6 || i.screenshots.some(v => typeof v !== 'string' || !/\.(png|jpg|webp)$/.test(v) || !v.split('/').every(part => /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(part)))) throw new Error('截图路径无效')
+    if (!Number.isSafeInteger(i.data_schema) || i.data_schema < 1 || i.data_schema > 0xffffffff) throw new Error('数据版本无效')
   }
   if (!Array.isArray(manifest.permissions) || manifest.permissions.length > PERMISSIONS.length || new Set(manifest.permissions).size !== manifest.permissions.length || manifest.permissions.some(permission => !PERMISSIONS.includes(permission))) {
     throw new Error('permissions 包含重复或不受支持的权限')

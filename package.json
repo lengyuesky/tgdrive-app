@@ -17,7 +17,10 @@
     "test:comics": "playwright test -c tests/standalone/playwright.config.ts",
     "test:shorts": "playwright test -c tests/standalone/shorts.config.ts",
     "test:readers": "playwright test -c tests/standalone/readers.config.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "create": "node tools/create-app.mjs",
+    "dev:host": "node tools/dev-host.mjs",
+    "test:dev-host": "playwright test -c tests/standalone/development.config.ts"
   },
   "dependencies": {
     "@zip.js/zip.js": "2.14.0",

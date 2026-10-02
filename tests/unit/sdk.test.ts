@@ -1,4 +1,5 @@
 import { runInNewContext } from 'node:vm'
+import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Drive } from '../../sdk/types'
 import source from '../../sdk/tgdrive-sdk.js?raw'
@@ -22,7 +23,7 @@ function boot(visibility: DocumentVisibilityState = 'visible') {
   const frames = new Map<number, FrameRequestCallback>()
   let sequence = 0
   runInNewContext(source, {
-    window, document, setInterval, clearInterval, setTimeout, clearTimeout, DOMException,
+    window, document, setInterval, clearInterval, setTimeout, clearTimeout, DOMException, AbortController, crypto: webcrypto,
     requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++sequence, callback); return sequence },
     cancelAnimationFrame: (id: number) => frames.delete(id),
   })
@@ -38,6 +39,38 @@ beforeEach(() => vi.useFakeTimers())
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
 
 describe('页面 SDK 的可交互就绪时序', () => {
+  it('文件定位只发送稳定引用，迁移成功后才提交数据版本', async () => {
+    const app = boot('hidden')
+    Object.assign(app.context, { capabilities: ['app.lifecycle', 'ui.showFile'] })
+    app.connect(); await app.drive.ready
+    const locating = app.drive.ui.showFile!({ id: 42, content_version: 'v1', path: '/不应传递' } as any)
+    await Promise.resolve()
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 1, method: 'ui.showFile', params: { id: 42, content_version: 'v1' } })
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: null } }); await locating
+    const work = vi.fn().mockResolvedValue(undefined)
+    const migration = app.drive.lifecycle!.migrate(1, work)
+    await vi.advanceTimersByTimeAsync(0)
+    const begin = app.port.postMessage.mock.calls.at(-1)![0]
+    expect(begin.params).toMatchObject({ action: 'begin', version: 1 })
+    expect(work).not.toHaveBeenCalled()
+    app.port.onmessage!({ data: { type: 'response', id: begin.id, result: { needed: true } } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(work).toHaveBeenCalledOnce()
+    const complete = app.port.postMessage.mock.calls.at(-1)![0]
+    expect(complete.params).toMatchObject({ action: 'complete', version: 1, owner: begin.params.owner })
+    app.port.onmessage!({ data: { type: 'response', id: complete.id, result: {} } })
+    await migration
+    app.window.emit('pagehide')
+  })
+
+  it('已完成的数据版本不重复执行迁移', async () => {
+    const app = boot('hidden'); Object.assign(app.context, { capabilities: ['app.lifecycle'] }); app.connect(); await app.drive.ready
+    const work = vi.fn(), promise = app.drive.lifecycle!.migrate(1, work)
+    await vi.advanceTimersByTimeAsync(0)
+    const begin = app.port.postMessage.mock.calls.at(-1)![0]
+    app.port.onmessage!({ data: { type: 'response', id: begin.id, result: { needed: false } } })
+    await promise; expect(work).not.toHaveBeenCalled(); app.window.emit('pagehide')
+  })
   it('媒体地址兼容路径与稳定引用，不把引用对象塞入路径', async () => {
     const app = boot('hidden'); app.connect(); await app.drive.ready
     const legacy = app.drive.media.url('/电影.mp4', 'thumbnail')

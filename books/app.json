@@ -1,9 +1,9 @@
 {
   "id": "books",
   "name": "图书",
-  "version": "1.5.5",
+  "version": "1.6.1",
   "api_version": 2,
-  "min_host_version": "0.2.0",
+  "min_host_version": "0.3.0",
   "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
   "author": "tgdrive",
   "entry": "index.html",
@@ -20,5 +20,29 @@
       "type": "directory",
       "default": "/"
     }
-  ]
+  ],
+  "integration": {
+    "file_types": [
+      "txt",
+      "epub",
+      "pdf"
+    ],
+    "directories": false,
+    "changelog": "支持从文件页直接打开、目录选择授权、文件定位与详情；加入版本化数据初始化、运行诊断及统一任务状态。",
+    "formats": [
+      "TXT",
+      "EPUB 2/3",
+      "PDF"
+    ],
+    "limitations": [
+      "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
+      "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。"
+    ],
+    "homepage": "https://github.com/lengyuesky/tgdrive-app",
+    "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+    "screenshots": [
+      "screenshots/home.png"
+    ],
+    "data_schema": 1
+  }
 }

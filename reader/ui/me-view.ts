@@ -158,6 +158,7 @@ export class MeView {
               aria-label="目录路径"
               required
             />
+            <button id="btn-choose-source" class="btn-primary" type="button">选择并授权目录</button>
             <button id="btn-submit-source" class="btn-primary" type="submit">添加目录</button>
           </form>
           <p id="add-source-error" class="error-text" hidden></p>
@@ -277,6 +278,16 @@ export class MeView {
     const pathInput = subview.querySelector<HTMLInputElement>('#input-source-path')
     const errText = subview.querySelector<HTMLElement>('#add-source-error')
 
+    const choose = subview.querySelector<HTMLButtonElement>('#btn-choose-source')
+    if (choose) {
+      choose.hidden = !this.context.drive.can?.('ui.authorizeDirectory')
+      choose.onclick = async () => {
+        try {
+          const selected = await this.context.drive.ui.authorizeDirectory?.(pathInput?.value || '/')
+          if (selected && pathInput) { pathInput.value = selected; form?.requestSubmit() }
+        } catch (error) { this.context.reportError(error) }
+      }
+    }
     if (form && pathInput && errText) {
       form.onsubmit = async (e) => {
         e.preventDefault()

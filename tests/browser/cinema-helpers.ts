@@ -3,7 +3,7 @@ import { expect, type Page } from '@playwright/test'
 export async function chooseCinemaDirectory(page: Page, path: string) {
   const frame = page.frameLocator('iframe')
   await frame.locator('#library-pick').click()
-  const picker = page.getByRole('dialog', { name: '影视：选择目录', exact: true })
+  const picker = page.getByRole('dialog', { name: '选择允许应用读取的目录', exact: true })
   await expect(picker).toBeVisible()
   // 宿主入场动画会移动目录行；等待动画结束再按实际坐标点击，不强制点击或固定休眠。
   await picker.evaluate(async element => {
@@ -24,6 +24,7 @@ export async function chooseCinemaDirectory(page: Page, path: string) {
   await expect(picker.locator('.picked code')).toHaveText(path)
   await picker.getByRole('button', { name: '确定', exact: true }).click()
   await expect(picker).not.toBeVisible()
+  await page.getByRole('dialog', { name: '授权目录', exact: true }).getByRole('button', { name: '允许读取', exact: true }).click()
   await expect(frame.locator('#library-path')).toHaveText(path)
   await expect(frame.locator('#library-save')).toBeEnabled()
 }
@@ -58,8 +59,9 @@ export async function installCinema(page: Page, source: string | null = '/测试
   const index = await (await page.request.get('/api/apps')).json()
   if (index.installed.some((app: any) => app.manifest.id === 'cinema')) expect((await page.request.delete('/api/apps/cinema?purge_data=true')).ok()).toBe(true)
   const app = index.available.find((app: any) => app.manifest.id === 'cinema')
-  expect(app?.manifest.version).toBe('1.3.1')
+  expect(app?.manifest.integration?.file_types).toContain('mkv')
   expect((await page.request.post('/api/apps/catalog/cinema/install', { data: { digest: app.digest } })).ok()).toBe(true)
+  expect((await page.request.patch('/api/apps/cinema/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto('/apps/cinema')
   await expect(page.frameLocator('iframe').locator('#empty-title')).toHaveText('尚未创建媒体库')
   await expect(page.frameLocator('iframe').locator('#empty')).toBeVisible()

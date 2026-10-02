@@ -3,7 +3,7 @@ import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises'
 import { resolve, relative, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { crc32, deflateRawSync } from 'node:zlib'
-import { MAX_MANIFEST_BYTES, parsePublishJson, readLimitedFile } from './catalog.mjs'
+import { MAX_MANIFEST_BYTES, validateManifest, parsePublishJson, readLimitedFile } from './catalog.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const source = resolve(process.argv[2] ?? `${root}/shorts`)
@@ -13,6 +13,7 @@ if (!/^[a-z][a-z0-9-]{0,63}$/.test(manifest.id) || !/^[0-9A-Za-z.+-]{1,80}$/.tes
   throw new Error('应用 ID 或版本无效')
 }
 // 包内清单与目录共用 JSON 数值表示，避免 1.0/1e0 经目录序列化后与原包不一致。
+validateManifest(manifest)
 const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2) + '\n')
 if (manifestBytes.length > MAX_MANIFEST_BYTES) throw new Error('规范化应用清单超过 64 KiB')
 const files = []
@@ -29,6 +30,7 @@ async function collect(directory) {
   }
 }
 await collect(source)
+for (const path of manifest.integration?.screenshots ?? []) { const image = files.find(file => file.name === path); if (!image || !image.data.length || image.data.length > 512 * 1024) throw new Error('截图不存在或超过 512 KiB') }
 if (!files.some((file) => file.name === manifest.entry)) throw new Error('应用入口文件不存在')
 if (files.some((file) => file.name === 'tgdrive-sdk.js')) throw new Error('tgdrive-sdk.js 由打包工具自动加入，请移除同名源文件')
 files.push({ name: 'tgdrive-sdk.js', data: await readFile(`${root}/sdk/tgdrive-sdk.js`) })
