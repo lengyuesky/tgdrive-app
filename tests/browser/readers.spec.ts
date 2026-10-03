@@ -352,3 +352,30 @@ test('图书分组通过宿主存储持久化并在两个页面同步，删除�
     await expect(first.locator('#viewport')).toContainText('你好')
   } finally { await other.close() }
 })
+
+test('返回书库等待记录加载时保护旧卡片，加载完成后首次点击即可开书', async ({ page }) => {
+  await install(page, 'books', '/测试图书')
+  const frame = page.frameLocator('iframe')
+  await frame.getByRole('button', { name: /长篇.txt/ }).click()
+  await expect(frame.locator('#reading-status')).toHaveText('')
+  let release!: () => void, intercepted = false
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/apps/books/rpc', async route => {
+    const body = route.request().postDataJSON()
+    if (!intercepted && body.method === 'storage.list' && body.params.prefix === 'progress:') {
+      intercepted = true
+      await gate
+    }
+    await route.continue().catch(() => {})
+  })
+  try {
+    await frame.locator('#back').click()
+    await expect.poll(() => intercepted).toBe(true)
+    await expect(frame.locator('#app-ui')).toHaveAttribute('inert', '')
+    release()
+    await expect(frame.locator('#app-ui')).not.toHaveAttribute('inert')
+    await frame.getByRole('button', { name: /标准字体.pdf/ }).click()
+    await expect(frame.locator('canvas')).toBeVisible()
+    await expect(frame.locator('#reading-status')).toHaveText('')
+  } finally { release(); await page.unroute('**/api/apps/books/rpc') }
+})

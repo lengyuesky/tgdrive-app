@@ -4,6 +4,29 @@ import type { Drive, FileEntry } from '../sdk/types'
 import type { ReaderView } from './view'
 import { file, memoryDrive } from './library/test-fixtures'
 
+it.each(['books', 'comics'] as const)('%s 初始化断线后可以原地恢复，不需要重开应用', async kind => {
+  document.body.innerHTML = '<div id="app"></div>'
+  const mock = memoryDrive([])
+  window.tgdrive = Object.assign(mock.drive, {
+    ready: Promise.resolve({ id: kind, name: kind === 'books' ? '图书' : '漫画', version: '1.0.0', api_version: 2, dark: false }),
+    ui: { close: vi.fn(async () => {}), download: vi.fn(async () => {}) },
+    on: () => () => {},
+  }) as unknown as Drive
+  vi.spyOn(mock.drive.storage, 'get').mockRejectedValueOnce(new Error('连接中断'))
+  try {
+    await startApp({ kind, create: vi.fn() })
+    expect(document.getElementById('startup-error')!.hidden).toBe(false)
+    expect(document.getElementById('app-ui')!.inert).toBe(true)
+    document.getElementById('startup-retry')!.click()
+    await vi.waitFor(() => expect(document.getElementById('startup-error')!.hidden).toBe(true))
+    expect(document.getElementById('app-ui')!.inert).toBe(false)
+    expect(document.getElementById('view-me')!.hidden).toBe(false)
+  } finally {
+    window.dispatchEvent(new Event('pagehide'))
+    document.body.replaceChildren()
+  }
+})
+
 it('最近阅读包含取材目录本身的图片章节，但不混入同名前缀的外部目录', async () => {
   document.body.innerHTML = '<div id="app"></div>'
   const rootDir = file(1, '/漫画', true)

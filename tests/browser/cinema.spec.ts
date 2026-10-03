@@ -212,3 +212,32 @@ test('本剧跳过设置保存后从头播放生效，片尾与本集定时停�
   await frame.locator('#skip-intro').fill('4'); await frame.locator('#save-series').click()
   await expect(frame.locator('#series-status')).toContainText('已同步')
 })
+
+test('手机影院搜索和详情断线后可原地重试并保留搜索条件', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await install(page)
+  const frame = page.frameLocator('iframe')
+  let failSearch = true, failDetail = true
+  await page.route('**/api/apps/cinema/rpc', async route => {
+    const body = route.request().postDataJSON()
+    if ((failSearch && body.method === 'files.searchPage') || (failDetail && body.method === 'storage.get' && body.params.key.startsWith('progress:'))) {
+      await route.fulfill({ status: 503, json: { error: '测试连接暂时中断' } })
+    } else await route.continue()
+  })
+  await frame.locator('#search').fill('S01E01')
+  await frame.locator('#search-submit').click()
+  await expect(frame.locator('#list-retry')).toBeVisible()
+  await expect(frame.locator('#items')).toHaveAttribute('aria-busy', 'false')
+  failSearch = false
+  await frame.locator('#list-retry').click()
+  await expect(frame.locator('#search')).toHaveValue('S01E01')
+  await expect(frame.locator('#items .poster-card')).toHaveCount(1)
+  await frame.getByRole('button', { name: '查看影视：星际旅程 S01E01.mp4', exact: true }).click()
+  await expect(frame.locator('#detail-retry')).toBeVisible()
+  await page.screenshot({ path: info.outputPath('cinema-mobile-retry.png'), fullPage: true })
+  failDetail = false
+  await frame.locator('#detail-retry').click()
+  await expect(frame.locator('#episode-count')).toContainText('3 个视频')
+  await expect(frame.locator('#detail-retry')).not.toBeVisible()
+  await expect(frame.locator('#detail-favorite')).toBeEnabled()
+})

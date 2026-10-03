@@ -9,6 +9,7 @@
   const mobileQuery = window.matchMedia('(max-width: 767px), (pointer: coarse)')
   let launchPending = true
   let cursor = null, more = false, filling, filesDirty = false
+  let moveIntent = 0
   const recent = new Set(), cursors = new Set(), subscriptions = []
   let queue = [], index = 0, directory = '/', muted = true
   let generation = 0, listGeneration = 0, disposed = false, listController
@@ -99,6 +100,11 @@
     get('favorite').querySelector('.symbol').textContent = favorite ? '★' : '☆'
     get('favorite').querySelector('.label').textContent = favorite ? '已收藏' : '收藏'
   }
+  function syncQueue() {
+    const item = current()
+    if (item) get('video-meta').textContent = `${index + 1} / ${queue.length} · ${sizeText(item.size)}${more ? ' · 更多视频待载入' : ''}`
+    for (const id of ['previous', 'next', 'skip-error']) get(id).disabled = queue.length < 2 && !more
+  }
   function syncMute() {
     video.muted = muted
     get('mute').querySelector('.symbol').textContent = muted ? '静' : '声'
@@ -147,8 +153,7 @@
     buffering(true)
     get('video-name').textContent = item.name
     get('video-name').title = item.path
-    get('video-meta').textContent = `${index + 1} / ${queue.length} · ${sizeText(item.size)}${more ? ' · 更多视频待载入' : ''}`
-    for (const id of ['previous', 'next', 'skip-error']) get(id).disabled = queue.length < 2 && !more
+    syncQueue()
     recent.delete(itemKey(item)); recent.add(itemKey(item)); if (recent.size > 512) recent.delete(recent.values().next().value)
     if (more && queue.length - index < 6) handle(fillQueue())
     syncFavorite(); syncMute(); syncPlay()
@@ -169,6 +174,7 @@
     }
   }
   async function load() {
+    moveIntent++
     const active = ++listGeneration
     listController?.abort(); listController = new AbortController()
     const signal = AbortSignal.any([lifetime.signal, listController.signal])
@@ -191,8 +197,10 @@
       get('source-label').title = `取材文件夹：${directory}，点击更换`
       index = 0
       await fillQueue()
+      if (disposed || active !== listGeneration) return
       if (launchPending && context.launch?.file) {
         const file = await drive.files.stat({ id: context.launch.file.id, content_version: context.launch.file.content_version }, { signal })
+        if (disposed || active !== listGeneration) return
         queue = [file, ...queue.filter(item => item.id !== file.id)]
       }
       launchPending = false
@@ -228,18 +236,19 @@
       // 新内容排在近期看过的内容之前；旧队列最多保留 100 条用于回看。
       queue.push(...fresh.filter(item => !recent.has(itemKey(item))), ...fresh.filter(item => recent.has(itemKey(item))))
       if (index > 100) { queue.splice(0, index - 100); index = 100 }
-      for (const id of ['previous', 'next', 'skip-error']) get(id).disabled = queue.length < 2 && !more
+      syncQueue()
     })()
     filling = task
     try { await task } finally { if (filling === task) filling = undefined }
   }
   async function go(delta) {
     if (disposed) return
+    const intent = ++moveIntent
     if (filesDirty) { await load(); return }
     if (delta > 0 && index === queue.length - 1 && more) {
       const active = listGeneration
       await fillQueue()
-      if (disposed || active !== listGeneration) return
+      if (disposed || active !== listGeneration || intent !== moveIntent) return
     }
     if (queue.length < 2) return
     index = (index + delta + queue.length) % queue.length
@@ -296,6 +305,7 @@
   listen(get('download'), 'click', () => { if (current()) handle(drive.ui.download(current().path)) })
   listen(get('shuffle'), 'click', () => {
     if (queue.length < 2) return
+    moveIntent++
     const previous = current()
     queue = shuffled(queue)
     if (queue[0] === previous) [queue[0], queue[1]] = [queue[1], queue[0]]

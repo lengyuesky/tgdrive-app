@@ -12,6 +12,8 @@ import { PlaybackSession, type PlaybackInfo } from './media'
 import { Captions, readSubtitle, type SubtitleTrack } from './subtitles'
 
 const drive = window.tgdrive
+const lifetime = new AbortController()
+window.addEventListener('pagehide', () => lifetime.abort(), { once: true })
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const show = (id: string, visible: boolean) => { $(id).hidden = !visible }
 const text = (id: string, value: string) => { $(id).textContent = value }
@@ -145,6 +147,7 @@ async function loadPage() {
   for (const id of ['empty', 'hero', 'continue-section', 'libraries', 'search-form', 'breadcrumbs', 'previous-page', 'next-page']) show(id, false)
   show('library-navigation', !!activeId); show('new-library', !recordView && !activeId)
   text('page-label', ''); text('source-label', ''); $('source-label').title = ''; text('list-status', '正在读取媒体库设置…')
+  show('list-retry', false); $('items').setAttribute('aria-busy', 'true')
   $('main').scrollTop = 0
   text('page-title', { home: '今晚，看点什么？', library: '我的媒体库', favorites: '把喜欢，留在身边', history: '每一次相遇，都有记录' }[view])
   text('section-title', recordView ? view === 'history' ? '观看历史' : '我的收藏' : '我的媒体库')
@@ -207,7 +210,9 @@ async function loadPage() {
     text('page-label', currentFiles.length || pageIndex || nextCursor ? `第 ${pageIndex + 1} 页 · ${currentFiles.length} 项` : '')
     if (!recordView && currentRoot && !directoryMode && !query && !format && pageIndex === 0) await homeSections(currentRoot, signal)
   } catch (error) {
-    if (!signal.aborted) { text('list-status', `${(error as Error).message}；可点击右上角刷新重试。`); show('empty', false) }
+    if (!signal.aborted) { text('list-status', `${(error as Error).message}；可重试加载本页。`); show('empty', false); show('list-retry', true) }
+  } finally {
+    if (!signal.aborted) $('items').setAttribute('aria-busy', 'false')
   }
 }
 async function homeSections(root: CinemaLibrary, signal: AbortSignal) {
@@ -247,7 +252,8 @@ async function openDetail(file: FileEntry) {
   previousFocus = document.activeElement as HTMLElement
   if (!detail.open) detail.showModal()
   text('detail-title', title(file.name)); text('detail-meta', `${extension(file.name).toUpperCase()} · ${sizeText(file.size)}`); text('detail-path', file.path)
-  text('detail-progress', ''); text('detail-status', '正在整理同目录合集…'); text('episode-count', '')
+  text('detail-progress', ''); text('detail-status', '正在整理同目录合集…'); text('episode-count', ''); show('detail-retry', false)
+  $('detail-play').querySelector('span:last-child')!.textContent = '播放'
   $('episodes').replaceChildren(); $('detail-poster').replaceChildren(); show('episodes-prev', false); show('episodes-next', false)
   const image = element('div', 'poster-art'); image.style.setProperty('--hue', String(230 + file.id * 37 % 100)); image.append(element('span', 'poster-initial', title(file.name).slice(0, 4)))
   $('detail-poster').append(image)
@@ -269,7 +275,7 @@ async function openDetail(file: FileEntry) {
     signal.throwIfAborted(); episodes = list.files.filter(item => isVideo(item) && withinDirectory(item.path, root.directoryPath)).sort(naturalOrder); episodesComplete = list.complete
     text('detail-status', list.complete ? '' : '此目录超过 10000 项，只展示已整理部分；自动连播已禁用，请用目录分页选择。')
     text('episode-count', `${episodes.length} 个视频`); renderEpisodes()
-  } catch (error) { if (!signal.aborted) text('detail-status', `文件不可用或加载失败：${(error as Error).message}`) }
+  } catch (error) { if (!signal.aborted) { text('detail-status', `文件不可用或加载失败：${(error as Error).message}`); show('detail-retry', true) } }
 }
 function renderEpisodes() {
   $('episodes').replaceChildren()
@@ -497,6 +503,8 @@ for (const id of ['settings','mobile-source','library-back']) on(id, 'click', ()
 on('library-edit-current', 'click', () => { const item = configSnapshot?.config.libraries.find(item => item.id === activeLibraryId); if (item) return manager.edit(item) })
 for (const id of ['exit','mobile-exit']) on(id, 'click', async () => { await closePlayer(false); await manager.flush(); await drive.ui.close() })
 on('refresh', 'click', () => { closeDetail(); library.clear(); resetPages(); return loadPage() })
+on('list-retry', 'click', loadPage)
+on('detail-retry', 'click', () => selected && openDetail(selected))
 on('directory-mode', 'click', () => { if (!currentRoot) return; directoryMode = !directoryMode; directory = currentRoot.directoryPath; resetPages(); return loadPage() })
 function searchInLibrary() { if (!currentRoot) return; query = value('search').trim(); format = value('format'); directoryMode = false; resetPages(); return loadPage() }
 on('search-submit', 'click', searchInLibrary)
@@ -657,22 +665,42 @@ drive.on('sync.hint', refreshLists)
 drive.on('scope.changed', refreshLists)
 window.addEventListener('pagehide', () => { sleep.clear(); clearTimeout(hostEventTimer); pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
 async function boot() {
+  const signal = lifetime.signal
   const context = await drive.ready
+  signal.throwIfAborted()
   show('detail-show-file', !!drive.can?.('ui.showFile')); show('detail-file-info', !!drive.can?.('ui.fileDetails'))
   await drive.lifecycle?.migrate(context.data_schema ?? 1, async signal => { await librariesStore.load(signal) })
-  let libraries = await librariesStore.load()
-  const file = context.launch?.file ? await drive.files.stat({ id: context.launch.file.id, content_version: context.launch.file.content_version }) : undefined
+  signal.throwIfAborted()
+  let libraries = await librariesStore.load(signal)
+  const file = context.launch?.file ? await drive.files.stat({ id: context.launch.file.id, content_version: context.launch.file.content_version }, { signal }) : undefined
   const paths = file ? [parentPath(file.path)] : !libraries.config.libraries.length && context.scope?.mode === 'selected' ? context.scope.paths : []
   for (const path of paths) {
     if (libraries.config.libraries.some(root => withinDirectory(file?.path ?? path, root.directoryPath))) continue
-    const directory = await drive.files.stat({ path })
+    const directory = await drive.files.stat({ path }, { signal })
     const name = (directory.name || '网盘') + ' · ' + (libraries.config.libraries.length + 1)
-    libraries = await librariesStore.save({ schemaVersion: 1, libraries: [...libraries.config.libraries, { id: newLibraryId(), name, directoryId: directory.id, directoryPath: directory.path }] }, libraries.revision)
+    libraries = await librariesStore.save({ schemaVersion: 1, libraries: [...libraries.config.libraries, { id: newLibraryId(), name, directoryId: directory.id, directoryPath: directory.path }] }, libraries.revision, signal)
   }
-  const saved = await drive.storage.get<CinemaPreferences>('preferences')
+  const saved = await drive.storage.get<CinemaPreferences>('preferences', { signal })
+  signal.throwIfAborted()
   prefRecord = saved; pref = preferences(saved?.value); applyPreferences()
   show('app', true); show('boot-status', false); await loadPage()
   if (file) await startPlayback(file)
+  signal.throwIfAborted()
   await drive.lifecycle?.report('ready')
 }
-void boot().catch(error => { void drive.lifecycle?.report('failed', (error as Error).message).catch(() => {}); show('app', true); show('boot-status', false); text('list-status', (error as Error).message) })
+let booting = false
+async function initialize() {
+  if (booting || lifetime.signal.aborted) return
+  booting = true
+  show('boot-retry', false); text('boot-message', '正在点亮你的私人影院…')
+  try { await boot(); show('boot-status', false) }
+  catch (error) {
+    if (lifetime.signal.aborted || isAbort(error)) return
+    void drive.lifecycle?.report('failed', (error as Error).message).catch(() => {})
+    show('app', false); show('boot-status', true); show('boot-retry', true)
+    text('boot-message', `影院暂时无法加载：${(error as Error).message}`)
+  } finally { booting = false }
+}
+on('boot-retry', 'click', initialize)
+on('boot-exit', 'click', () => drive.ui.close())
+void initialize()

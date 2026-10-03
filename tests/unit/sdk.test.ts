@@ -267,3 +267,74 @@ describe('SDK v2 新增能力', () => {
     app.window.emit('pagehide')
   })
 })
+
+describe('只读请求限流恢复', () => {
+  it('按延迟退避并使用新编号重试，成功后返回真实结果', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const request = app.drive.files.stat({ id: 42 })
+    await vi.advanceTimersByTimeAsync(0)
+    app.port.onmessage!({ data: { type: 'response', id: 1, error: '请求过于频繁', code: 'rate_limited' } })
+    await vi.advanceTimersByTimeAsync(249)
+    expect(app.port.postMessage).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'request', id: 2, method: 'files.stat', params: { id: 42 } })
+    app.port.onmessage!({ data: { type: 'response', id: 2, result: { id: 42 } } })
+    await expect(request).resolves.toEqual({ id: 42 })
+    app.window.emit('pagehide')
+  })
+
+  it.each(['取消', '关闭'])('等待退避时%s立即结束，之后不再发送请求', async action => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const controller = new AbortController()
+    const request = app.drive.files.stat({ id: 42 }, { signal: controller.signal })
+    const outcome = request.catch(error => error)
+    await vi.advanceTimersByTimeAsync(0)
+    app.port.onmessage!({ data: { type: 'response', id: 1, error: '请求过于频繁', code: 'rate_limited' } })
+    await vi.advanceTimersByTimeAsync(0)
+    if (action === '取消') controller.abort()
+    else app.window.emit('pagehide')
+    expect((await outcome).message).toContain(action === '取消' ? '取消' : '关闭')
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(app.port.postMessage).toHaveBeenCalledTimes(1)
+    app.window.emit('pagehide')
+  })
+
+  it('持续限流最多重试四次，写入限流与权限错误不自动重放', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const outcome = app.drive.files.stat({ id: 42 }).catch(error => error)
+    await vi.advanceTimersByTimeAsync(0)
+    for (const delay of [250, 750, 2000, 7000]) {
+      const sent = app.port.postMessage.mock.calls.at(-1)![0]
+      app.port.onmessage!({ data: { type: 'response', id: sent.id, error: '限流', code: 'rate_limited' } })
+      await vi.advanceTimersByTimeAsync(delay)
+    }
+    const last = app.port.postMessage.mock.calls.at(-1)![0]
+    app.port.onmessage!({ data: { type: 'response', id: last.id, error: '限流', code: 'rate_limited' } })
+    expect((await outcome).code).toBe('rate_limited')
+    expect(app.port.postMessage).toHaveBeenCalledTimes(5)
+    for (const [promise, code] of [
+      [app.drive.storage.set('x', 1).catch(error => error), 'rate_limited'],
+      [app.drive.files.stat({ id: 1 }).catch(error => error), 'permission_denied'],
+    ] as const) {
+      await vi.advanceTimersByTimeAsync(0)
+      const sent = app.port.postMessage.mock.calls.slice().reverse().find(call => call[0].method === (code === 'rate_limited' ? 'storage.set' : 'files.stat'))![0]
+      app.port.onmessage!({ data: { type: 'response', id: sent.id, error: '失败', code } })
+      expect((await promise).code).toBe(code)
+    }
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(app.port.postMessage).toHaveBeenCalledTimes(7)
+    app.window.emit('pagehide')
+  })
+})
+
+it.each([false, true])('批量请求仅在全部为只读能力时重试（包含写入：%s）', async writing => {
+  const app = boot('hidden'); app.connect(); await app.drive.ready
+  const outcome = app.drive.batch!([{ method: writing ? 'storage.set' : 'storage.get', params: { key: 'x' } }]).catch(error => error)
+  await vi.advanceTimersByTimeAsync(0)
+  app.port.onmessage!({ data: { type: 'response', id: 1, error: '限流', code: 'rate_limited' } })
+  await vi.advanceTimersByTimeAsync(250)
+  expect(app.port.postMessage).toHaveBeenCalledTimes(writing ? 1 : 2)
+  if (!writing) app.port.onmessage!({ data: { type: 'response', id: 2, result: { results: [{ result: 42 }] } } })
+  expect(await outcome).toEqual(writing ? expect.objectContaining({ code: 'rate_limited' }) : [{ result: 42 }])
+  app.window.emit('pagehide')
+})

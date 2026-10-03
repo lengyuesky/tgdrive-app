@@ -138,6 +138,7 @@ export class LibraryView {
 
         <!-- 书库内容网格 (两列/自适应) -->
         <div id="library-status" role="status" class="library-status-msg"></div>
+        <button id="btn-library-retry" class="btn-primary" type="button" hidden>重试加载本页</button>
         <div id="items" class="library-grid" role="list"></div>
 
         <!-- 分页栏 -->
@@ -157,6 +158,7 @@ export class LibraryView {
       this.renderGroupControls()
     }
     this.bindEvents()
+    this.container.querySelector<HTMLButtonElement>('#btn-library-retry')!.onclick = () => { void this.loadItems() }
     await this.loadItems()
 
     if (restoreScroll && this.state.scrollTop > 0) {
@@ -472,6 +474,13 @@ export class LibraryView {
     const pageInfo = this.container.querySelector<HTMLElement>('#page-info')
 
     if (!itemsContainer || !statusMsg) return
+    const retry = this.container.querySelector<HTMLButtonElement>('#btn-library-retry')!
+    retry.hidden = true
+    itemsContainer.replaceChildren()
+    if (prevBtn) prevBtn.disabled = true
+    if (nextBtn) nextBtn.disabled = true
+    if (pageInfo) pageInfo.textContent = `第 ${Math.floor(this.state.offset / this.pageSize) + 1} 页`
+    itemsContainer.setAttribute('aria-busy', 'true')
     statusMsg.textContent = '正在加载书库…'
 
     try {
@@ -618,8 +627,12 @@ export class LibraryView {
       if (nextBtn) nextBtn.disabled = !this.hasMore
     } catch (error) {
       if (activeGen !== this.loadGeneration || this.lifecycle.signal.aborted) return
-      statusMsg.textContent = '加载失败，请刷新重试'
+      statusMsg.textContent = '本页加载失败，筛选条件已保留。'
+      retry.hidden = false
+      if (prevBtn) prevBtn.disabled = this.state.offset === 0
       this.context.reportError(error)
+    } finally {
+      if (activeGen === this.loadGeneration && !this.lifecycle.signal.aborted) itemsContainer.setAttribute('aria-busy', 'false')
     }
   }
 

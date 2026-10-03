@@ -6,6 +6,8 @@
   const listeners = new Map()
   const capabilities = new Set()
   const localWrites = new Map()
+  const retryWaits = new Set()
+  const readMethods = new Set(['files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats'])
   let resolveReady
   let rejectReady
   let cancelPaint
@@ -60,6 +62,30 @@
   window.addEventListener('message', connect)
   announce()
   async function request(method, params = {}, options = {}) {
+    const retryable = readMethods.has(method) || method === 'rpc.batch' && Array.isArray(params.calls) && params.calls.every(call => readMethods.has(call?.method))
+    const delays = [250, 750, 2000, 7000]
+    for (let attempt = 0; ; attempt++) {
+      try { return await sendRequest(method, params, options) }
+      catch (error) {
+        // 只处理宿主明确拒绝的限流；权限、网络错误和写入均交给调用者处理。
+        if (!retryable || error?.code !== 'rate_limited' || attempt >= delays.length) throw error
+        await waitForRetry(delays[attempt], options.signal)
+      }
+    }
+  }
+  function waitForRetry(delay, signal) {
+    signal?.throwIfAborted()
+    if (!port) return Promise.reject(new Error('应用已经关闭'))
+    return new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timer); retryWaits.delete(cancel); signal?.removeEventListener('abort', abort) }
+      const cancel = () => { cleanup(); reject(new Error('应用已经关闭')) }
+      const abort = () => { cleanup(); reject(new DOMException('读取已取消', 'AbortError')) }
+      const timer = setTimeout(() => { cleanup(); resolve() }, delay)
+      retryWaits.add(cancel)
+      signal?.addEventListener('abort', abort, { once: true })
+    })
+  }
+  async function sendRequest(method, params = {}, options = {}) {
     const signal = options.signal
     signal?.throwIfAborted()
     await ready
@@ -164,6 +190,7 @@
     window.removeEventListener('message', connect)
     rejectReady(new Error('应用已经关闭'))
     port?.close(); port = undefined
+    for (const cancel of retryWaits) cancel()
     for (const task of pending.values()) { task.cleanup(); task.reject(new Error('应用已经关闭')) }
     pending.clear(); listeners.clear()
   })

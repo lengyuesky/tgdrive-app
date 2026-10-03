@@ -155,6 +155,67 @@ describe('阅读馆 UI 模块', () => {
     document.body.replaceChildren()
   })
 
+  it('首页加载失败停止显示加载占位，并可原地重试', async () => {
+    await library.initialize()
+    await library.refresh()
+    vi.spyOn(library, 'loadReadingState').mockRejectedValueOnce(new Error('连接中断'))
+    const home = new HomeView(container, context)
+    await home.render()
+    expect(container.querySelector('.loading-placeholder')).toBeNull()
+    const retry = [...container.querySelectorAll('button')].find(button => button.textContent === '重新加载首页')!
+    expect(retry).toBeDefined()
+    retry.click()
+    await vi.waitFor(() => expect(container.querySelector('#home-recent-grid')?.textContent).toContain('三体'))
+    expect(context.reportError).toHaveBeenCalledOnce()
+    home.destroy()
+  })
+
+  it.each(['成功', '失败'])('首页重新进入后忽略旧请求迟到的%s结果', async outcome => {
+    await library.initialize()
+    await library.refresh()
+    const state = await library.loadReadingState()
+    let resolve!: (value: typeof state) => void
+    let reject!: (reason: Error) => void
+    const pending = new Promise<typeof state>((done, fail) => { resolve = done; reject = fail })
+    vi.spyOn(library, 'loadReadingState').mockReturnValueOnce(pending)
+    const home = new HomeView(container, context)
+    const previous = home.render()
+    await home.render()
+    const query = vi.spyOn(library, 'query')
+    const content = container.innerHTML
+    if (outcome === '成功') resolve({ ...state, readings: new Map(), flags: new Map() })
+    else reject(new Error('迟到的连接错误'))
+    await previous
+    expect(container.innerHTML).toBe(content)
+    expect(query).not.toHaveBeenCalled()
+    expect(context.reportError).not.toHaveBeenCalled()
+    home.destroy()
+  })
+
+  it('书库分页失败可重试同一页，并阻止加载中连续翻页', async () => {
+    await library.initialize()
+    await library.refresh()
+    const query = vi.spyOn(library, 'query')
+    const result = library.query({ limit: 40 })
+    query.mockReturnValue({ ...result, total: 81, nextOffset: 40 })
+    const view = new LibraryView(container, context)
+    await view.render()
+    const readings = vi.spyOn(library, 'loadReadingState').mockRejectedValueOnce(new Error('网络中断'))
+    const next = container.querySelector<HTMLButtonElement>('#btn-next-page')!
+    next.click()
+    expect(next.disabled).toBe(true)
+    next.click()
+    const retry = container.querySelector<HTMLButtonElement>('#btn-library-retry')!
+    await vi.waitFor(() => expect(retry.hidden).toBe(false))
+    expect(container.querySelector('#items')!.children).toHaveLength(0)
+    retry.click()
+    await vi.waitFor(() => expect(container.querySelector('#items')!.children.length).toBeGreaterThan(0))
+    expect(query.mock.lastCall?.[0]?.offset).toBe(40)
+    expect(readings).toHaveBeenCalledTimes(2)
+    expect(retry.hidden).toBe(true)
+    view.destroy()
+  })
+
   it('首页在无历史时展示友好空态并支持前往书库，有历史时展示续读卡并直接进入阅读', async () => {
     await library.initialize()
     await library.refresh()

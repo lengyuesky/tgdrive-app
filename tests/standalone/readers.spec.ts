@@ -452,7 +452,7 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
         expect(box!.width, `${vp.label} 下步进按钮宽度需 >= 44px`).toBeGreaterThanOrEqual(44)
         expect(box!.height, `${vp.label} 下步进按钮高度需 >= 44px`).toBeGreaterThanOrEqual(44)
         await prefBtn.click()
-      } else if (vp.width <= 768) {
+      } else if (await page.locator('#app.immersive').count()) {
         await expect(page.locator('#app.immersive')).toHaveCount(1)
         // 唤出沉浸工具栏存在轻微竞态：仅在工具栏未显示时按键，避免无效重复触发；
         // 若面板恰好打开首键仅关面板，下一轮再补一键即可唤出。

@@ -20,6 +20,7 @@ export class HomeView {
   async render() {
     this.destroy()
     this.lifecycle = new AbortController()
+    const signal = this.lifecycle.signal
     this.coverLoader =
       typeof IntersectionObserver !== 'undefined'
         ? new ViewportCoverLoader(
@@ -62,19 +63,32 @@ export class HomeView {
     }
 
     try {
-      await this.loadData()
+      await this.loadData(signal)
     } catch (error) {
+      if (signal.aborted) return
+      this.container.querySelector('#home-continue-card')?.replaceChildren()
+      const grid = this.container.querySelector('#home-recent-grid')!
+      const message = document.createElement('p')
+      message.setAttribute('role', 'status')
+      message.textContent = '阅读记录暂时无法加载，请重试。'
+      const retry = document.createElement('button')
+      retry.type = 'button'
+      retry.className = 'btn-primary'
+      retry.textContent = '重新加载首页'
+      retry.onclick = () => { retry.disabled = true; void this.render() }
+      grid.replaceChildren(message, retry)
       this.context.reportError(error)
     }
   }
 
-  private async loadData() {
+  private async loadData(signal: AbortSignal) {
     const readingState = await this.context.library.loadReadingState(
-      this.lifecycle.signal
+      signal
     )
+    signal.throwIfAborted()
 
     // 1. 查找最新阅读记录用于续读卡
-    await this.renderContinueCard(readingState.readings)
+    this.renderContinueCard(readingState.readings)
 
     // 2. 加载最近加入 (sort: 'added')
     const addedResult = this.context.library.query(
@@ -93,7 +107,7 @@ export class HomeView {
     this.renderWantToRead(wantResult.items)
   }
 
-  private async renderContinueCard(readings: Map<number, UnitReading>) {
+  private renderContinueCard(readings: Map<number, UnitReading>) {
     const wrapper = this.container.querySelector('#home-continue-card')
     if (!wrapper) return
 
@@ -203,6 +217,7 @@ export class HomeView {
       launch()
     })
     card.addEventListener('keydown', (e) => {
+      if (e.target !== card) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         launch()

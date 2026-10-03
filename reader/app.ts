@@ -71,6 +71,11 @@ export async function startApp(options: AppOptions) {
   root.innerHTML = `
     <p id="notice" role="alert" hidden></p>
     <div id="modal-container"></div>
+    <section id="startup-error" class="empty-state" hidden>
+      <p id="startup-message" role="status"></p>
+      <button id="startup-retry" type="button">重新加载阅读馆</button>
+      <button id="startup-exit" type="button">返回网盘</button>
+    </section>
 
     <!-- 阅读馆非正文界面容器 (首页 / 书库 / 详情 / 我的) -->
     <div id="app-ui" class="app-ui-layout">
@@ -784,7 +789,7 @@ export async function startApp(options: AppOptions) {
     const previous = store
     canSave = false
     readerReady = false
-    bookGeneration++
+    const closingGeneration = ++bookGeneration
     bookController.abort()
     bodySearch?.update()
     readerNav?.update(undefined)
@@ -800,29 +805,36 @@ export async function startApp(options: AppOptions) {
     workPrefsSnapshot = undefined
 
     show('reader', false)
+    // 进度保存与书库重绘完成前不接收卡片点击，避免按下后节点被替换而漏掉点击。
+    get('app-ui').inert = true
     show('app-ui', true)
     show('preferences', false)
     show('bookmarks', false)
 
-    await Promise.all([previous?.flush(), chrome?.leave()])
+    try {
+      await Promise.all([previous?.flush(), chrome?.leave()])
+      if (stopped || closingGeneration !== bookGeneration) return
 
-    // 恢复书库运行并刷新当前所在视图
-    library.resume()
-    library.invalidateReadingState()
-    if (pendingFull || pendingSources || pendingWorks || pendingPaths.size) scheduleLibraryRefresh(pendingSources ? 'sources' : pendingWorks && !pendingFull && !pendingPaths.size ? 'works' : 'files', pendingFull ? undefined : [...pendingPaths])
-    if (currentView === 'detail' && detailView && detailSection) {
-      if (detailView['currentItem']) {
-        await detailView.render(detailView['currentItem'])
-      } else if (detailView['currentUnit']) {
-        await detailView.render({
-          unit: detailView['currentUnit']!,
-          work: detailView['currentWork'],
-        })
+      // 恢复书库运行并刷新当前所在视图
+      library.resume()
+      library.invalidateReadingState()
+      if (pendingFull || pendingSources || pendingWorks || pendingPaths.size) scheduleLibraryRefresh(pendingSources ? 'sources' : pendingWorks && !pendingFull && !pendingPaths.size ? 'works' : 'files', pendingFull ? undefined : [...pendingPaths])
+      if (currentView === 'detail' && detailView && detailSection) {
+        if (detailView['currentItem']) {
+          await detailView.render(detailView['currentItem'])
+        } else if (detailView['currentUnit']) {
+          await detailView.render({
+            unit: detailView['currentUnit']!,
+            work: detailView['currentWork'],
+          })
+        }
+      } else if (currentView === 'library') {
+        await libraryView?.render(true)
+      } else if (currentView === 'home') {
+        await homeView?.render()
       }
-    } else if (currentView === 'library') {
-      await libraryView?.render(true)
-    } else if (currentView === 'home') {
-      await homeView?.render()
+    } finally {
+      if (!stopped && closingGeneration === bookGeneration) get('app-ui').inert = false
     }
   }
 
@@ -1428,52 +1440,74 @@ export async function startApp(options: AppOptions) {
   detailView = new DetailView(detailSection, uiContext)
   meView = new MeView(meSection, uiContext)
 
-  try {
-    // 读取持久化偏好设置（使用 PreferenceStore V2 结构）
-    globalPrefsSnapshot = await prefStore.load(appLifecycle.signal)
-    resolveActivePreferences()
-    syncPreferences()
+  let initializing = false
+  const startupRetry = get('startup-retry') as HTMLButtonElement
+  bind('startup-retry', initialize)
+  bind('startup-exit', closeApp)
+  async function initialize() {
+    if (initializing || stopped) return
+    initializing = true
+    startupRetry.disabled = true
+    clearTimeout(noticeTimer)
+    show('notice', false)
+    get('app-ui').inert = true
+    text('startup-message', '正在加载阅读馆…')
+    try {
+      // 读取持久化偏好设置（使用 PreferenceStore V2 结构）
+      globalPrefsSnapshot = await prefStore.load(appLifecycle.signal)
+      resolveActivePreferences()
+      syncPreferences()
 
-    // 初始化统一阅读馆数据层
-    await drive.lifecycle?.migrate(context.data_schema ?? 1, async signal => { await library.initialize(signal) })
-    let snapshot = await library.initialize(appLifecycle.signal)
-    const launchFile = context.launch?.file
-    if (launchFile) {
-      const file = await drive.files.stat({ id: launchFile.id, content_version: launchFile.content_version }, { signal: appLifecycle.signal })
-      const sourcePath = file.is_dir ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) || '/'
-      if (!snapshot.sources.config.sources.some(source => source.path === '/' || file.path === source.path || file.path.startsWith(source.path + '/'))) {
-        const added = await library.addSource(sourcePath, { confirmedRoot: sourcePath === '/', signal: appLifecycle.signal })
-        void added.scan.catch(report)
+      // 初始化统一阅读馆数据层
+      await drive.lifecycle?.migrate(context.data_schema ?? 1, async signal => { await library.initialize(signal) })
+      let snapshot = await library.initialize(appLifecycle.signal)
+      const launchFile = context.launch?.file
+      if (launchFile) {
+        const file = await drive.files.stat({ id: launchFile.id, content_version: launchFile.content_version }, { signal: appLifecycle.signal })
+        const sourcePath = file.is_dir ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) || '/'
+        if (!snapshot.sources.config.sources.some(source => source.path === '/' || file.path === source.path || file.path.startsWith(source.path + '/'))) {
+          const added = await library.addSource(sourcePath, { confirmedRoot: sourcePath === '/', signal: appLifecycle.signal })
+          void added.scan.catch(report)
+        }
+        await openReader(file.id)
+        await drive.lifecycle?.report('ready')
+        show('startup-error', false)
+        get('app-ui').inert = false
+        return
       }
-      await openReader(file.id)
+      if (!snapshot.sources.config.sources.length && context.scope?.mode === 'selected') {
+        for (const path of context.scope.paths.slice(0, 16)) {
+          const added = await library.addSource(path, { confirmedRoot: path === '/', signal: appLifecycle.signal })
+          await added.scan
+        }
+        snapshot = library.snapshot
+      }
+      // 旧版封面缩略图占用私有存储配额，后台回收；失败不影响阅读馆使用。
+      void library.purgeLegacyCovers(appLifecycle.signal).catch(() => {})
+
+      // 未配置来源时进入“我的”，只使用当前来源管理
+      if (snapshot.sources.config.sources.length === 0) {
+        await switchView('me')
+      } else {
+        // 如果已有来源，缓存优先展示；如果缓存为空，自动触发轻扫描发现新增
+        if (snapshot.units.length === 0) {
+          await library.refresh(appLifecycle.signal).catch(() => {})
+        }
+        await switchView('home')
+      }
       await drive.lifecycle?.report('ready')
-      return
+      show('startup-error', false)
+      get('app-ui').inert = false
+    } catch (error) {
+      if (stopped || isAbort(error)) return
+      report(error)
+      void drive.lifecycle?.report('failed', errorText(error)).catch(() => {})
+      text('startup-message', '阅读馆暂时无法加载，请检查连接后重试。')
+      show('startup-error', true)
+    } finally {
+      initializing = false
+      startupRetry.disabled = false
     }
-    if (!snapshot.sources.config.sources.length && context.scope?.mode === 'selected') {
-      for (const path of context.scope.paths.slice(0, 16)) {
-        const added = await library.addSource(path, { confirmedRoot: path === '/', signal: appLifecycle.signal })
-        await added.scan
-      }
-      snapshot = library.snapshot
-    }
-    // 旧版封面缩略图占用私有存储配额，后台回收；失败不影响阅读馆使用。
-    void library.purgeLegacyCovers(appLifecycle.signal).catch(() => {})
-
-    // 未配置来源时进入“我的”，只使用当前来源管理
-    if (snapshot.sources.config.sources.length === 0) {
-      await switchView('me')
-    } else {
-      // 如果已有来源，缓存优先展示；如果缓存为空，自动触发轻扫描发现新增
-      if (snapshot.units.length === 0) {
-        await library.refresh(appLifecycle.signal).catch(() => {})
-      }
-      await switchView('home')
-    }
-    await drive.lifecycle?.report('ready')
-  } catch (error) {
-    report(error)
-    void drive.lifecycle?.report('failed', errorText(error)).catch(() => {})
-    text('notice', '阅读馆初始化失败，请返回应用中心重新打开。')
-    show('notice', true)
   }
+  await initialize()
 }
