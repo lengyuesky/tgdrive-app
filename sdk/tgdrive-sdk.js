@@ -7,6 +7,49 @@
   const capabilities = new Set()
   const localWrites = new Map()
   const retryWaits = new Set()
+  // 只调度只读 RPC；写入、生命周期和界面交互不被媒体读取占住。
+  const readQueue = []
+  let activeReads = 0, backgroundReads = 0, foregroundStreak = 0
+  let closed = false
+  const isRead = (method, params) => readMethods.has(method) || method === 'rpc.batch' && Array.isArray(params.calls) && params.calls.every(call => readMethods.has(call?.method))
+  function drainReads() {
+    while (!closed && activeReads < 4 && readQueue.length) {
+      const foreground = readQueue.findIndex(task => !task.background)
+      const background = backgroundReads < 2 ? readQueue.findIndex(task => task.background) : -1
+      // 每八个前台任务给后台一次机会；后台最多占两槽，保留前台容量。
+      const index = background >= 0 && (foreground < 0 || foregroundStreak >= 8) ? background : foreground
+      if (index < 0) return
+      const [task] = readQueue.splice(index, 1)
+      task.cleanup()
+      activeReads++
+      if (task.background) { backgroundReads++; foregroundStreak = 0 }
+      else foregroundStreak = Math.min(8, foregroundStreak + 1)
+      task.run().then(task.resolve, task.reject).finally(() => {
+        activeReads--
+        if (task.background) backgroundReads--
+        drainReads()
+      })
+    }
+  }
+  function scheduleRead(run, background, signal) {
+    signal?.throwIfAborted()
+    if (closed) return Promise.reject(new Error('应用已经关闭'))
+    if (readQueue.length >= 128) return Promise.reject(Object.assign(new Error('应用读取队列已满，请稍后重试'), { code: 'sdk_queue_full' }))
+    return new Promise((resolve, reject) => {
+      const cancel = (error) => {
+        const index = readQueue.indexOf(task)
+        if (index < 0) return
+        readQueue.splice(index, 1); task.cleanup(); reject(error)
+        drainReads()
+      }
+      const abort = () => cancel(new DOMException('读取已取消', 'AbortError'))
+      const timer = setTimeout(() => cancel(new Error('应用读取排队超时，请重试')), 30_000)
+      const task = { run, background, resolve, reject, cancel, cleanup: () => { clearTimeout(timer); signal?.removeEventListener('abort', abort) } }
+      signal?.addEventListener('abort', abort, { once: true })
+      readQueue.push(task)
+      drainReads()
+    })
+  }
   const readMethods = new Set(['files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats'])
   let resolveReady
   let rejectReady
@@ -62,14 +105,15 @@
   window.addEventListener('message', connect)
   announce()
   async function request(method, params = {}, options = {}) {
-    const retryable = readMethods.has(method) || method === 'rpc.batch' && Array.isArray(params.calls) && params.calls.every(call => readMethods.has(call?.method))
+    const retryable = isRead(method, params)
     const delays = [250, 750, 2000, 7000]
     for (let attempt = 0; ; attempt++) {
       try { return await sendRequest(method, params, options) }
       catch (error) {
         // 只处理宿主明确拒绝的限流；权限、网络错误和写入均交给调用者处理。
         if (!retryable || error?.code !== 'rate_limited' || attempt >= delays.length) throw error
-        await waitForRetry(delays[attempt], options.signal)
+        // 在原等待下限上增加至多 25% 抖动，避免一批请求同步重试。
+        await waitForRetry(delays[attempt] * (1 + Math.random() * 0.25), options.signal)
       }
     }
   }
@@ -90,7 +134,15 @@
     signal?.throwIfAborted()
     await ready
     signal?.throwIfAborted()
-    if (!port) throw new Error('应用已经关闭')
+    if (!port || closed) throw new Error('应用已经关闭')
+    if (isRead(method, params)) {
+      const background = options.priority === 'background' || options.priority !== 'foreground' && (method.startsWith('covers.') || method === 'media.url' && params.kind === 'thumbnail')
+      return scheduleRead(() => transmit(method, params, options), background, signal)
+    }
+    return transmit(method, params, options)
+  }
+  function transmit(method, params, options) {
+    const signal = options.signal
     const id = ++sequence
     return new Promise((resolve, reject) => {
       const cancel = (error) => {
@@ -100,6 +152,8 @@
         port?.postMessage({ type: 'cancel', id })
         reject(error)
       }
+      if (closed || !port) { reject(new Error('应用已经关闭')); return }
+      if (signal?.aborted) { reject(new DOMException('读取已取消', 'AbortError')); return }
       const abort = () => cancel(new DOMException('读取已取消', 'AbortError'))
       const timeout = setTimeout(() => cancel(new Error('应用请求超时，请重试')), method.startsWith('ui.') ? 300_000 : 30_000)
       const cleanup = () => { clearTimeout(timeout); signal?.removeEventListener('abort', abort) }
@@ -152,7 +206,7 @@
       wroteRecently: (key, windowMs = 5000) => { const at = localWrites.get(key); return at !== undefined && Date.now() - at < windowMs },
     }),
     media: Object.freeze({
-      url: async (pathOrRef, kind = 'preview') => (await request('media.url', typeof pathOrRef === 'string' ? { path: pathOrRef, kind } : { id: pathOrRef.id, content_version: pathOrRef.content_version, kind })).url,
+      url: async (pathOrRef, kind = 'preview', options) => (await request('media.url', typeof pathOrRef === 'string' ? { path: pathOrRef, kind } : { id: pathOrRef.id, content_version: pathOrRef.content_version, kind }, options)).url,
       /** 获取字节数据面票据；需要宿主声明 media.bytes 能力，凭票据直连 Range 读取。 */
       bytes: (ref, options) => request('media.url', { id: ref.id, content_version: ref.content_version, kind: 'bytes' }, options),
     }),
@@ -186,6 +240,8 @@
     },
   })
   window.addEventListener('pagehide', () => {
+    closed = true
+    for (const task of [...readQueue]) task.cancel(new Error('应用已经关闭'))
     clearInterval(interval); clearTimeout(deadline); cancelPaint?.()
     window.removeEventListener('message', connect)
     rejectReady(new Error('应用已经关闭'))

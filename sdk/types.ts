@@ -2,7 +2,8 @@
 export interface Ref { id: number; content_version: string }
 export interface FileEntry extends Ref { path: string; name: string; is_dir: boolean; size: number; created_at: number; modified_at: number; favorite: boolean }
 export interface Page { next_cursor: string | null; has_more: boolean }
-export interface CallOptions { signal?: AbortSignal }
+/** 只读 RPC 共用有界队列；预取可降为后台，不改变宿主权限或直连字节传输。 */
+export interface CallOptions { signal?: AbortSignal; priority?: 'foreground' | 'background' }
 export interface RecordValue<T = unknown> { key: string; value: T; revision: string; updated_at: number }
 export interface Search { under?: string; q?: string; kind?: 'file' | 'dir' | 'all'; extensions?: string[]; limit?: number; cursor?: string | null }
 export interface TaskProgress { id: string; title: string; completed: number; total?: number; state: 'running' | 'done' | 'cancelled' | 'failed' }
@@ -28,7 +29,7 @@ export interface Drive {
   }
   assets: { read(path: string, options?: CallOptions): Promise<Uint8Array<ArrayBuffer>> }
   media: {
-    url(pathOrRef: string | Ref, kind?: 'preview' | 'thumbnail' | 'download' | 'bytes'): Promise<string>
+    url(pathOrRef: string | Ref, kind?: 'preview' | 'thumbnail' | 'download' | 'bytes', options?: CallOptions): Promise<string>
     /** 字节数据面票据：插件可凭它直接 fetch + Range，需 media.bytes 能力。 */
     bytes(ref: Ref, options?: CallOptions): Promise<ByteGrant>
   }

@@ -139,7 +139,7 @@
     warmedGeneration = generation
     const item = queue[(index + 1) % queue.length]
     // 只预取下一条的短期播放地址，不创建隐藏播放器、不下载下一段视频。
-    const next = { key: itemKey(item), at: Date.now(), promise: drive.media.url(mediaRef(item)) }
+    const next = { key: itemKey(item), at: Date.now(), promise: drive.media.url(mediaRef(item), 'preview', { signal: lifetime.signal, priority: 'background' }) }
     prepared = next
     next.promise.catch(() => { if (prepared === next) prepared = undefined })
   }

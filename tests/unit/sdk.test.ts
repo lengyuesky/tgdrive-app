@@ -22,7 +22,10 @@ function boot(visibility: DocumentVisibilityState = 'visible') {
   const document = { ...events(), visibilityState: visibility }
   const frames = new Map<number, FrameRequestCallback>()
   let sequence = 0
+  const random = vi.fn(() => 0)
+  const math = Object.create(Math); math.random = random
   runInNewContext(source, {
+    Math: math,
     window, document, setInterval, clearInterval, setTimeout, clearTimeout, DOMException, AbortController, crypto: webcrypto,
     requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++sequence, callback); return sequence },
     cancelAnimationFrame: (id: number) => frames.delete(id),
@@ -30,7 +33,7 @@ function boot(visibility: DocumentVisibilityState = 'visible') {
   const port = { start: vi.fn(), close: vi.fn(), postMessage: vi.fn(), onmessage: undefined as ((event: { data: unknown }) => void) | undefined }
   const context = { id: 'books', name: '图书', version: '1.0.0', api_version: 2, dark: false }
   return {
-    drive: window.tgdrive!, window, document, frames, port, context,
+    drive: window.tgdrive!, window, document, frames, port, context, random,
     connect: () => window.emit('message', { source: parent, data: { channel: 'tgdrive-app-v1', type: 'connect', context }, ports: [port] }),
     draw: () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach((callback) => callback(0)) },
   }
@@ -268,7 +271,119 @@ describe('SDK v2 新增能力', () => {
   })
 })
 
+describe('只读请求的有界优先级调度', () => {
+  it('最多四个前台读取，释放槽位后按序发送；写入和关闭不排队', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const reads = Array.from({ length: 6 }, (_, id) => app.drive.files.stat({ id }).catch(error => error))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(app.port.postMessage.mock.calls.map(([message]) => message.params.id)).toEqual([0, 1, 2, 3])
+    const write = app.drive.storage.set('progress', 1).catch(error => error)
+    const close = app.drive.ui.close().catch(error => error)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(app.port.postMessage.mock.calls.slice(-2).map(([message]) => message.method)).toEqual(['storage.set', 'ui.close'])
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: { id: 0 } } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(app.port.postMessage.mock.calls.at(-1)![0].params.id).toBe(4)
+    app.window.emit('pagehide')
+    await Promise.all([...reads, write, close])
+  })
+
+  it('后台最多占两槽，前台优先且后台不会永久饥饿', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const results = Array.from({ length: 3 }, (_, id) => app.drive.media.url(`/预取${id}`, 'preview', { priority: 'background' }).catch(error => error))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(app.port.postMessage).toHaveBeenCalledTimes(2)
+    results.push(...Array.from({ length: 14 }, (_, id) => app.drive.files.stat({ id }).catch(error => error)))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(app.port.postMessage.mock.calls.map(([message]) => message.method)).toEqual(['media.url', 'media.url', 'files.stat', 'files.stat'])
+    // 留一个后台任务在途，另一个槽位应先让给前台。
+    app.port.onmessage!({ data: { type: 'response', id: 1, result: { url: '/ok' } } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(app.port.postMessage.mock.calls.at(-1)![0].method).toBe('files.stat')
+    for (let id = 3; id <= 8; id++) {
+      app.port.onmessage!({ data: { type: 'response', id, result: {} } })
+      await vi.advanceTimersByTimeAsync(0)
+    }
+    expect(app.port.postMessage.mock.calls.at(-1)![0]).toMatchObject({ method: 'media.url', params: { path: '/预取2' } })
+    app.window.emit('pagehide'); await Promise.all(results)
+  })
+
+  it('取消排队请求不发送请求或取消帧，关闭页面拒绝所有等待者', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const reads = Array.from({ length: 4 }, (_, id) => app.drive.files.stat({ id }).catch(error => error))
+    const controller = new AbortController()
+    const cancelled = app.drive.files.stat({ id: 99 }, { signal: controller.signal }).catch(error => error)
+    const queued = app.drive.files.stat({ id: 100 }).catch(error => error)
+    await vi.advanceTimersByTimeAsync(0); controller.abort()
+    expect(await cancelled).toMatchObject({ name: 'AbortError' })
+    expect(app.port.postMessage).toHaveBeenCalledTimes(4)
+    app.window.emit('pagehide')
+    expect((await queued).message).toContain('关闭')
+    expect((await Promise.all(reads)).every(error => error.message.includes('关闭'))).toBe(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(app.port.postMessage).toHaveBeenCalledTimes(4)
+  })
+
+  it('队列容量和排队时间有界；已取消的信号不进入队列', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    const reads = Array.from({ length: 132 }, (_, id) => app.drive.files.stat({ id }).catch(error => error))
+    const overflow = app.drive.files.stat({ id: 999 }).catch(error => error)
+    const controller = new AbortController(); controller.abort()
+    const cancelled = app.drive.files.stat({ id: 1000 }, { signal: controller.signal }).catch(error => error)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await overflow).toMatchObject({ code: 'sdk_queue_full' })
+    expect(await cancelled).toMatchObject({ name: 'AbortError' })
+    expect(app.port.postMessage).toHaveBeenCalledTimes(4)
+    app.window.emit('pagehide'); await Promise.all(reads)
+
+    const waiting = boot('hidden'); waiting.connect(); await waiting.drive.ready
+    const background = Array.from({ length: 3 }, (_, id) => waiting.drive.covers.get([String(id)]).catch(error => error))
+    await vi.advanceTimersByTimeAsync(0)
+    // 两个后台槽位持续占用；按时补入新任务，不让其他任务自身超时释放槽位。
+    await vi.advanceTimersByTimeAsync(10_000)
+    const expired = waiting.drive.covers.get(['expired']).catch(error => error)
+    const foreground = Array.from({ length: 6 }, (_, id) => waiting.drive.files.stat({ id }).catch(error => error))
+    await vi.advanceTimersByTimeAsync(10_000)
+    waiting.port.onmessage!({ data: { type: 'response', id: 1, result: { covers: [] } } })
+    waiting.port.onmessage!({ data: { type: 'response', id: 2, result: { covers: [] } } })
+    await vi.advanceTimersByTimeAsync(10_000)
+    // 第三项封面此时已经排队 30 秒，前台优先期间没有被发送。
+    expect((await background[2]).message).toContain('排队超时')
+    expect(waiting.port.postMessage.mock.calls.some(([message]) => message.params.keys?.[0] === '2')).toBe(false)
+    waiting.window.emit('pagehide'); await Promise.all([...background, ...foreground, expired])
+  })
+
+  it('发送失败与在途取消均释放槽位', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    app.port.postMessage.mockImplementationOnce(() => { throw new Error('通道失败') })
+    const failed = app.drive.files.stat({ id: 0 }).catch(error => error)
+    const controller = new AbortController()
+    const cancelled = app.drive.files.stat({ id: 1 }, { signal: controller.signal }).catch(error => error)
+    const reads = Array.from({ length: 4 }, (_, id) => app.drive.files.stat({ id: id + 2 }).catch(error => error))
+    await vi.advanceTimersByTimeAsync(0)
+    expect((await failed).message).toBe('通道失败')
+    expect(app.port.postMessage.mock.calls.filter(([message]) => message.type === 'request')).toHaveLength(5)
+    controller.abort(); await vi.advanceTimersByTimeAsync(0)
+    expect(await cancelled).toMatchObject({ name: 'AbortError' })
+    expect(app.port.postMessage.mock.calls.at(-1)![0]).toMatchObject({ method: 'files.stat', params: { id: 5 } })
+    app.window.emit('pagehide'); await Promise.all(reads)
+  })
+})
+
 describe('只读请求限流恢复', () => {
+  it('抖动遵守原等待下限且退避期间释放槽位', async () => {
+    const app = boot('hidden'); app.random.mockReturnValue(0.8); app.connect(); await app.drive.ready
+    const reads = Array.from({ length: 5 }, (_, id) => app.drive.files.stat({ id }).catch(error => error))
+    await vi.advanceTimersByTimeAsync(0)
+    app.port.onmessage!({ data: { type: 'response', id: 1, error: '限流', code: 'rate_limited' } })
+    await vi.advanceTimersByTimeAsync(299)
+    expect(app.port.postMessage.mock.calls.at(-1)![0]).toMatchObject({ params: { id: 4 } })
+    app.port.onmessage!({ data: { type: 'response', id: 2, result: {} } })
+    await vi.advanceTimersByTimeAsync(1)
+    expect(app.port.postMessage.mock.calls.at(-1)![0]).toMatchObject({ id: 6, params: { id: 0 } })
+    app.window.emit('pagehide'); await Promise.all(reads)
+  })
+
   it('按延迟退避并使用新编号重试，成功后返回真实结果', async () => {
     const app = boot('hidden'); app.connect(); await app.drive.ready
     const request = app.drive.files.stat({ id: 42 })

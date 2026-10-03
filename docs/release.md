@@ -10,18 +10,18 @@
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
-  - `apps/shorts-1.4.4.tgapp`
-  - `apps/books-1.6.5.tgapp`
-  - `apps/comics-1.4.5.tgapp`
-  - `apps/cinema-1.4.3.tgapp`
+  - `apps/shorts-1.4.5.tgapp`
+  - `apps/books-1.6.6.tgapp`
+  - `apps/comics-1.4.6.tgapp`
+  - `apps/cinema-1.4.4.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/books-1.6.5.tgapp
-<sha256>  apps/cinema-1.4.3.tgapp
-<sha256>  apps/comics-1.4.5.tgapp
-<sha256>  apps/shorts-1.4.4.tgapp
+<sha256>  apps/books-1.6.6.tgapp
+<sha256>  apps/cinema-1.4.4.tgapp
+<sha256>  apps/comics-1.4.6.tgapp
+<sha256>  apps/shorts-1.4.5.tgapp
 <sha256>  catalog.json
 ```
 
@@ -43,7 +43,7 @@
       "manifest": {
         "id": "books",
         "name": "图书",
-        "version": "1.6.5",
+        "version": "1.6.6",
         "api_version": 2,
         "min_host_version": "0.3.1",
         "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
@@ -62,7 +62,7 @@
             "pdf"
           ],
           "directories": false,
-          "changelog": "阅读馆初始化、首页和书库失败可原地重试并保留分页筛选；修复旧请求覆盖、续读键盘重复触发及返回书库时点击被刷新打断。只读请求遇宿主限流时自动退避重试，支持取消。",
+          "changelog": "只读请求统一限并发并优先正文与当前页，封面读取降低优先级；限流退避加入随机抖动，排队可取消且有容量与时间上限，不阻塞进度保存和退出。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -82,7 +82,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.5.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.6.tgapp"
     }
   ]
 }
