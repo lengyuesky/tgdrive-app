@@ -50,7 +50,7 @@
       drainReads()
     })
   }
-  const readMethods = new Set(['files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats'])
+  const readMethods = new Set(['library.page', 'files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats'])
   let resolveReady
   let rejectReady
   let cancelPaint
@@ -188,6 +188,7 @@
     lifecycle: Object.freeze({ migrate, report: (phase, message = '') => capabilities.has('app.lifecycle') ? request('ui.report', { phase, message: message.slice(0, 350) }) : Promise.resolve() }),
     /** 能力探测：旧宿主不声明新能力，插件据此降级到消息通道读取。 */
     can: (capability) => capabilities.has(capability),
+    library: Object.freeze({ page: (params, options) => request('library.page', params, options) }),
     files: Object.freeze({
       search: (params = {}, options) => request('files.search', params, options),
       list: (params, options) => request('files.list', params, options),

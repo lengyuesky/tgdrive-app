@@ -90,6 +90,20 @@
   ```
   阅读馆的 `LibraryAccess` 在宿主支持时用它把"来源根 + 目标文件"的两轮核对合并为两次往返，旧宿主自动逐个 `stat`。
 
+### 1.1 宿主阅读索引 (`drive.library`)
+
+仅在 `drive.can('library.page')` 且 `drive.library` 存在时使用。需要 `files.read`，每次调用重新检查来源目录范围；不支持进入批量信封。
+
+```ts
+const page = await drive.library.page({
+  roots: [12], kind: 'books', q: '示例', format: 'epub',
+  sort: 'title', limit: 40, cursor: null,
+}, { signal });
+// { entries: [{ file, format, source_ids }], revision, next_cursor, has_more }
+```
+
+支持 1～16 个稳定目录 ID，递归包含子目录、重叠来源去重。`kind` 为 books/comics，排序 title/added，页大小最多 200。搜索仅文件名，不含作者或正文；漫画图片目录由直属非隐藏图片发现。游标绑定修订和筛选，文件树变化返回 `reading_index_changed`（409），需从首页重新查询。宿主在数据库维护索引，不需要插件持续扫描。它不替代已有作品和阅读状态存储；旧宿主保持原分页/扫描能力。
+
 ### 2. 媒体直链与缩略图 (`drive.media`)
 
 需在 `manifest.permissions` 中声明 `media.read`。
@@ -225,6 +239,7 @@ tgdrive.on('sync.hint', () => void refreshLists());
 
 | 能力名 | 含义 |
 |---|---|
+| `library.page` | 宿主阅读文件索引分页，绑定来源、筛选及文件树修订 |
 | `media.bytes` | 字节数据面票据可用（`media.bytes` RPC + 票据 URL 直连 Range 读取） |
 | `files.readRanges` | `files.readRanges` 批量段读可用 |
 | `storage.events` | `storage.changed` / `settings.changed` / `scope.changed` / `files.changed` / `sync.hint` 事件可用 |

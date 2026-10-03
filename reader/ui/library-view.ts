@@ -1,5 +1,6 @@
 /** 书库视图：两列封面、搜索筛选排序、作品/文件切换、部分范围提示、SDK文件分页兜底与滚动恢复。 */
 import { fillGroupSelect, showBookGroups } from './book-groups'
+import { HostLibraryView } from './host-library'
 import type { UiContext, LibraryFilterState } from './types'
 import type { FileEntry } from '../../sdk/types'
 import {
@@ -14,6 +15,8 @@ import {
 } from '../library'
 
 export class LibraryView {
+  private hostView?: HostLibraryView
+  private hostMode = false
   private coverLoader?: ViewportCoverLoader
   private lifecycle = new AbortController()
   private state: LibraryFilterState = {
@@ -58,6 +61,11 @@ export class LibraryView {
   async render(restoreScroll = false) {
     this.destroy()
     this.lifecycle = new AbortController()
+    if (this.hostMode && this.context.drive.can?.('library.page') && this.context.drive.library) {
+      this.hostView = new HostLibraryView(this.container, this.context, () => { this.hostMode = false; void this.render() })
+      await this.hostView.render()
+      return
+    }
     this.coverLoader =
       typeof IntersectionObserver !== 'undefined'
         ? new ViewportCoverLoader(
@@ -83,6 +91,7 @@ export class LibraryView {
             />
             <button id="btn-library-refresh" class="btn-refresh" title="刷新书库">刷新</button>
             <div class="view-toggle">
+              ${this.context.drive.can?.('library.page') && this.context.drive.library ? '<button id="btn-view-host" class="toggle-btn" type="button">全库</button>' : ''}
               <button id="btn-view-works" class="toggle-btn ${this.state.view === 'works' ? 'active' : ''}" type="button">作品</button>
               <button id="btn-view-files" class="toggle-btn ${this.state.view === 'files' ? 'active' : ''}" type="button">文件</button>
             </div>
@@ -158,6 +167,8 @@ export class LibraryView {
       this.renderGroupControls()
     }
     this.bindEvents()
+    const hostButton = this.container.querySelector<HTMLButtonElement>('#btn-view-host')
+    if (hostButton) hostButton.onclick = () => { this.hostMode = true; void this.render() }
     this.container.querySelector<HTMLButtonElement>('#btn-library-retry')!.onclick = () => { void this.loadItems() }
     await this.loadItems()
 
@@ -732,6 +743,7 @@ export class LibraryView {
   }
 
   destroy() {
+    this.hostView?.destroy(); this.hostView = undefined
     this.loadGeneration++
     this.lifecycle.abort()
     this.coverLoader?.destroy()

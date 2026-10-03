@@ -15,7 +15,11 @@ export type BatchResult<T = unknown> = { result: T; error?: undefined } | { erro
 /** 封面缓存记录：data 为 WebP/JPEG/PNG 的 base64 data URL，meta 由插件自定义用于核验是否过期。 */
 export interface CoverRecord<M = unknown> { key: string; data: string; meta: M | null; updated_at: number }
 export interface CoverStats { entries: number; bytes: number; limit_bytes: number; limit_entries: number }
+export interface HostLibraryQuery { roots: number[]; kind: 'books' | 'comics'; q?: string; format?: string; sort?: 'title' | 'added'; limit?: number; cursor?: string | null }
+export interface HostLibraryPage extends Page { revision: string; entries: { file: FileEntry; format: string; source_ids: number[] }[] }
 export interface Drive {
+  /** 宿主维护的阅读文件索引；使用前探测 library.page。 */
+  library?: { page(query: HostLibraryQuery, options?: CallOptions): Promise<HostLibraryPage> }
   ready: Promise<ReadyContext>
   /** 能力探测：宿主未声明的功能需降级到消息通道。 */
   can(capability: string): boolean

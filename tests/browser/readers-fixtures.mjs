@@ -59,6 +59,7 @@ export function basicPdf() {
 }
 export async function seedReaders(destination) {
   const put = async (path, data) => { const target = `${destination}/${path}`; await mkdir(dirname(target), { recursive: true }); await writeFile(target, data) }
+  for (let i = 0; i < 85; i++) await put(`全库分页/子目录/书${String(i).padStart(3, '0')}.txt`, `第1章\n合成全库阅读正文 ${i}`)
   const paragraphs = Array.from({ length: 6000 }, (_, i) => `正文第 ${i + 1} 行：在临时网盘验证长篇阅读和字符位置恢复。`).join('\n')
   await put('测试图书/长篇.txt', `第1章 起点\n${paragraphs}\n第2章 终点\n这里是超过 256 KiB 的正文结尾。`)
   await put('测试图书/GBK.txt', Buffer.from([0xb5,0xda,0x31,0xd5,0xc2,0x20,0xd6,0xd0,0xce,0xc4,0x0a,0xc4,0xe3,0xba,0xc3]))
