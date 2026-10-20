@@ -131,6 +131,12 @@ export class HostLibraryView {
     const signal = AbortSignal.any([this.request.signal, this.lifetime.signal, this.context.signal]), active = ++this.generation
     const current = () => !signal.aborted && active === this.generation
     const query = structuredClone(this.query), pageNumber = this.page
+    this.context.librarySelectionChanged?.({
+      kind: query.kind === 'all' ? undefined : query.kind,
+      format: query.format as ReadingUnit['format'] | undefined,
+      sourceId: query.roots.length === 1 ? query.roots[0] : undefined,
+      groupId: undefined,
+    })
     this.validPage = false; this.next = null
     this.coverLoader?.destroy(); this.coverLoader = undefined
     this.get('items').replaceChildren(); this.get('items').setAttribute('aria-busy', 'true')

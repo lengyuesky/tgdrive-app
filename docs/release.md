@@ -14,6 +14,8 @@
   - `apps/reader-1.0.0.tgapp`
   - `apps/cinema-1.4.5.tgapp`
 
+根目录现有分发资产为 reader 1.0.0；工作区 1.0.1 正在完成全屏/侧栏验证，使用新的隔离输出目录构建，未覆盖此处基线，未授权发布。下面的包列表描述现有根目录资产，JSON 示例对应 1.0.1 源清单；当前结果见 [独立验证记录](reader-layout-validation.md)。
+
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
@@ -43,7 +45,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -64,7 +66,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "新增统一阅读馆，共享书漫来源、历史、收藏与想读清单，按真实格式选择阅读器，支持混合全库索引与内容筛选。",
+          "changelog": "新增按内容类型、来源目录和自定义分组切换的书库侧栏，手机支持书库抽屉；漫画等比例铺满可用视口，桌面阅读菜单悬浮并联动宿主全屏。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -90,7 +92,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.0.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.1.tgapp"
     }
   ]
 }

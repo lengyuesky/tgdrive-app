@@ -190,11 +190,21 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .ui-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* 桌面端侧边栏 */
-.desktop-sidebar { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface); padding: 20px 14px; gap: 20px; }
-.sidebar-brand { display: flex; align-items: center; gap: 12px; }
+#nav-container { display: flex; min-height: 0; flex-shrink: 0; }
+.desktop-sidebar { width: 248px; height: 100%; min-height: 0; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface); padding: 20px 14px; gap: 20px; }
+.sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sidebar-mobile-close { display: none; }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.sidebar-backdrop { position: fixed; inset: 0; z-index: 49; border: 0; border-radius: 0; background: #0006; }
+.sidebar-library-section { display: flex; flex-direction: column; gap: 4px; margin-top: 22px; }
+.sidebar-section-title { font-size: 11px; color: var(--muted); font-weight: 600; margin: 0 12px 6px; letter-spacing: .08em; }
+.sidebar-empty { margin: 4px 12px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.nav-icon { width: 22px; flex-shrink: 0; text-align: center; }
+.nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-title { font-size: 19px; margin: 0; font-weight: 700; }
 .sidebar-subtitle { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
-.sidebar-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
 .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: none; border-radius: 8px; background: transparent; text-align: left; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s, color 0.15s; }
 .nav-item:hover { background: var(--soft); color: var(--accent); }
 .nav-item.active { background: var(--soft); color: var(--accent); font-weight: 700; }
@@ -203,8 +213,8 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 
 /* 移动端顶栏与底部导航栏 */
 .mobile-header { display: none; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); flex-shrink: 0; }
-.mobile-brand { display: flex; align-items: center; gap: 10px; }
-.mobile-title { font-size: 18px; margin: 0; }
+.mobile-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mobile-title { font-size: 18px; margin: 0; white-space: nowrap; }
 .mobile-actions { display: flex; gap: 6px; }
 .mobile-action-btn { padding: 6px 10px; font-size: 12px; }
 .mobile-bottom-nav { display: none; align-items: center; justify-content: space-around; height: 56px; border-top: 1px solid var(--line); background: var(--surface); flex-shrink: 0; z-index: 10; }
@@ -212,12 +222,16 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .bottom-tab.active { color: var(--accent); font-weight: 700; }
 .tab-icon { font-size: 18px; }
 
-@media (max-width: 767px) {
+@media (max-width: 768px), (pointer: coarse) {
   .app-ui-layout { flex-direction: column; }
   /* 手机端让顶栏、内容区、标签栏成为同一纵向 flex 的直接成员：顶栏在顶、内容居中滚动、标签栏贴底。 */
   #nav-container { display: contents; }
   .desktop-sidebar { display: none; }
-  .mobile-header { display: flex; }
+  .sidebar-open .desktop-sidebar { display: flex; position: fixed; inset: 0 auto 0 0; width: min(288px, 88vw); z-index: 50; box-shadow: 8px 0 32px #0004; }
+  .sidebar-mobile-close { display: block; min-width: 44px; min-height: 44px; padding: 0; font-size: 24px; }
+  .sidebar-open .nav-item { min-height: 44px; }
+  .mobile-header { display: flex; padding: 8px 10px; gap: 6px; }
+  .mobile-action-btn { min-height: 44px; padding: 6px 8px; }
   .mobile-bottom-nav { display: flex; order: 10; }
   .toolbar-search-row input[type="search"] { min-width: 120px; }
 }

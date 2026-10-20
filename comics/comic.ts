@@ -437,8 +437,10 @@ export class ComicReader implements ReaderView {
     if (this.after.style.height !== `${after}px`) this.after.style.height = `${after}px`
   }
   private scaledSize(size: Dimensions, width: number, height: number, fit = this.fit, zoom = this.zoom): Dimensions {
-    const scale = Math.min(1, width / size.width, fit === 'page' ? height / size.height : Infinity) * zoom
-    return { width: Math.min(196605, size.width * scale), height: Math.min(196605, size.height * scale) }
+    // 适宽/适页以视口为基准，小图也等比例放大；缩放倍率再作用于适配结果。
+    const fitted = Math.min(width / size.width, fit === 'page' ? height / size.height : Infinity) * zoom
+    const scale = Math.min(fitted, 196605 / size.width, 196605 / size.height)
+    return { width: size.width * scale, height: size.height * scale }
   }
   private measurePaged() {
     const viewport = this.context.viewport, available = contentSize(viewport), slot = available.width / Math.max(1, this.spread.length)

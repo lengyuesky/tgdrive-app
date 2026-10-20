@@ -37,7 +37,7 @@ import {
   type UnitState,
   type LibraryScope,
 } from './library'
-import type { UiView, UiContext } from './ui/types'
+import type { UiView, UiContext, LibrarySelection } from './ui/types'
 import { NavManager } from './ui/nav'
 import { HomeView } from './ui/home'
 import { LibraryView } from './ui/library-view'
@@ -234,7 +234,7 @@ export async function startApp(options: AppOptions) {
           <select id="zoom">
             <option value="0.5">50%</option>
             <option value="0.75">75%</option>
-            <option value="1">100% (原始)</option>
+            <option value="1">100% (适配)</option>
             <option value="1.25">125%</option>
             <option value="1.5">150%</option>
             <option value="2">200%</option>
@@ -353,7 +353,7 @@ export async function startApp(options: AppOptions) {
           void drive.ui.task?.({ id: 'library-scan', title: '整理内容库', completed: prog.nodes, state: prog.phase === 'scanning' ? 'running' : prog.phase === 'complete' ? 'done' : prog.phase === 'paused' || scanCancelled ? 'cancelled' : 'failed' }).catch(() => {})
         }
       },
-      changed: () => {},
+      changed: snapshot => { navManager?.refreshLibraries(snapshot) },
     },
     options.openPdf
   )
@@ -376,8 +376,9 @@ export async function startApp(options: AppOptions) {
   let detailView: DetailView | undefined
   let meView: MeView | undefined
 
-  const switchView = async (view: UiView) => {
-    if (view === currentView && view !== 'detail') return
+  const switchView = async (view: UiView, selection?: LibrarySelection) => {
+    if (view === currentView && view !== 'detail' && !selection) return
+    if (currentView === 'library') libraryView?.getState()
     if (currentView && currentView !== 'detail') {
       previousView = currentView
     }
@@ -393,10 +394,12 @@ export async function startApp(options: AppOptions) {
     if (view === 'home') {
       await homeView?.render()
     } else if (view === 'library') {
-      await libraryView?.render(true)
+      if (selection) await libraryView?.selectLibrary(selection)
+      else await libraryView?.render(true)
     } else if (view === 'me') {
       await meView?.render()
     }
+    navManager?.refreshLibraries()
   }
 
   // —— 宿主事件：跨设备进度、来源与文件树变化时去抖刷新阅读馆 ——
@@ -438,7 +441,9 @@ export async function startApp(options: AppOptions) {
         else if (works) await library.reloadWorks()
         if (full || paths.length) await library.refresh(undefined, full ? undefined : paths)
         else await library.loadReadingState()
+        if (groups) await library.bookGroups.load(appLifecycle.signal)
         await rerenderCurrentView()
+        navManager?.refreshLibraries()
       })().catch(report)
     }, 600)
   }
@@ -485,7 +490,9 @@ export async function startApp(options: AppOptions) {
     detailView?.setBackHandler(() => {
       void switchView(previousView)
     })
+    navManager?.setActive(previousView)
     await detailView?.render(itemOrUnit)
+    navManager?.refreshLibraries()
   }
 
   const closeApp = async () => {
@@ -822,6 +829,7 @@ export async function startApp(options: AppOptions) {
       library.resume()
       library.invalidateReadingState()
       if (pendingFull || pendingSources || pendingWorks || pendingPaths.size) scheduleLibraryRefresh(pendingSources ? 'sources' : pendingWorks && !pendingFull && !pendingPaths.size ? 'works' : 'files', pendingFull ? undefined : [...pendingPaths])
+      else if (pendingGroups || pendingState) scheduleLibraryRefresh(pendingGroups ? 'groups' : 'state')
       if (currentView === 'detail' && detailView && detailSection) {
         if (detailView['currentItem']) {
           await detailView.render(detailView['currentItem'])
@@ -837,7 +845,10 @@ export async function startApp(options: AppOptions) {
         await homeView?.render()
       }
     } finally {
-      if (!stopped && closingGeneration === bookGeneration) get('app-ui').inert = false
+      if (!stopped && closingGeneration === bookGeneration) {
+        navManager?.refreshLibraries()
+        get('app-ui').inert = false
+      }
     }
   }
 
@@ -1414,6 +1425,7 @@ export async function startApp(options: AppOptions) {
       libraryView?.destroy()
       detailView?.destroy()
       meView?.destroy()
+      navManager?.destroy()
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('visibilitychange', onVisibility)
       offTheme()
@@ -1432,6 +1444,11 @@ export async function startApp(options: AppOptions) {
     openReader,
     openDetail,
     switchView,
+    openLibrary: selection => switchView('library', selection),
+    librarySelectionChanged: selection => {
+      navManager?.setLibrarySelection(selection)
+      navManager?.refreshLibraries()
+    },
     reportError: report,
     createReader: options.create,
     closeApp,
@@ -1464,6 +1481,10 @@ export async function startApp(options: AppOptions) {
       // 初始化统一阅读馆数据层
       await drive.lifecycle?.migrate(context.data_schema ?? 1, async signal => { await library.initialize(signal) })
       let snapshot = await library.initialize(appLifecycle.signal)
+      if (options.kind !== 'comics') {
+        await library.bookGroups.load(appLifecycle.signal).catch(report)
+        navManager?.refreshLibraries()
+      }
       const launchFile = context.launch?.file
       if (launchFile) {
         const file = await drive.files.stat({ id: launchFile.id, content_version: launchFile.content_version }, { signal: appLifecycle.signal })

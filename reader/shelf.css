@@ -18,10 +18,17 @@ body[data-theme="sepia"] #app[data-app="reader"] { --accent: #456d35; --soft: #e
 #app[data-app="reader"] .reading-viewport[data-format="comic"] .comic-page { padding-bottom: 0; }
 #app[data-app="reader"] .reading-viewport[data-format="comic"] .comic-page figcaption { display: none; }
 
-/* 桌面可收起工具栏，正文尺寸保持稳定；目录和设置作为侧栏覆盖正文。 */
-#app.reader-desktop .reader { position: relative; }
+/* 工具栏始终悬浮，不占正文空间；显隐、目录与设置都不改变漫画适配尺寸。 */
+#app.reader-desktop .reader { position: relative; width: 100%; height: 100%; overflow: hidden; }
+#app.reader-desktop .reader-toolbar { position: absolute; inset: 0 0 auto; z-index: 6; background: var(--surface); box-shadow: 0 3px 18px #0002; }
+#app.reader-desktop .reader-footer { position: absolute; inset: auto 0 0; z-index: 5; box-shadow: 0 -3px 18px #0002; }
+#app.reader-desktop #notice { position: absolute; top: 64px; left: 12px; right: 12px; z-index: 10; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 12px #0002; }
+#app:is(.reader-desktop, .immersive) :is(#conflict, #layout-notice) { position: absolute; top: 64px; left: 12px; right: 12px; z-index: 9; padding: 12px; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; }
+#app.reader-desktop #reading-status:not(:empty) { position: absolute; top: 50%; left: 12px; right: 12px; z-index: 3; background: var(--surface); border-radius: 10px; }
 #app.reader-desktop[data-controls="hidden"] .reader-toolbar,
 #app.reader-desktop[data-controls="hidden"] .reader-footer { visibility: hidden; pointer-events: none; }
+#app.reader-desktop .reader-more { position: absolute; inset: calc(100% + 8px) 12px auto auto; display: flex; flex-direction: column; gap: 8px; width: min(320px, 90%); max-height: var(--panel-height, 75vh); overflow-y: auto; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px #0003; }
+#app.reader-desktop :is(.preferences, .reader-more, .bookmarks-panel) .panel-heading { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 #app.reader-desktop .reader-navigation,
 #app.reader-desktop .preferences,
 #app.reader-desktop .bookmarks-panel { position: absolute; inset: 58px auto 65px 0; width: min(380px, 45%); max-height: none; overflow-y: auto; z-index: 8; border-right: 1px solid var(--line); box-shadow: 6px 0 24px #0002; }
@@ -29,7 +36,7 @@ body[data-theme="sepia"] #app[data-app="reader"] { --accent: #456d35; --soft: #e
 #app.reader-desktop .preferences { inset-inline: auto 0; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 20px; }
 #app.reader-desktop .preferences label { justify-content: space-between; }
 
-@media (max-width: 767px) {
+@media (max-width: 768px), (pointer: coarse) {
   #app[data-app="reader"] .home-container,
   #app[data-app="reader"] .library-view-container { padding: 18px 16px; }
   #app[data-app="reader"] .library-grid,

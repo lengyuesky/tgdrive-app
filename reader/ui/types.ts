@@ -31,6 +31,8 @@ export interface LibraryFilterState {
   scrollTop: number
 }
 
+export type LibrarySelection = Pick<LibraryFilterState, 'kind' | 'format' | 'sourceId' | 'groupId'>
+
 export interface UiContext {
   drive: Drive
   library: ReadingLibrary
@@ -39,6 +41,8 @@ export interface UiContext {
   openReader: (nodeId: number, location?: Location) => Promise<void>
   openDetail: (item: CatalogItem | { unit: ReadingUnit; work?: Work }) => void
   switchView: (view: UiView) => void
+  openLibrary?: (selection: LibrarySelection) => Promise<void>
+  librarySelectionChanged?: (selection: LibrarySelection) => void
   reportError: (error: unknown) => void
   createReader: (context: ViewContext) => Promise<ReaderView>
   closeApp: () => Promise<void>

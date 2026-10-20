@@ -1,4 +1,4 @@
-/** 图书与漫画的临时阅读界面状态不持久化，移动端阅读时激活全屏沉浸并与宿主联动。 */
+/** 临时阅读状态不持久化；手机沉浸与阅读馆桌面阅读都通过公开 SDK 请求宿主腾出全屏。 */
 import type { Drive, ReadyContext } from '../sdk/types'
 import { ReadingGestures } from './gestures'
 export const MOBILE_READING_QUERY = '(max-width: 768px), (pointer: coarse)'
@@ -62,7 +62,8 @@ export class ReaderChrome {
     }).catch((error) => { if (!this.disposed) { this.hostState = false; this.options.error(error) } })
     return this.hostQueue
   }
-  themeChanged() { return this.setHost(this.active) }
+  private hostActive() { return this.reading && (this.active || !!this.options.desktopControls) }
+  themeChanged() { return this.setHost(this.hostActive()) }
   private apply() {
     const active = (this.options.immersive ?? this.options.books ?? true) && this.reading && !!this.media?.matches
     this.root.classList.toggle('reader-desktop', this.reading && !active && !!this.options.desktopControls)
@@ -78,7 +79,7 @@ export class ReaderChrome {
       this.controls = !active || !this.ready
     }
     this.render()
-    return this.setHost(active)
+    return this.setHost(this.hostActive())
   }
   private render() {
     this.root.dataset.controls = this.controls ? 'visible' : 'hidden'

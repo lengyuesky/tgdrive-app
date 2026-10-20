@@ -1,7 +1,7 @@
 /** 书库视图：两列封面、搜索筛选排序、作品/文件切换、部分范围提示、SDK文件分页兜底与滚动恢复。 */
 import { fillGroupSelect, showBookGroups } from './book-groups'
 import { HostLibraryView } from './host-library'
-import type { UiContext, LibraryFilterState } from './types'
+import type { UiContext, LibraryFilterState, LibrarySelection } from './types'
 import type { FileEntry } from '../../sdk/types'
 import {
   ViewportCoverLoader,
@@ -61,9 +61,36 @@ export class LibraryView {
     Object.assign(this.state, saved)
   }
 
+  private notifySelection() {
+    const { kind, format, sourceId, groupId } = this.state
+    this.context.librarySelectionChanged?.({ kind, format, sourceId, groupId })
+  }
+
+  async selectLibrary(selection: LibrarySelection) {
+    this.hostMode = false
+    this.selecting = false
+    this.selected.clear()
+    this.sdkPageCursors.clear()
+    Object.assign(this.state, {
+      kind: selection.kind,
+      format: selection.format,
+      sourceId: selection.sourceId,
+      groupId: selection.groupId,
+      query: '',
+      status: undefined,
+      offset: 0,
+      scrollTop: 0,
+    })
+    const scrollEl = this.container.closest('.ui-content') || this.container
+    scrollEl.scrollTop = 0
+    this.notifySelection()
+    await this.render()
+  }
+
   async render(restoreScroll = false) {
     this.destroy()
     this.lifecycle = new AbortController()
+    const signal = this.lifecycle.signal
     if (this.hostMode && this.context.drive.can?.('library.page') && this.context.drive.library) {
       this.hostView = new HostLibraryView(this.container, this.context, () => { this.hostMode = false; void this.render() })
       await this.hostView.render()
@@ -78,8 +105,20 @@ export class LibraryView {
         : undefined
 
     const hasGroups = this.context.kind !== 'comics'
-    const snapshot = this.context.library.snapshot
+    let snapshot = this.context.library.snapshot
     if (this.state.sourceId !== undefined && !snapshot.sources.config.sources.some(source => source.nodeId === this.state.sourceId)) this.state.sourceId = snapshot.indexedSourceId
+    if (this.state.sourceId !== snapshot.indexedSourceId) {
+      this.container.innerHTML = '<p class="library-status-msg" role="status">正在切换来源书库…</p>'
+      try { await this.context.library.selectSource(this.state.sourceId, signal) }
+      catch (error) {
+        if (signal.aborted) return
+        this.state.sourceId = this.context.library.snapshot.indexedSourceId
+        this.context.reportError(error)
+      }
+      if (signal.aborted) return
+      snapshot = this.context.library.snapshot
+    }
+    this.notifySelection()
 
     this.container.innerHTML = `
       <div class="library-view-container">
@@ -153,7 +192,6 @@ export class LibraryView {
     `
 
     if (hasGroups) {
-      const signal = this.lifecycle.signal
       try { await this.context.library.bookGroups.load(signal) }
       catch (error) { if (!signal.aborted) this.context.reportError(error) }
       if (signal.aborted) return
@@ -165,7 +203,7 @@ export class LibraryView {
     this.container.querySelector<HTMLButtonElement>('#btn-library-retry')!.onclick = () => { void this.loadItems() }
     await this.loadItems()
 
-    if (restoreScroll && this.state.scrollTop > 0) {
+    if (!signal.aborted && restoreScroll && this.state.scrollTop > 0) {
       const scrollEl = this.container.closest('.ui-content') || this.container
       scrollEl.scrollTop = this.state.scrollTop
     }
@@ -175,6 +213,7 @@ export class LibraryView {
     this.container.querySelector('#book-group-controls')?.remove()
     const store = this.context.library.bookGroups
     if (this.state.groupId && !store.groups.some(group => group.id === this.state.groupId)) this.state.groupId = undefined
+    this.notifySelection()
     const controls = document.createElement('div')
     controls.id = 'book-group-controls'; controls.className = 'book-group-controls'
     const filter = document.createElement('select')
@@ -183,6 +222,7 @@ export class LibraryView {
     filter.disabled = !store.ready
     filter.onchange = () => {
       this.state.groupId = filter.value === '*' ? undefined : filter.value
+      this.notifySelection()
       this.state.offset = 0; this.sdkPageCursors.clear(); void this.loadItems()
     }
     const manage = document.createElement('button')
@@ -340,6 +380,7 @@ export class LibraryView {
       formatSelect.value = this.state.format ?? ''
       formatSelect.onchange = () => {
         this.state.format = (formatSelect.value as UnitFormat) || undefined
+        this.notifySelection()
         this.state.offset = 0
         this.sdkPageCursors.clear()
         void this.loadItems()
@@ -362,10 +403,10 @@ export class LibraryView {
         this.state.sourceId !== undefined ? String(this.state.sourceId) : ''
       sourceSelect.onchange = () => {
         this.state.sourceId = sourceSelect.value ? Number(sourceSelect.value) : undefined
+        this.notifySelection()
         this.state.offset = 0
         this.sdkPageCursors.clear()
-        void this.context.library.selectSource(this.state.sourceId, this.lifecycle.signal)
-          .then(() => this.loadItems()).catch(error => this.context.reportError(error))
+        void this.render()
       }
     }
 

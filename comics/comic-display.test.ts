@@ -223,6 +223,42 @@ describe('漫画适配、缩放与真实末端', () => {
     expect(reader.current()).toMatchObject({ index: 1, entry: '3' })
     expect(reader.navigationState().atEnd).toBe(false)
   })
+  it('小尺寸漫画单页适页会放大到视口，适宽与缩放不受原图尺寸限制', async () => {
+    const { mock, reader, viewport, context, loaded } = fixture({ count: 1, width: 1200, height: 900, prefs: { mode: 'single', fit: 'page' } })
+    mock.binary(mock.nodes.get(2)!, png(240, 360, [70, 130, 180]))
+    await reader.open(); await loaded()
+    const image = viewport.querySelector<HTMLImageElement>('img')!
+    expect(parseFloat(image.style.width)).toBe(600)
+    expect(parseFloat(image.style.height)).toBe(900)
+    expect(parseFloat(viewport.querySelector<HTMLElement>('.comic-track')!.style.marginTop)).toBe(0)
+    await reader.configure({ ...context.prefs, fit: 'width' })
+    expect(parseFloat(image.style.width)).toBe(1200)
+    expect(parseFloat(image.style.height)).toBe(1800)
+    await reader.configure({ ...context.prefs, zoom: .5 })
+    expect(parseFloat(image.style.width)).toBe(600)
+    expect(parseFloat(image.style.height)).toBe(900)
+  })
+  it('小图双页适页保持比例并占满高度，连续模式铺满宽度且不更改显式偏好', async () => {
+    const { mock, reader, viewport, context, loaded } = fixture({ count: 2, width: 1200, height: 900, prefs: { mode: 'double', fit: 'page', coverAlone: false } })
+    for (const id of [2, 3]) mock.binary(mock.nodes.get(id)!, png(240, 360, [70, 130, 180]))
+    await reader.open(); await loaded()
+    expect(reader.navigationState().visiblePages).toEqual([0, 1])
+    for (const image of viewport.querySelectorAll<HTMLImageElement>('img')) {
+      expect(parseFloat(image.style.width)).toBe(600); expect(parseFloat(image.style.height)).toBe(900)
+    }
+    await reader.configure({ ...context.prefs, mode: 'scroll', fit: 'width' }); await loaded()
+    const image = viewport.querySelector<HTMLImageElement>('img')!
+    expect(parseFloat(image.style.width)).toBe(1200); expect(parseFloat(image.style.height)).toBe(1800)
+    expect(context.prefs).toMatchObject({ mode: 'scroll', fit: 'width', zoom: 1 })
+  })
+  it('超长漫画达到 CSS 尺寸上限时两轴同比缩放，不拉伸画面', async () => {
+    const { mock, reader, viewport, loaded } = fixture({ count: 1, width: 2000, height: 900, prefs: { mode: 'single', fit: 'width', zoom: 3 } })
+    mock.binary(mock.nodes.get(2)!, png(500, 60000, [70, 130, 180]))
+    await reader.open(); await loaded()
+    const image = viewport.querySelector<HTMLImageElement>('img')!
+    expect(parseFloat(image.style.height)).toBe(196605)
+    expect(parseFloat(image.style.height) / parseFloat(image.style.width)).toBeCloseTo(120)
+  })
   it('最后长图只有底部真正可见才完成，局部轨道底部不是全章末端', async () => {
     const { reader, viewport, loaded } = fixture({ count: 60, width: 1000, height: 600, prefs: { mode: 'scroll', fit: 'width' } })
     await reader.open({ format: 'comic', index: 30 }); await loaded()

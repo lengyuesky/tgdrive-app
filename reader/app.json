@@ -1,7 +1,7 @@
 {
   "id": "reader",
   "name": "阅读馆",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "api_version": 2,
   "min_host_version": "0.3.3",
   "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -13,7 +13,7 @@
   "integration": {
     "file_types": ["txt", "epub", "pdf", "cbz", "zip"],
     "directories": true,
-    "changelog": "新增统一阅读馆，共享书漫来源、历史、收藏与想读清单，按真实格式选择阅读器，支持混合全库索引与内容筛选。",
+    "changelog": "新增按内容类型、来源目录和自定义分组切换的书库侧栏，手机支持书库抽屉；漫画等比例铺满可用视口，桌面阅读菜单悬浮并联动宿主全屏。",
     "formats": ["TXT", "EPUB 2/3", "PDF", "CBZ", "ZIP", "图片目录"],
     "limitations": [
       "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
