@@ -312,7 +312,7 @@ describe('catalog 版本升级、移除与防篡改 (mergeCatalogs)', () => {
 })
 
 describe('verifyCatalogPackages 本地真实包与目录核验（通用安全门禁）', () => {
-  it('四个匹配的真实包核验通过', async () => {
+  it('匹配的真实包核验通过', async () => {
     const { directory, packages } = await fixture(sampleManifest('books', '1.1.4'))
     const [pkg] = await collectPackages(packages)
     const catalog = mergeCatalogs({ currentEntries: [pkg] })
@@ -391,7 +391,7 @@ describe('catalog CLI、真实 ZIP 与 SHA256SUMS', () => {
     expect(example).not.toBeNull()
     const catalog = parseCatalog(example![1])
     expect(catalog.schema_version).toBe(2)
-    expect(catalog.entries[0].manifest).toEqual(JSON.parse(await readFile(`${root}/books/app.json`, 'utf8')))
+    expect(catalog.entries[0].manifest).toEqual(JSON.parse(await readFile(`${root}/reader/app.json`, 'utf8')))
   })
 
   it('CLI generate 生成带 apps/ 路径的 SHA256SUMS 与根目录 catalog.json', async () => {
@@ -564,20 +564,27 @@ describe('build.mjs 与独立分发输出行为', () => {
     })
     const catalog = await readCatalog(`${output}/catalog.json`)
     expect(catalog.schema_version).toBe(2)
-    expect(catalog.entries).toHaveLength(4)
+    expect(catalog.entries).toHaveLength(3)
     const packages = await collectPackages(`${output}/apps`)
-    expect(packages).toHaveLength(4)
+    expect(packages).toHaveLength(3)
+    expect(packages.map(pkg => pkg.manifest.id)).toEqual(['cinema', 'reader', 'shorts'])
+    const reader = packages.find(pkg => pkg.manifest.id === 'reader')!
+    expect(reader.manifest).toMatchObject({ version: '1.0.0', min_host_version: '0.3.3' })
+    // 同一归档必须同时携带两类阅读器资源，不能依赖退役包或外部 CDN。
+    for (const path of ['licenses/zip-js.txt', 'licenses/dompurify.txt', 'licenses/pdfjs.txt', 'licenses/core-js.txt', 'licenses/NOTICE.txt', 'cmaps/LICENSE', 'cmaps/Adobe-GB1-UCS2.bcmap', 'standard_fonts/LICENSE_FOXIT', 'standard_fonts/FoxitSerif.pfb']) {
+      expect(extractFileFromZip(reader.buffer, path)?.length, path).toBeGreaterThan(0)
+    }
     await expect(verifyCatalogPackages(catalog, `${output}/apps`)).resolves.toBeUndefined()
     const shaCheck = await run('sha256sum', ['-c', 'SHA256SUMS'], { cwd: output })
     // execFile 成功退出已证明校验通过，不绑定系统语言中的“成功”或“OK”。
-    expect(shaCheck.stdout).toContain('apps/' + await currentPackage('books') + ':')
+    expect(shaCheck.stdout).toContain('apps/' + await currentPackage('reader') + ':')
     expect(shaCheck.stdout).toContain('catalog.json:')
   }, 20_000)
 
   it('目标 catalog.json 存在同版本篡改时，在 staging 阻断并不破坏目标目录', async () => {
     const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
     temporary.push(output)
-    const tamperedCatalog = sampleCatalog([sampleEntry('books', (await currentManifest('books')).version, 'f'.repeat(64))])
+    const tamperedCatalog = sampleCatalog([sampleEntry('reader', (await currentManifest('reader')).version, 'f'.repeat(64))])
     await writeFile(`${output}/catalog.json`, JSON.stringify(tamperedCatalog, null, 2))
 
     await expect(
@@ -611,10 +618,12 @@ describe('build.mjs 与独立分发输出行为', () => {
     expect(await readFile(`${output}/apps/marker.txt`, 'utf8')).toBe(markerContent)
   }, 20_000)
 
-  it('构建成功后自动清理 apps/ 中的历史旧版本包，仅保留最新四包', async () => {
+  it('构建成功后移除退役 books/comics 索引与包，仅保留官方最新三包', async () => {
     const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
     temporary.push(output)
     await mkdir(`${output}/apps`, { recursive: true })
+    await writeFile(`${output}/catalog.json`, serializeCatalog(sampleCatalog([sampleEntry('books', '1.6.7'), sampleEntry('comics', '1.4.7')])))
+    await writeFile(`${output}/apps/books-1.6.7.tgapp`, '退役图书包')
     await writeFile(`${output}/apps/comics-1.0.8.tgapp`, '旧版占位')
     await writeFile(`${output}/apps/legacy-0.0.1.tgapp`, '废弃包')
 
@@ -623,7 +632,8 @@ describe('build.mjs 与独立分发输出行为', () => {
     })
 
     const packages = await collectPackages(`${output}/apps`)
-    expect(packages).toHaveLength(4)
-    expect(packages.map(p => p.filename)).toEqual(await Promise.all(['books', 'cinema', 'comics', 'shorts'].map(currentPackage)))
+    expect(packages).toHaveLength(3)
+    expect(packages.map(p => p.filename)).toEqual(await Promise.all(['cinema', 'reader', 'shorts'].map(currentPackage)))
+    expect((await readCatalog(`${output}/catalog.json`)).entries.map(entry => entry.manifest.id)).toEqual(['cinema', 'reader', 'shorts'])
   }, 20_000)
 })

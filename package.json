@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
-  "description": "官方插件仓库与开发套件，包含短视频、图书、漫画与影视插件及独立打包分发工具。",
+  "description": "官方插件仓库与开发套件，包含短视频、阅读馆与影视插件及独立打包分发工具。",
   "engines": {
     "node": ">=22.22.0"
   },

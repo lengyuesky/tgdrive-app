@@ -59,6 +59,12 @@ export function basicPdf() {
 }
 export async function seedReaders(destination) {
   const put = async (path, data) => { const target = `${destination}/${path}`; await mkdir(dirname(target), { recursive: true }); await writeFile(target, data) }
+  await put('混合书库/文字.txt', '第1章 混合书库\n同一个阅读馆可以切换文字和漫画。')
+  await put('混合书库/电子书.epub', epub(3))
+  await put('混合书库/文档.pdf', basicPdf())
+  await put('混合书库/漫画.cbz', zip([['1.png', png(240, 360, [40, 120, 200])]]))
+  await put('混合书库/漫画压缩包.zip', zip([['1.png', png(240, 360, [140, 75, 155])]]))
+  await put('混合书库/图片目录/1.png', png(240, 360, [200, 90, 40]))
   for (let i = 0; i < 85; i++) await put(`全库分页/子目录/书${String(i).padStart(3, '0')}.txt`, `第1章\n合成全库阅读正文 ${i}`)
   const paragraphs = Array.from({ length: 6000 }, (_, i) => `正文第 ${i + 1} 行：在临时网盘验证长篇阅读和字符位置恢复。`).join('\n')
   await put('测试图书/长篇.txt', `第1章 起点\n${paragraphs}\n第2章 终点\n这里是超过 256 KiB 的正文结尾。`)

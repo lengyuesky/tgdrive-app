@@ -25,6 +25,12 @@
 5. **单一概念单一拼写**：
    - 保持架构概念一致，如 `manifest`、`catalog`、`digest`、`tgapp` 等。
 
+## 阅读馆与分发边界
+
+官方仅发布 `shorts`、`reader`、`cinema`。`reader` 1.0.0 最低宿主 0.3.3；`books`、`comics` 的解析器源码和回归继续维护，但不再单独进入 catalog 或 apps。浏览器集成使用 reader 应用 ID，内容种类仍按实际格式区分。
+
+第三方许可、ZIP、DOMPurify、PDF worker、cmaps 和标准字体必须随阅读馆一起分发。修改公共 SDK 后需比较其他插件摘要；同版本产物变化必须升版，不能跳过防篡改。新截图完成前请在新的临时输出目录迭代构建。
+
 ## 提交 PR 前的自检清单
 
 在提交 Pull Request 前，请务必在本地依次执行并确保全部通过：

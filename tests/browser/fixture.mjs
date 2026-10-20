@@ -2,15 +2,13 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 import { seedReaders } from './readers-fixtures.mjs'
 import { seedCinema } from './cinema-fixtures.mjs'
-import { verifyFixtureBuilds } from './fixture-preflight.mjs'
+import { fixtureCatalogDir, verifyFixtureBuilds } from './fixture-preflight.mjs'
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hostDir = process.env.TGDRIVE_HOST_DIR
-const catalogDir = resolve(process.env.TGDRIVE_APP_CATALOG_DIR ?? `${repoRoot}/apps`)
+const catalogDir = fixtureCatalogDir()
 await verifyFixtureBuilds(hostDir, catalogDir)
 
 const temporary = await mkdtemp(`${tmpdir()}/tgdrive-apps-browser-`)
@@ -43,7 +41,7 @@ const child = spawn('cargo', ['test', '--locked', 'apps::tests::browser_fixture'
     TGDRIVE_TEST_FILES_DIR: readers,
     TGDRIVE_TEST_READERS: readers,
     TGDRIVE_APP_CATALOG_DIR: catalogDir,
-    CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR ?? `${tmpdir()}/tgdrive-codex-target`,
+    CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR ?? resolve(hostDir, 'target'),
   },
 })
 

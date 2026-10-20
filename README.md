@@ -1,14 +1,13 @@
 # tgdrive-app 官方插件仓库
 
-tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）、图书（Books）、漫画（Comics）与影视（Cinema）四款官方插件，以及插件 SDK、独立打包分发工具与目录协议实现。
+tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）、阅读馆（Reader）与影视（Cinema）三款官方插件，以及插件 SDK、独立打包分发工具与目录协议实现。
 
 ## 官方插件一览
 
 | 插件 ID | 名称 | 版本 | API 版本 | 说明 |
 |---|---|---|---|---|
 | `shorts` | 短视频 | `1.4.6` | 2 | 分页加载视频队列，支持滑动切换、进度拖动、收藏与下载 |
-| `books` | 图书 | `1.6.7` | 2 | 渐进读取 TXT，支持 TXT/EPUB/PDF 正文搜索、书签与跨设备进度 |
-| `comics` | 漫画 | `1.4.7` | 2 | 分来源书库、完整收藏分页，连续滚动或翻阅图片目录与 CBZ/ZIP 漫画包 |
+| `reader` | 阅读馆 | `1.0.0` | 2 | 混合图书/漫画书库，按实际格式选择 TXT/EPUB/PDF/CBZ/ZIP/图片目录阅读器，最低宿主 0.3.3 |
 | `cinema` | 影视 | `1.4.5` | 2 | 媒体库、片头片尾设置、定时停止、字幕与客户端 MKV 流式解封装 |
 
 所有插件遵循统一沙箱规范，使用沙箱内 iframe 隔离运行，无服务器转码或外部 CDN 依赖。宿主声明 `media.bytes` 能力时，阅读器走票据直连的字节数据面（Range 读取不经宿主页面二次缓冲）；旧宿主自动降级到消息通道。
@@ -19,10 +18,10 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 .
 ├── apps/                  # 最新版插件安装包（apps/<id>-<version>.tgapp）
 ├── shorts/                # 短视频插件源码
-├── books/                 # 图书插件源码（TXT/EPUB/PDF）
-├── comics/                # 漫画插件源码（图片/CBZ/ZIP）
+├── books/                 # 保留图书解析器（TXT/EPUB/PDF，独立入口退役）
+├── comics/                # 保留漫画解析器（图片/CBZ/ZIP，独立入口退役）
 ├── cinema/                # 影视插件源码（流式转封装/媒体库）
-├── reader/                # 阅读器共用逻辑与样式（Range/归档/排版）
+├── reader/                # 统一阅读馆入口、共用逻辑与样式
 ├── sdk/                   # 插件 SDK 运行时 (tgdrive-sdk.js) 与 TypeScript 类型
 ├── tests/
 │   ├── unit/              # 独立单元测试（SDK、打包工具、应用目录）
@@ -61,7 +60,7 @@ npm run catalog verify ./catalog.json
 sha256sum -c SHA256SUMS
 ```
 
-漫画滚动另有无需宿主的真实浏览器回归：安装 Chromium 后运行 `npm run test:comics`，步骤见[开发指南](docs/development.md#漫画独立浏览器回归)。
+统一阅读馆独立验收运行 `npm run test:readers`，包括混合书库和手机/桌面切换；底层漫画滚动另有无需宿主的真实浏览器回归：安装 Chromium 后运行 `npm run test:comics`，步骤见[开发指南](docs/development.md#漫画独立浏览器回归)。
 
 ## 与宿主 (tgdrive) 的协作与集成
 
@@ -81,12 +80,12 @@ sha256sum -c SHA256SUMS
    - 夹具将使用宿主的临时数据库与内存 Telegram 驱动，加载 `tgdrive-app` 打包生成的最新插件包，执行真实浏览器生命周期验收。
 
 3. **兼容性记录 (`compatibility.json`)**：
-   - 本仓库根目录的 `compatibility.json` 记录宿主 Git ref、目标宿主版本及支持的 API 版本。拆分起点 SHA 不等于集成验收；发布前由维护者填写实际通过本机集成的完整宿主提交 SHA。
+   - 本仓库根目录的 `compatibility.json` 记录宿主 Git ref、目标宿主版本及支持的 API 版本。拆分起点 SHA 不等于集成验收；未提交工作区须记录真实 base SHA 与 dirty 验证状态，不伪造版本标签。
 
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.4.6.tgapp`、`books-1.6.7.tgapp`、`comics-1.4.7.tgapp`、`cinema-1.4.5.tgapp`）
+- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.4.6.tgapp`、`reader-1.0.0.tgapp`、`cinema-1.4.5.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 
@@ -95,7 +94,7 @@ sha256sum -c SHA256SUMS
 - 插件安装包：`https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/<id>-<version>.tgapp`
 
 分发协议与工具保证：
-- **单版本最新**：每个插件 ID 仅保留一条最新版本记录，`apps/` 仅保留最新四个包。
+- **单版本最新**：每个插件 ID 仅保留一条最新版本记录，`apps/` 仅保留最新三个包。
 - **不可更换内容**：同一应用同一版本若出现不同摘要、完整 manifest 或包长度，直接阻断，禁止静默覆盖；如需变更必须升级版本。
 - **禁止版本倒退**：同应用 ID 不允许倒退版本。
 - **允许升级与移除**：允许新版本替换旧版本，允许目录中移除插件。
@@ -110,11 +109,13 @@ sha256sum -c SHA256SUMS
 - [代码贡献指南](docs/contributing.md)
 - [插件分发与目录协议说明](docs/release.md)
 
-最新体验与验证记录见[四款应用可用性优化](docs/app-usability-2026-10-03.md)；此前改动见[应用加载和交互优化](docs/app-optimization-2026-10.md)。
+本轮实际验收见[阅读馆验证记录](docs/reader-validation.md)；四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
 
-### 图书手动分组
+### 阅读馆与旧应用迁移
 
-图书 1.5.5 支持在书库中管理自定义分组，每本书最多加入一个分组。使用“管理分组”新建、改名或删除分组；点击“批量分组”选择书籍，再移动到目标分组或“未分组”。全选仅作用于当前已加载页面，切换筛选会清空选择。详情页也可保存单本书的分组。
+阅读馆承接图书与漫画，旧应用的替换及恢复边界见 [阅读馆迁移说明](docs/reader.md)。本轮最终实际验证见 [验证记录](docs/reader-validation.md)。
+
+阅读馆支持在书库中管理自定义分组，每本书最多加入一个分组。使用“管理分组”新建、改名或删除分组；点击“批量分组”选择书籍，再移动到目标分组或“未分组”。全选仅作用于当前已加载页面，切换筛选会清空选择。详情页也可保存单本书的分组。
 
 分组筛选可与搜索、来源、格式和阅读状态叠加。分组保存在应用存储中，按文件标识关联；重新扫描、缓存清理、文件改名或移动不清除归属。删除分组仅将书籍移回“未分组”，不会修改网盘文件。另一设备修改导致保存冲突时，保留当前操作选择，请重新加载分组后重试。
 
@@ -122,4 +123,4 @@ sha256sum -c SHA256SUMS
 
 ### 文件与系统集成
 
-本版要求宿主 0.3.0，支持文件页打开方式、首次目录授权、应用内文件定位、数据迁移诊断和任务取消。详情、恢复边界及独立开发工具见 [平台集成说明](docs/platform-integration.md)。
+阅读馆 1.0.0 要求宿主 0.3.3，支持文件页打开方式、首次目录授权、应用内文件定位、数据迁移诊断和任务取消。详情、恢复边界及独立开发工具见 [平台集成说明](docs/platform-integration.md)。

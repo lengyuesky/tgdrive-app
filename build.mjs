@@ -14,7 +14,7 @@ import {
 
 const root = dirname(fileURLToPath(import.meta.url))
 const modules = resolve(root, 'node_modules')
-const officialApps = ['shorts', 'books', 'comics', 'cinema']
+const officialApps = ['shorts', 'reader', 'cinema']
 
 async function pack(source, destination) {
   await new Promise((resolvePromise, rejectPromise) => {
@@ -71,11 +71,11 @@ async function buildReader(name, destination) {
     await copyFile(`${modules}/@zip.js/zip.js/LICENSE`, `${output}/licenses/zip-js.txt`)
   }
 
-  if (name === 'books') {
+  if (name === 'reader') {
     await copyFile(`${modules}/dompurify/LICENSE`, `${output}/licenses/dompurify.txt`)
     await copyFile(`${modules}/pdfjs-dist/LICENSE`, `${output}/licenses/pdfjs.txt`)
     await copyFile(`${root}/books/licenses/core-js.txt`, `${output}/licenses/core-js.txt`)
-    await copyFile(`${root}/books/NOTICE.txt`, `${output}/licenses/NOTICE.txt`)
+    await copyFile(`${root}/reader/NOTICE.txt`, `${output}/licenses/NOTICE.txt`)
     for (const directory of ['cmaps', 'standard_fonts']) {
       await mkdir(`${output}/${directory}`, { recursive: true })
       for (const item of await readdir(`${modules}/pdfjs-dist/${directory}`, { withFileTypes: true })) {
@@ -103,14 +103,14 @@ async function buildAll() {
 
   try {
     await pack(`${root}/shorts`, stagingAppsDir)
-    for (const name of ['books', 'comics', 'cinema']) {
+    for (const name of ['reader', 'cinema']) {
       await buildReader(name, stagingAppsDir)
     }
 
     // 2. 收集并校验 staging 产物完整性与源 app.json 一致性
     const packages = await collectPackages(stagingAppsDir)
     if (packages.length !== officialApps.length || new Set(packages.map(p => p.manifest.id)).size !== officialApps.length) {
-      throw new Error(`构建产物必须恰好包含四个官方插件包（预期 ${officialApps.join(', ')}）`)
+      throw new Error(`构建产物必须恰好包含三个官方插件包（预期 ${officialApps.join(', ')}）`)
     }
     for (const pkg of packages) {
       const sourceManifest = JSON.parse(await readFile(`${root}/${pkg.manifest.id}/app.json`, 'utf8'))
@@ -156,7 +156,7 @@ async function buildAll() {
     // 6. 验证完全通过后，转入已授权的目标输出目录
     await mkdir(targetAppsDir, { recursive: true })
 
-    // apps/ 仅保留最新四个包：清理目标目录中的旧版或其他 .tgapp
+    // apps/ 仅保留最新三个包：旧 books/comics 入口退役，解析器源码仍由 reader 引用。
     const currentFilenames = new Set(packages.map(p => p.filename))
     const existingTargetFiles = await readdir(targetAppsDir, { withFileTypes: true })
     for (const item of existingTargetFiles) {

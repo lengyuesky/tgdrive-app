@@ -1,4 +1,4 @@
-/** 导航栏组件：桌面侧边栏与手机底部三导航栏，跟随深浅色与图书绿/漫画紫主题。 */
+/** 导航栏组件：桌面侧边栏与手机底部三导航栏，跟随应用主题。 */
 import type { UiContext, UiView } from './types'
 
 export class NavManager {
@@ -14,8 +14,8 @@ export class NavManager {
 
   private render() {
     const isBooks = this.context.kind === 'books'
-    const title = isBooks ? '图书' : '漫画'
-    const subtitle = isBooks ? '把网盘变成随身书房' : '按自己的节奏，翻开下一页'
+    const title = this.context.kind === 'all' ? '阅读馆' : isBooks ? '图书' : '漫画'
+    const subtitle = this.context.kind === 'all' ? '书与漫画，都在这里' : isBooks ? '把网盘变成随身书房' : '按自己的节奏，翻开下一页'
 
     this.container.innerHTML = `
       <aside class="desktop-sidebar">

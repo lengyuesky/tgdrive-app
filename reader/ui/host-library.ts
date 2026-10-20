@@ -1,6 +1,6 @@
 /** 全库文件分页：宿主维护索引；只驻留当前页，不把作品元数据筛选冒充全库查询。 */
 import type { HostLibraryPage, HostLibraryQuery, RecordValue } from '../../sdk/types'
-import { parseUnit, type ReadingUnit } from '../library/model'
+import { parseUnit, contentKind, scopeFormats, type LibraryScope, type ReadingUnit } from '../library/model'
 import { ViewportCoverLoader } from '../library'
 import type { UiContext } from './types'
 
@@ -8,13 +8,13 @@ const POSITION_KEY = 'library:host-position:v1'
 interface Position { schemaVersion: 1; query: HostLibraryQuery; page: number }
 function position(raw: unknown, kind: UiContext['kind'], roots: number[]): Position | undefined {
   const p = raw as Position | undefined, q = p?.query
-  if (!p || p.schemaVersion !== 1 || !Number.isSafeInteger(p.page) || p.page < 1 || !q || q.kind !== kind
+  if (!p || p.schemaVersion !== 1 || !Number.isSafeInteger(p.page) || p.page < 1 || !q || !['all', 'books', 'comics'].includes(q.kind) || kind !== 'all' && q.kind !== kind
     || !Array.isArray(q.roots) || !q.roots.length || q.roots.some(id => !roots.includes(id))
     || q.roots.length > 16 || (q.q !== undefined && (typeof q.q !== 'string' || q.q.length > 255))
     || (q.cursor !== undefined && q.cursor !== null && (typeof q.cursor !== 'string' || q.cursor.length > 8192))
     || (q.sort !== 'title' && q.sort !== 'added') || q.limit !== 40
-    || (q.format !== undefined && !(kind === 'books' ? ['txt', 'epub', 'pdf'] : ['zip', 'cbz', 'images']).includes(q.format))) return
-  return { schemaVersion: 1, page: p.page, query: { roots: [...q.roots], kind, q: q.q, format: q.format, sort: q.sort, limit: 40, cursor: q.cursor } }
+    || (q.format !== undefined && !scopeFormats(q.kind).includes(q.format as ReadingUnit['format']))) return
+  return { schemaVersion: 1, page: p.page, query: { roots: [...q.roots], kind: q.kind, q: q.q, format: q.format, sort: q.sort, limit: 40, cursor: q.cursor } }
 }
 
 export class HostLibraryView {
@@ -48,6 +48,7 @@ export class HostLibraryView {
           <button id="host-refresh" type="button" class="btn-refresh">从首页刷新</button>
         </div>
         <div class="toolbar-filters-row">
+          ${this.context.kind === 'all' ? '<select id="host-kind" aria-label="全库内容类型"><option value="all">全部书漫</option><option value="books">图书</option><option value="comics">漫画</option></select>' : ''}
           <select id="host-source" aria-label="全库来源"><option value="">全部已添加来源</option></select>
           <select id="host-format" aria-label="全库格式"><option value="">全部格式</option></select>
           <select id="host-sort" aria-label="全库排序"><option value="title">按文件名</option><option value="added">按文件创建时间</option></select>
@@ -65,13 +66,12 @@ export class HostLibraryView {
       </div>
     </div>`
     this.get('back').onclick = () => { this.destroy(); this.back() }
-    const source = this.get<HTMLSelectElement>('source'), formats = this.context.kind === 'books' ? ['txt', 'epub', 'pdf'] : ['cbz', 'zip', 'images']
+    const source = this.get<HTMLSelectElement>('source')
     for (const item of this.context.library.snapshot.sources.config.sources) {
       const option = document.createElement('option'); option.value = String(item.nodeId); option.textContent = item.path; source.append(option)
     }
-    for (const format of formats) {
-      const option = document.createElement('option'); option.value = format; option.textContent = format === 'images' ? '图片目录' : format.toUpperCase(); this.get('format').append(option)
-    }
+    const kind = this.get<HTMLSelectElement>('kind')
+    if (kind) kind.onchange = () => { this.fillFormats(kind.value as LibraryScope); this.apply() }
     this.get('apply').onclick = () => this.apply()
     this.get('refresh').onclick = () => this.apply()
     this.get('search').onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); this.apply() } }
@@ -108,6 +108,8 @@ export class HostLibraryView {
     }
     if (signal.aborted) return
     this.get<HTMLInputElement>('search').value = this.query.q ?? ''
+    if (kind) kind.value = this.query.kind
+    this.fillFormats(this.query.kind)
     source.value = this.query.roots.length === 1 ? String(this.query.roots[0]) : ''
     this.get<HTMLSelectElement>('format').value = this.query.format ?? ''
     this.get<HTMLSelectElement>('sort').value = this.query.sort ?? 'title'
@@ -115,9 +117,14 @@ export class HostLibraryView {
   }
   private apply() {
     const selected = this.get<HTMLSelectElement>('source').value
-    this.query = { roots: selected ? [Number(selected)] : this.roots(), kind: this.context.kind, q: this.get<HTMLInputElement>('search').value.trim(),
+    this.query = { roots: selected ? [Number(selected)] : this.roots(), kind: this.get<HTMLSelectElement>('kind')?.value as LibraryScope || this.context.kind, q: this.get<HTMLInputElement>('search').value.trim(),
       format: this.get<HTMLSelectElement>('format').value || undefined, sort: this.get<HTMLSelectElement>('sort').value === 'added' ? 'added' : 'title', limit: 40, cursor: null }
     this.page = 1; this.history = []; void this.load()
+  }
+  private fillFormats(kind: LibraryScope) {
+    const select = this.get<HTMLSelectElement>('format')
+    select.replaceChildren(new Option('全部格式', ''))
+    for (const format of scopeFormats(kind)) select.append(new Option(format === 'images' ? '图片目录' : format.toUpperCase(), format))
   }
   private async load() {
     this.request?.abort(); this.request = new AbortController()
@@ -170,7 +177,9 @@ export class HostLibraryView {
       || result.has_more !== (result.next_cursor !== null) || result.next_cursor && result.next_cursor === query.cursor) throw new Error('宿主全库分页返回无效')
     const units = result.entries.map(item => {
       if (!item || !Array.isArray(item.source_ids) || item.source_ids.some(id => !query.roots.includes(id))) throw new Error('宿主返回了来源外的阅读文件')
-      return parseUnit({ nodeId: item.file?.id, file: item.file, format: item.format, sourceIds: item.source_ids, firstIndexedAt: item.file?.created_at })
+      const unit = parseUnit({ nodeId: item.file?.id, file: item.file, format: item.format, sourceIds: item.source_ids, firstIndexedAt: item.file?.created_at })
+      if (query.kind !== 'all' && contentKind(unit.format) !== query.kind || query.format && unit.format !== query.format) throw new Error('宿主返回了筛选范围外的阅读文件')
+      return unit
     })
     if (new Set(units.map(unit => unit.nodeId)).size !== units.length) throw new Error('宿主全库分页包含重复节点')
     return units

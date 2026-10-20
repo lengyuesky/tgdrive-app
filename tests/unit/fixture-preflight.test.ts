@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { verifyFixtureBuilds } from '../browser/fixture-preflight.mjs'
+import { fixtureCatalogDir, verifyFixtureBuilds } from '../browser/fixture-preflight.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const run = promisify(execFile)
 const temporary: string[] = []
-const ids = ['shorts', 'books', 'comics', 'cinema']
+const ids = ['shorts', 'reader', 'cinema']
 
 async function fixture() {
   const directory = await mkdtemp(`${tmpdir()}/tgdrive-preflight-test-`)
@@ -38,7 +38,7 @@ async function fixture() {
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
 describe('浏览器夹具构建前置检查（不启动宿主）', () => {
-  it('显式合成宿主与四个当前真实包通过，支持自定义目录', async () => {
+  it('显式合成宿主与三个当前真实包通过，支持自定义目录', async () => {
     const { hostDir, catalogDir } = await fixture()
     await expect(verifyFixtureBuilds(hostDir, catalogDir)).resolves.toBeUndefined()
   })
@@ -81,11 +81,13 @@ describe('浏览器夹具构建前置检查（不启动宿主）', () => {
     })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('请先在插件仓库执行 npm run build') })
   })
 
-  it('真实夹具入口默认使用本仓库 apps 目录并能识别已构建的四个插件包', async () => {
-    const { hostDir } = await fixture()
+  it('真实夹具默认指向本仓库 apps，显式合成包通过前置检查后才启动 ffmpeg', async () => {
+    const { hostDir, catalogDir } = await fixture()
+    expect(fixtureCatalogDir({})).toBe(resolve(root, 'apps'))
+    expect(fixtureCatalogDir({ TGDRIVE_APP_CATALOG_DIR: catalogDir })).toBe(catalogDir)
     await expect(run(process.execPath, [`${root}/tests/browser/fixture.mjs`], {
       cwd: root,
-      env: { ...process.env, PATH: '', TGDRIVE_HOST_DIR: hostDir, TGDRIVE_APP_CATALOG_DIR: undefined },
+      env: { ...process.env, PATH: '', TGDRIVE_HOST_DIR: hostDir, TGDRIVE_APP_CATALOG_DIR: catalogDir },
       timeout: 10_000,
     })).rejects.toMatchObject({ stderr: expect.stringContaining('请确认已安装 ffmpeg') })
   })

@@ -1,9 +1,72 @@
 import { describe, expect, it } from 'vitest'
 import { chineseNumber, editWorkMetadata, groupingCandidates, mergeWorks, nextWorkUnit, parseComicName, reconcileWorks, reorderWork, resolvedMetadata, splitWork, validateWorks, resolveWork } from './grouping'
 import { file, unit } from './test-fixtures'
+import { queryLibrary } from './catalog'
 
 const comic = (id: number, name: string) => unit(file(id, `/漫画/${name}`))
 describe('文件名谨慎归组及稳定作品', () => {
+  it('同节点图书改为漫画后按真实类型合并，旧主 ID 和别名保留，再次归组幂等', () => {
+    const books = [unit(file(2, '/阅读/星河 第1卷.epub')), unit(file(3, '/阅读/星河 第2卷.epub'))]
+    const previous = reconcileWorks([], books, 'all')
+    const comics = [unit(file(2, '/阅读/星河 第1卷.cbz')), unit(file(3, '/阅读/星河 第2卷.zip'))]
+    const merged = reconcileWorks(previous, comics, 'all')
+    const active = merged.filter(work => !work.redirectTo)
+    expect(active).toHaveLength(1)
+    expect(active[0]).toMatchObject({ id: previous[0]!.id, kind: 'comics', orderConfirmed: true })
+    expect(active[0]!.members.map(member => member.unitId)).toEqual([2, 3])
+    expect(resolveWork(merged, previous[1]!.id)?.id).toBe(previous[0]!.id)
+    expect(reconcileWorks(merged, comics, 'all')).toEqual(merged)
+    expect(previous.every(work => work.kind === 'books' && work.members.length === 1)).toBe(true)
+    const singleChanged = reconcileWorks(previous, [comics[0]!, books[1]!], 'all')
+    expect(singleChanged.find(work => work.id === previous[0]!.id)?.kind).toBe('comics')
+    expect(singleChanged.find(work => work.id === previous[1]!.id)?.kind).toBe('books')
+  })
+
+  it.each(['automatic', 'manual'] as const)('%s 漫画转成多本图书时按原成员顺序拆分，首组保留主 ID，其余生成新 ID', grouping => {
+    const comics = [comic(2, '星河 第1卷.cbz'), comic(3, '星河 第2卷.cbz'), comic(4, '星河 第3卷.cbz')]
+    const previous = reconcileWorks([], comics, 'all')
+    const main = previous[0]!
+    main.grouping = grouping
+    main.overrides = { title: '人工标题', authors: ['作者'] }
+    const alias = { ...structuredClone(main), id: 'e'.repeat(32), members: [], redirectTo: main.id }
+    const books = [unit(file(2, '/阅读/一.epub')), unit(file(3, '/阅读/二.txt')), unit(file(4, '/阅读/三.pdf'))]
+    const split = reconcileWorks([...previous, alias], books, 'all')
+    const active = split.filter(work => !work.redirectTo)
+    expect(active.map(work => work.members.map(member => member.unitId))).toEqual([[2], [3], [4]])
+    expect(active.every(work => work.kind === 'books' && work.orderConfirmed)).toBe(true)
+    expect(active[0]!.id).toBe(main.id)
+    expect(active.slice(1).every(work => ![main.id, alias.id].includes(work.id))).toBe(true)
+    expect(active.every(work => work.overrides.title === '人工标题')).toBe(true)
+    expect(split.find(work => work.id === alias.id)).toEqual(alias)
+    expect(resolveWork(split, alias.id)?.id).toBe(main.id)
+    expect(reconcileWorks(split, books, 'all')).toEqual(split)
+  })
+
+  it('部分成员改成图书时拆为单本与漫画组，缺失当前单元时保留原类型，不猜测变更', () => {
+    const comics = [comic(2, '星河 第1卷.cbz'), comic(3, '星河 第2卷.cbz'), comic(4, '星河 第3卷.cbz')]
+    const original = reconcileWorks([], comics, 'all'), book = unit(file(2, '/阅读/第一卷.epub'))
+    const alias = { ...structuredClone(original[0]!), id: 'd'.repeat(32), members: [], redirectTo: original[0]!.id }
+    const previous = [...original, alias]
+    const split = reconcileWorks(previous, [book, comics[1]!, comics[2]!], 'all').filter(work => !work.redirectTo)
+    expect(split.map(work => [work.kind, work.members.map(member => member.unitId)])).toEqual([['books', [2]], ['comics', [3, 4]]])
+    expect(split[0]!.id).toBe(previous[0]!.id)
+    const partial = reconcileWorks(previous, [book], 'all').filter(work => !work.redirectTo)
+    expect(partial.map(work => [work.kind, work.members.map(member => member.unitId)])).toEqual([['books', [2]], ['comics', [3, 4]]])
+    expect(partial[0]!.id).toBe(previous[0]!.id)
+    expect(reconcileWorks(partial, [book], 'all')).toEqual(partial)
+    expect(reconcileWorks(previous, [], 'all')).toEqual(previous)
+    expect(reconcileWorks(split, [book, comics[1]!, comics[2]!], 'all')).toEqual(split)
+    const current = [book, comics[1]!], reconciled = reconcileWorks(previous, current, 'all')
+    expect(reconciled.find(work => work.id === alias.id)).toEqual(alias)
+    expect(resolveWork(reconciled, alias.id)?.id).toBe(previous[0]!.id)
+    for (const kind of ['books', 'comics'] as const) {
+      const result = queryLibrary({ units: current, works: reconciled, complete: false }, { kind })
+      expect(result.total).toBe(1)
+      expect(result.items[0]!.work?.kind).toBe(kind)
+      expect(result.items[0]!.units.map(unit => unit.nodeId)).toEqual(kind === 'books' ? [2] : [3])
+    }
+  })
+
   it('识别卷话章、Vol/v、Ch/c 和常见中文数字，不猜裸数字或模糊系列名', () => {
     for (const [text, expected] of [['十', 10], ['二十三', 23], ['一百零二', 102], ['两千零二', 2002], ['一万零三', 10003], ['〇二', 2]] as const) expect(chineseNumber(text)).toBe(expected)
     expect(chineseNumber('十一二')).toBeUndefined(); expect(chineseNumber('九'.repeat(10))).toBeUndefined()

@@ -29,7 +29,7 @@ describe('queryLibrary 整理范围内的筛选和排序', () => {
     expect(queryLibrary(input, { view: 'files' }).items).toHaveLength(3)
     expect(queryLibrary(input).items.find(item => item.units[0]!.nodeId === 4)?.ungrouped).toBe(true)
     const partial = queryLibrary({ ...input, units: [units[0]!] }).items[0]!
-    expect(partial.reading).toMatchObject({ status: 'reading', percent: undefined })
+    expect(partial.reading).toMatchObject({ status: 'unknown', percent: undefined })
     expect(queryLibrary(input, { view: 'files', status: 'read' }).items.map(item => item.units[0]!.nodeId)).toEqual([2])
   })
   it('图书文件的明确卷名不会因一文件一作品规则被截成系列标题', () => {

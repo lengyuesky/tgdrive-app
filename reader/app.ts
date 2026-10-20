@@ -1,5 +1,5 @@
 import { BodySearch } from './search'
-/** 两个独立插件共用的阅读馆应用外壳与阅读器桥接，只依赖公开 SDK 与统一数据层。 */
+/** 阅读馆和兼容入口共用的应用外壳与阅读器桥接，只依赖公开 SDK 与统一数据层。 */
 import { filesChangeAffectsSources } from './library/sources'
 import type { Drive, FileEntry } from '../sdk/types'
 import { isAbort } from './io'
@@ -8,6 +8,7 @@ import {
   PreferenceSaveError,
   ProgressStore,
   defaultPreferences,
+  readerDefaultPreferences,
   resolvePreferences,
   preferenceFormat,
   validLocation,
@@ -34,6 +35,7 @@ import {
   type PdfOpener,
   type ValueSnapshot,
   type UnitState,
+  type LibraryScope,
 } from './library'
 import type { UiView, UiContext } from './ui/types'
 import { NavManager } from './ui/nav'
@@ -52,7 +54,8 @@ export interface CoverLoader {
 }
 
 export interface AppOptions {
-  kind: 'books' | 'comics'
+  id?: 'reader' | 'books' | 'comics'
+  kind: LibraryScope
   create: (context: ViewContext) => Promise<ReaderView>
   createCoverLoader?: (drive: Drive, signal: AbortSignal) => CoverLoader
   openPdf?: PdfOpener
@@ -334,6 +337,7 @@ export async function startApp(options: AppOptions) {
   let dark = context.dark
 
   root.dataset.kind = options.kind
+  root.dataset.app = options.id ?? options.kind
   document.title = context.name
 
   // 创建集中数据层服务，隔离不需要的 PDF 依赖
@@ -491,7 +495,7 @@ export async function startApp(options: AppOptions) {
   }
 
   // 持久化偏好存储 (V2 schemaVersion: 2，分格式与作品覆盖)
-  const prefStore = new PreferenceStore(drive)
+  const prefStore = new PreferenceStore(drive, options.id === 'reader' ? readerDefaultPreferences : defaultPreferences)
   let globalPrefsSnapshot: PreferencesSnapshot = {
     value: defaultPreferences(),
     revision: null,
@@ -515,13 +519,11 @@ export async function startApp(options: AppOptions) {
   let prefQueue = Promise.resolve()
   let readerNav: ReaderNavigation | undefined
 
-  let activeFormat: PreferenceFormat = options.kind === 'books' ? 'text' : 'comic'
+  let activeFormat: PreferenceFormat = options.kind === 'comics' ? 'comic' : 'text'
   let activeWork: Work | undefined = undefined
   let workPrefsSnapshot: WorkPreferencesSnapshot | undefined = undefined
   let prefScope: 'format' | 'work' = 'format'
   let prefs: Preferences = resolvePreferences(globalPrefsSnapshot.value, activeFormat)
-
-  const isBooks = options.kind === 'books'
 
   const pageGestures = () => {
     if (!view) return false
@@ -534,12 +536,13 @@ export async function startApp(options: AppOptions) {
 
   chrome = new ReaderChrome(root, {
     immersive: true,
+    desktopControls: options.id === 'reader',
     drive,
     context,
     paged: pageGestures,
     turn: (delta) => {
       const actualDelta =
-        !isBooks && prefs.direction === 'rtl' ? ((-delta as unknown) as -1 | 1) : delta
+        view?.current().format === 'comic' && prefs.direction === 'rtl' ? ((-delta as unknown) as -1 | 1) : delta
       void navigate(() => view!.turn(actualDelta)).catch(report)
     },
     error: report,

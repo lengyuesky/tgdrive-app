@@ -9,7 +9,7 @@ import { queryLibrary, type LibraryQuery } from './catalog'
 import { reconcileWorks } from './grouping'
 import { HistoryStore } from './history'
 import { MetadataService, metadataKey, validMetadataResult, type PdfOpener } from './metadata'
-import { LibraryError, errorMessage, parseUnit, unitFormat, uniqueUnits, within, type BibliographicMetadata, type LibraryIssue, type LibraryKind, type ReadingUnit, type UnitReading, type WorkFlags } from './model'
+import { LibraryError, errorMessage, parseUnit, unitFormat, uniqueUnits, within, type BibliographicMetadata, type LibraryIssue, type LibraryScope, type ReadingUnit, type UnitReading, type WorkFlags } from './model'
 import { ReadingDataStore } from './reading'
 import { ReadingStateCache } from './reading-cache'
 import { LibraryScanner, mergeScan, type ScanHandle, type ScanProgress, type ScanResult } from './scanner'
@@ -64,7 +64,7 @@ export class ReadingLibrary {
   private indexedSourceId?: number
   private readingCache: ReadingStateCache
   private initialization?: Promise<LibrarySnapshot>
-  constructor(readonly drive: Drive, readonly kind: LibraryKind, private callbacks: LibraryCallbacks = {}, private openPdf?: PdfOpener) {
+  constructor(readonly drive: Drive, readonly kind: LibraryScope, private callbacks: LibraryCallbacks = {}, private openPdf?: PdfOpener) {
     this.bookGroups = new BookGroupsStore(drive)
     this.sources = new SourcesStore(drive); this.access = new LibraryAccess(drive); this.works = new WorksStore(drive)
     this.metadata = new MetadataService(drive, this.access, new BudgetCache(drive, 'metadata', CACHE_BUDGETS.metadata, validMetadataResult, status => callbacks.cacheStatus?.('metadata', status)), this.openPdf)
@@ -217,7 +217,12 @@ export class ReadingLibrary {
       if (this.indexedSourceId !== undefined) {
         const visible = new Set(this.state.units.map(unit => unit.nodeId))
         const partial = new Map(this.state.works.rows.filter(work => work.members.some(member => !visible.has(member.unitId))).map(work => [work.id, work]))
-        rows = rows.map(work => partial.get(work.id) ?? work)
+        rows = rows.map(work => {
+          const previous = partial.get(work.id)
+          // 局部扫描保留旧顺序，但不能恢复已按真实格式拆分的旧成员关系。
+          return previous && previous.kind === work.kind && previous.members.length === work.members.length
+            && previous.members.every((member, index) => member.unitId === work.members[index]?.unitId) ? previous : work
+        })
       }
       if (JSON.stringify(rows) === JSON.stringify(this.state.works.rows)) return
       const works = await this.works.save({ ...this.state.works, rows }, signal, check)
@@ -264,7 +269,7 @@ export class ReadingLibrary {
     this.current(generation, signal); this.state.works = works; this.invalidateReadingState(); this.emit()
   }
   query(query: LibraryQuery = {}, readings?: ReadonlyMap<number, UnitReading>, flags?: ReadonlyMap<string, WorkFlags>) {
-    return queryLibrary({ bookGroups: this.kind === 'books' ? this.bookGroups : undefined, units: this.state.units, works: this.state.works.rows, metadata: this.names, readings, flags, complete: this.state.complete && (this.indexedSourceId === undefined || query.sourceId === this.indexedSourceId) }, query)
+    return queryLibrary({ bookGroups: this.bookGroups, units: this.state.units, works: this.state.works.rows, metadata: this.names, readings, flags, complete: this.state.complete && (this.indexedSourceId === undefined || query.sourceId === this.indexedSourceId) }, query)
   }
   async openUnit(nodeId: number, signal = this.controller.signal) {
     await this.initialization

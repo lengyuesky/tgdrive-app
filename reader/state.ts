@@ -61,6 +61,14 @@ export function defaultPreferences(): PreferencesV2 {
     comic: { theme: 'system', mode: 'scroll', direction: 'ltr', fit: 'width', zoom: 1, coverAlone: true, spreadOffset: 0 },
     pdf: { theme: 'system', fit: 'width', zoom: 1 } }
 }
+/** 新阅读馆的首次默认；旧记录仍按原版本解析，不覆盖用户已有模式。 */
+export function readerDefaultPreferences(): PreferencesV2 {
+  const value = defaultPreferences()
+  value.text.mode = 'page'
+  value.comic.mode = 'single'; value.comic.fit = 'page'
+  value.pdf.fit = 'page'
+  return value
+}
 function validPreference(format: PreferenceFormat, key: string, value: unknown) {
   const between = (min: number, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
   switch (key) {
@@ -126,11 +134,11 @@ export class PreferenceSaveError extends Error {
 }
 /** 不自动重试 CAS；调用方必须保留表单基线并显式处理冲突，读取失败不能构造空基线保存。 */
 export class PreferenceStore {
-  constructor(private drive: Drive) {}
+  constructor(private drive: Drive, private initialPreferences = defaultPreferences) {}
   async load(signal?: AbortSignal): Promise<PreferencesSnapshot> {
     signal?.throwIfAborted()
     const record = await this.drive.storage.get('preferences', { signal }); signal?.throwIfAborted()
-    return { value: record ? parsePreferences(record.value) : defaultPreferences(), revision: record?.revision ?? null,
+    return { value: record ? parsePreferences(record.value) : this.initialPreferences(), revision: record?.revision ?? null,
       migrated: !!record && (record.value as { schemaVersion?: unknown } | null)?.schemaVersion !== 2 }
   }
   private workKey(workId: string) {

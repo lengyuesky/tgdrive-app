@@ -1,0 +1,28 @@
+{
+  "id": "reader",
+  "name": "阅读馆",
+  "version": "1.0.0",
+  "api_version": 2,
+  "min_host_version": "0.3.3",
+  "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
+  "author": "tgdrive",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "permissions": ["files.read", "media.read"],
+  "settings": [],
+  "integration": {
+    "file_types": ["txt", "epub", "pdf", "cbz", "zip"],
+    "directories": true,
+    "changelog": "新增统一阅读馆，共享书漫来源、历史、收藏与想读清单，按真实格式选择阅读器，支持混合全库索引与内容筛选。",
+    "formats": ["TXT", "EPUB 2/3", "PDF", "CBZ", "ZIP", "图片目录"],
+    "limitations": [
+      "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
+      "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。",
+      "不支持加密归档、RAR、CBR 或 7Z；漫画归档上限 2 GiB，图片章最多 10000 页。"
+    ],
+    "homepage": "https://github.com/lengyuesky/tgdrive-app",
+    "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+    "screenshots": ["screenshots/home.png", "screenshots/mobile-library.png", "screenshots/mobile-reading.png"],
+    "data_schema": 1
+  }
+}

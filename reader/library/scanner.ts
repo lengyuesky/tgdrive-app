@@ -1,7 +1,7 @@
 /** 流式轻索引：每批 200 节点，只记直属图片目录，不保存全库页图。 */
 import { isAbort, isImage } from '../io'
 import { LibraryAccess, type SourceRoots } from './sources'
-import { LIBRARY_LIMITS, LibraryError, errorMessage, timeSlice, unitFormat, within, type LibraryIssue, type LibraryKind, type ReadingUnit } from './model'
+import { LIBRARY_LIMITS, LibraryError, errorMessage, timeSlice, unitFormat, within, type LibraryIssue, type LibraryScope, type ReadingUnit } from './model'
 
 export type ScanPhase = 'scanning' | 'paused' | 'complete' | 'incomplete'
 export type ScanEnd = 'complete' | 'cancelled' | 'unit-limit' | 'directory-limit' | 'failed'
@@ -20,7 +20,7 @@ export interface ScanHandle { result: Promise<ScanResult>; pause(): void; resume
 
 export class LibraryScanner {
   private active?: ScanHandle
-  constructor(private access: LibraryAccess, private kind: LibraryKind) {}
+  constructor(private access: LibraryAccess, private kind: LibraryScope) {}
   start(options: ScanOptions = {}): ScanHandle {
     this.active?.cancel()
     const lifetime = new AbortController()
@@ -102,7 +102,7 @@ export class LibraryScanner {
               else {
                 const format = unitFormat(file, this.kind)
                 if (format) add(file, format)
-                else if (this.kind === 'comics' && isImage(file.name) && !file.name.startsWith('.')) add(page.directory, 'images')
+                else if (this.kind !== 'books' && isImage(file.name) && !file.name.startsWith('.')) add(page.directory, 'images')
               }
               if (end !== 'complete') break
             }

@@ -4,7 +4,7 @@ import { ReadingGestures } from './gestures'
 export const MOBILE_READING_QUERY = '(max-width: 768px), (pointer: coarse)'
 type Panel = 'preferences' | 'bookmarks' | 'navigation' | 'reader-more'
 interface ChromeOptions {
-  books?: boolean; immersive?: boolean; drive: Drive; context: ReadyContext
+  books?: boolean; immersive?: boolean; desktopControls?: boolean; drive: Drive; context: ReadyContext
   turn: (delta: -1 | 1) => void; paged: () => boolean; error: (error: unknown) => void
   onPanelChange?: (panel?: Panel) => void
 }
@@ -25,7 +25,7 @@ export class ReaderChrome {
   private get = <T extends HTMLElement = HTMLElement>(id: string) => this.root.querySelector<T>(`#${id}`)!
   constructor(private root: HTMLElement, private options: ChromeOptions) {
     this.gestures = new ReadingGestures(this.get('viewport'), {
-      enabled: () => this.active && this.ready && !this.panel,
+      enabled: () => (this.active || !!this.options.desktopControls) && this.ready && !this.panel,
       paged: options.paged, controls: () => this.controls,
       toggle: () => this.toggle(), turn: options.turn,
     })
@@ -65,6 +65,7 @@ export class ReaderChrome {
   themeChanged() { return this.setHost(this.active) }
   private apply() {
     const active = (this.options.immersive ?? this.options.books ?? true) && this.reading && !!this.media?.matches
+    this.root.classList.toggle('reader-desktop', this.reading && !active && !!this.options.desktopControls)
     if (active !== this.active) {
       this.closePanel(false)
       this.active = active
@@ -117,7 +118,7 @@ export class ReaderChrome {
   }
   reveal() { if (this.panel) this.closePanel(false); this.controls = true; this.render() }
   toggle() {
-    if (!this.active) return
+    if (!this.active && !this.options.desktopControls) return
     this.closePanel(false); this.controls = !this.controls; this.render()
     if (!this.controls) this.get('viewport').focus({ preventScroll: true })
   }
@@ -154,12 +155,12 @@ export class ReaderChrome {
       if (this.panel) {
         event.preventDefault()
         this.closePanel()
-      } else if (this.active) {
+      } else if (this.active || this.options.desktopControls) {
         event.preventDefault()
         this.reveal()
         this.get('back').focus({ preventScroll: true })
       }
-    } else if (this.active && event.key === 'Tab' && !this.panel && !this.controls) {
+    } else if ((this.active || this.options.desktopControls) && event.key === 'Tab' && !this.panel && !this.controls) {
       event.preventDefault(); this.reveal(); this.get('back').focus({ preventScroll: true })
     } else if (this.active && event.key === 'Tab' && this.panel) {
       const elements = this.focusable(this.get(this.panel)), first = elements[0], last = elements.at(-1)
@@ -174,7 +175,7 @@ export class ReaderChrome {
     window.visualViewport?.removeEventListener('resize', this.visualResize)
     document.removeEventListener('keydown', this.key)
     this.gestures.destroy(); this.removers.forEach((remove) => remove())
-    this.closePanel(false); this.root.classList.remove('immersive')
+    this.closePanel(false); this.root.classList.remove('immersive', 'reader-desktop')
     void this.setHost(false)
   }
 }

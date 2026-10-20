@@ -1,0 +1,41 @@
+/* 阅读馆封面书架：统一绿色强调，深浅色继承宿主主题。 */
+#app[data-app="reader"] { --accent: #25834b; --soft: #e4f1e8; }
+body[data-theme="dark"] #app[data-app="reader"] { --accent: #79cf93; --soft: #233a2b; }
+body[data-theme="sepia"] #app[data-app="reader"] { --accent: #456d35; --soft: #e5e8cf; }
+#app[data-app="reader"] .brand-mark { width: 28px; height: 34px; border-radius: 3px 7px 7px 3px; }
+#app[data-app="reader"] .library-grid { grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 24px 18px; margin: 0; }
+#app[data-app="reader"] .library-card { min-height: 0; padding: 0; gap: 10px; background: transparent; border: 0; border-radius: 8px; overflow: visible; }
+#app[data-app="reader"] .card-cover { position: relative; width: 100%; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px #0002; }
+#app[data-app="reader"] .cover-art { position: relative; width: 100%; aspect-ratio: 1 / 1.42; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background-color: var(--soft); background-image: linear-gradient(145deg, var(--soft), color-mix(in srgb, var(--accent) 18%, var(--surface))); background-size: cover; background-position: center; }
+#app[data-app="reader"] .cover-initial { font-size: 46px; font-weight: 700; color: var(--accent); opacity: .4; }
+#app[data-app="reader"] .has-cover .cover-initial { display: none; }
+#app[data-app="reader"] .card-cover .file-mark { position: absolute; top: 8px; left: 8px; padding: 3px 6px; border-radius: 4px; font-size: 10px; color: white; background: #18231ccc; }
+#app[data-app="reader"] .card-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0 2px; }
+#app[data-app="reader"] .card-title { font-size: 13px; font-weight: 600; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#app[data-app="reader"] .library-card:hover .card-title { color: var(--accent); }
+#app[data-app="reader"] .continue-cover { width: 84px; height: auto; flex-shrink: 0; }
+#app[data-app="reader"] .detail-tags .badge-status { position: static; }
+#app[data-app="reader"] .reading-viewport[data-format="comic"] .comic-page { padding-bottom: 0; }
+#app[data-app="reader"] .reading-viewport[data-format="comic"] .comic-page figcaption { display: none; }
+
+/* 桌面可收起工具栏，正文尺寸保持稳定；目录和设置作为侧栏覆盖正文。 */
+#app.reader-desktop .reader { position: relative; }
+#app.reader-desktop[data-controls="hidden"] .reader-toolbar,
+#app.reader-desktop[data-controls="hidden"] .reader-footer { visibility: hidden; pointer-events: none; }
+#app.reader-desktop .reader-navigation,
+#app.reader-desktop .preferences,
+#app.reader-desktop .bookmarks-panel { position: absolute; inset: 58px auto 65px 0; width: min(380px, 45%); max-height: none; overflow-y: auto; z-index: 8; border-right: 1px solid var(--line); box-shadow: 6px 0 24px #0002; }
+#app.reader-desktop .reader-navigation .toc-tree { flex: 1; min-height: 0; max-height: none; }
+#app.reader-desktop .preferences { inset-inline: auto 0; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 20px; }
+#app.reader-desktop .preferences label { justify-content: space-between; }
+
+@media (max-width: 767px) {
+  #app[data-app="reader"] .home-container,
+  #app[data-app="reader"] .library-view-container { padding: 18px 16px; }
+  #app[data-app="reader"] .library-grid,
+  #app[data-app="reader"] .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
+  #app[data-app="reader"] .toolbar-filters-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #app[data-app="reader"] .toolbar-filters-row select { width: 100%; }
+  #app[data-app="reader"] .section-title { font-size: 19px; }
+  #app[data-app="reader"] .continue-card { padding: 14px; gap: 14px; }
+}

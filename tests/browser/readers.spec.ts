@@ -5,12 +5,14 @@ async function authenticate(page: Page) {
   expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
   expect((await page.request.post('/api/auth/login', { data: { username: 'apps-test', password: 'apps-test-only' } })).ok()).toBe(true)
 }
-async function install(page: Page, id: string, directory: string) {
+async function install(page: Page, id: string, directory: string, legacyPreferences = true) {
   const index = await (await page.request.get('/api/apps')).json()
   const app = index.available.find((item: any) => item.manifest.id === id)
   expect(app).toBeTruthy()
-  expect((await page.request.post(`/api/apps/catalog/${id}/install`, { data: { digest: app.digest } })).ok()).toBe(true)
-  await seedReaderSource(page, id, directory)
+  if (!index.installed.some((item: any) => item.manifest.id === id)) {
+    expect((await page.request.post(`/api/apps/catalog/${id}/install`, { data: { digest: app.digest } })).ok()).toBe(true)
+  }
+  await seedReaderSource(page, id, directory, legacyPreferences)
   expect((await page.request.patch(`/api/apps/${id}/scope`, { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto(`/apps/${id}`)
   await expect(page.locator('.host-status')).toHaveCount(0)
@@ -26,6 +28,40 @@ test.beforeEach(async ({ page }) => {
   for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
 })
 
+for (const width of [390, 1280]) {
+  test(`阅读馆混合书库在同一安装实例内筛选并阅读所有格式 ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await install(page, 'reader', '/混合书库', false)
+    const frame = page.frameLocator('iframe'), cards = frame.locator('#items .library-card')
+    await expect(cards).toHaveCount(6)
+    for (const [format, title, marker] of [
+      ['txt', '文字.txt', '.flow-content'], ['cbz', '漫画.cbz', '.comic-page img'],
+      ['epub', '电子书.epub', '.flow-content'], ['pdf', '文档.pdf', 'canvas'],
+      ['zip', '漫画压缩包.zip', '.comic-page img'],
+      ['images', '图片目录', '.comic-page img'],
+    ]) {
+      await frame.getByRole('combobox', { name: '筛选格式', exact: true }).selectOption(format!)
+      await expect(cards).toHaveCount(1)
+      const nodeId = await frame.locator('body').evaluate(async (_node, path) => (await window.tgdrive.files.stat({ path })).id, `/混合书库/${title}`)
+      await expect(cards).toHaveAttribute('data-file-id', String(nodeId))
+      await cards.click()
+      await expect(frame.locator('#reader')).toBeVisible()
+      await expect(frame.locator('#reading-status')).toHaveText('')
+      await expect(frame.locator(`#viewport ${marker}`)).toBeVisible()
+      if (format === 'txt' || format === 'epub') await expect(frame.locator('#mode')).toHaveValue('page')
+      else {
+        await expect(frame.locator('#fit')).toHaveValue('page')
+        if (format !== 'pdf') await expect(frame.locator('#comic-mode')).toHaveValue('single')
+      }
+      await revealReader(page)
+      await frame.locator('#back').click()
+    }
+    await frame.getByRole('combobox', { name: '筛选格式', exact: true }).selectOption('')
+    await expect(cards).toHaveCount(6)
+    expect((await (await page.request.get('/api/apps')).json()).installed.map((app: any) => app.manifest.id)).toEqual(['reader'])
+  })
+}
+
 test('漫画封面写入服务器封面库，重新打开直接显示而不再读取归档', async ({ page }) => {
   const reads: number[] = []
   page.on('request', request => {
@@ -34,14 +70,14 @@ test('漫画封面写入服务器封面库，重新打开直接显示而不再�
     const claim = JSON.parse(Buffer.from(match[1]!.split('.')[0]!, 'base64url').toString())
     if (claim.purpose === 'preview' || claim.purpose === 'bytes') reads.push(claim.node_id)
   })
-  await install(page, 'comics', '/测试漫画')
+  await install(page, 'reader', '/测试漫画')
   const frame = page.frameLocator('iframe')
   const cover = frame.locator('#items .library-card:has-text("自然页序.cbz") .cover-art')
   const background = () => cover.evaluate(node => getComputedStyle(node).backgroundImage)
   await expect.poll(background).toMatch(/^url\("data:image\//)
   const id = await frame.locator('body').evaluate(async () => (await (window as any).tgdrive.files.stat({ path: '/测试漫画/自然页序.cbz' })).id as number)
   expect(reads).toContain(id)
-  await expect.poll(async () => (await (await page.request.get('/api/apps/comics/covers')).json()).entries).toBeGreaterThan(0)
+  await expect.poll(async () => (await (await page.request.get('/api/apps/reader/covers')).json()).entries).toBeGreaterThan(0)
   reads.length = 0
   await page.reload()
   await expect(page.locator('.host-status')).toHaveCount(0)
@@ -51,7 +87,7 @@ test('漫画封面写入服务器封面库，重新打开直接显示而不再�
 })
 
 test('反复冷启动后图书和漫画的首次点击均进入阅读器', async ({ page }) => {
-  for (const [id, directory, file] of [['books', '/测试图书', 'GBK.txt'], ['comics', '/测试漫画', '自然页序.cbz']]) {
+  for (const [id, directory, file] of [['reader', '/测试图书', 'GBK.txt'], ['reader', '/测试漫画', '自然页序.cbz']]) {
     await install(page, id!, directory!)
     for (let opening = 0; opening < 3; opening++) {
       const frame = page.frameLocator('iframe')
@@ -73,7 +109,7 @@ test('图书在真实沙箱中阅读长 TXT、EPUB 2/3 和含中文字体的 PDF
   const errors: string[] = [], outside: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   page.on('request', (request) => { if (/^https?:/.test(request.url()) && !request.url().startsWith(base)) outside.push(request.url()) })
-  await install(page, 'books', '/测试图书')
+  await install(page, 'reader', '/测试图书')
   const frame = page.frameLocator('iframe')
   await frame.getByRole('button', { name: /长篇.txt/ }).click()
   await expect(frame.locator('#reader')).toBeVisible()
@@ -148,7 +184,7 @@ test('图书在真实沙箱中阅读长 TXT、EPUB 2/3 和含中文字体的 PDF
 test('漫画自然页序、两种模式、目录分章和有界归档读取', async ({ page }, info) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await install(page, 'comics', '/测试漫画')
+  await install(page, 'reader', '/测试漫画')
   const frame = page.frameLocator('iframe')
   // 首页视图的最近网格也用 .library-card 且在 DOM 中更靠前，此处只看书库网格卡片。
   await expect(frame.locator('#items .library-card .card-cover').first()).toBeVisible()
@@ -194,7 +230,7 @@ test('漫画自然页序、两种模式、目录分章和有界归档读取', as
 })
 
 test('跨浏览器恢复进度、书签及并发冲突保护', async ({ page, browser }) => {
-  await install(page, 'books', '/测试图书')
+  await install(page, 'reader', '/测试图书')
   const first = page.frameLocator('iframe')
   await first.getByRole('button', { name: /中文.pdf/ }).click()
   await expect(first.locator('#reading-status')).toHaveText('')
@@ -202,7 +238,7 @@ test('跨浏览器恢复进度、书签及并发冲突保护', async ({ page, br
   await first.locator('#bookmarks-toggle').click(); await first.locator('#bookmark-name').fill('跨设备书签'); await first.locator('#add-bookmark').click()
   await expect(first.getByRole('textbox', { name: '修改书签名称' })).toHaveValue('跨设备书签')
   const context = await browser.newContext({ baseURL: base })
-  const secondPage = await context.newPage(); await authenticate(secondPage); await secondPage.goto('/apps/books'); await secondPage.bringToFront()
+  const secondPage = await context.newPage(); await authenticate(secondPage); await secondPage.goto('/apps/reader'); await secondPage.bringToFront()
   await expect(secondPage.locator('.host-status')).toHaveCount(0)
   const second = secondPage.frameLocator('iframe')
   await expect(second.locator('#btn-home-view-all')).toBeVisible()
@@ -222,7 +258,7 @@ test('跨浏览器恢复进度、书签及并发冲突保护', async ({ page, br
 })
 
 test('长漫画窗口、末页定位及 TXT 调整字号后保持字符位置', async ({ page }) => {
-  await install(page, 'comics', '/测试漫画')
+  await install(page, 'reader', '/测试漫画')
   const frame = page.frameLocator('iframe')
   await frame.getByRole('button', { name: /长册.cbz/ }).click()
   await expect(frame.locator('#reading-status')).toHaveText('')
@@ -237,7 +273,7 @@ test('长漫画窗口、末页定位及 TXT 调整字号后保持字符位置', 
   await expect(frame.locator('#position')).toHaveText('200 / 200')
   await page.setViewportSize({ width:390,height:844 })
   await expect(frame.locator('#position')).toHaveText('200 / 200')
-  await install(page, 'books', '/测试图书')
+  await install(page, 'reader', '/测试图书')
   await frame.getByRole('button', { name: /长篇.txt/ }).click()
   await expect(frame.locator('#reading-status')).toHaveText('')
   await frame.locator('#viewport').evaluate((node) => { node.scrollTop = 1000 })
@@ -254,7 +290,7 @@ test('长漫画窗口、末页定位及 TXT 调整字号后保持字符位置', 
 })
 
 test('坏归档被拒绝，退出阅读取消服务端范围读取', async ({ page }) => {
-  await install(page, 'comics', '/测试漫画')
+  await install(page, 'reader', '/测试漫画')
   const frame = page.frameLocator('iframe')
   for (const file of ['越界.zip','超限.zip']) {
     await frame.getByRole('button', { name: new RegExp(file) }).click()
@@ -271,7 +307,7 @@ test('坏归档被拒绝，退出阅读取消服务端范围读取', async ({ pa
 })
 
 test('条漫模式连续滚动时平滑推进，跨页不跳动不闪烁', async ({ page }) => {
-  await install(page, 'comics', '/测试漫画')
+  await install(page, 'reader', '/测试漫画')
   const frame = page.frameLocator('iframe')
   await frame.getByRole('button', { name: /长册.cbz/ }).click()
   await expect(frame.locator('#reading-status')).toHaveText('')
@@ -289,7 +325,7 @@ test('条漫模式连续滚动时平滑推进，跨页不跳动不闪烁', async
 })
 
 test('正文搜索在真实沙箱中跨章节定位并高亮，关闭面板后仍可阅读', async ({ page }, info) => {
-  await install(page, 'books', '/测试图书')
+  await install(page, 'reader', '/测试图书')
   const frame = page.frameLocator('iframe')
   await frame.getByRole('button', { name: /长篇.txt/ }).click()
   await expect(frame.locator('#reading-status')).toHaveText('')
@@ -312,7 +348,7 @@ test('正文搜索在真实沙箱中跨章节定位并高亮，关闭面板后�
 })
 
 test('图书分组通过宿主存储持久化并在两个页面同步，删除分组保留原书', async ({ page }) => {
-  await install(page, 'books', '/测试图书')
+  await install(page, 'reader', '/测试图书')
   const first = page.frameLocator('iframe')
   await first.getByRole('button', { name: '管理分组', exact: true }).click()
   await first.getByRole('textbox', { name: '新分组名称', exact: true }).fill('我的书单')
@@ -330,7 +366,7 @@ test('图书分组通过宿主存储持久化并在两个页面同步，删除�
 
   const other = await page.context().newPage()
   try {
-    await other.goto('/apps/books')
+    await other.goto('/apps/reader')
     const second = other.frameLocator('iframe')
     await second.locator('#btn-home-view-all').click()
     await second.getByRole('combobox', { name: '筛选分组', exact: true }).selectOption({ label: '我的书单' })
@@ -354,13 +390,13 @@ test('图书分组通过宿主存储持久化并在两个页面同步，删除�
 })
 
 test('返回书库等待记录加载时保护旧卡片，加载完成后首次点击即可开书', async ({ page }) => {
-  await install(page, 'books', '/测试图书')
+  await install(page, 'reader', '/测试图书')
   const frame = page.frameLocator('iframe')
   await frame.getByRole('button', { name: /长篇.txt/ }).click()
   await expect(frame.locator('#reading-status')).toHaveText('')
   let release!: () => void, intercepted = false
   const gate = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/apps/books/rpc', async route => {
+  await page.route('**/api/apps/reader/rpc', async route => {
     const body = route.request().postDataJSON()
     if (!intercepted && body.method === 'storage.list' && body.params.prefix === 'progress:') {
       intercepted = true
@@ -377,5 +413,5 @@ test('返回书库等待记录加载时保护旧卡片，加载完成后首次�
     await frame.getByRole('button', { name: /标准字体.pdf/ }).click()
     await expect(frame.locator('canvas')).toBeVisible()
     await expect(frame.locator('#reading-status')).toHaveText('')
-  } finally { release(); await page.unroute('**/api/apps/books/rpc') }
+  } finally { release(); await page.unroute('**/api/apps/reader/rpc') }
 })

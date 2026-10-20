@@ -59,12 +59,12 @@ npm run build
 
 该脚本执行流程：
 1. 优先在隔离的临时 staging 目录中进行构建，避免构建中断损坏已有已发布资产。
-2. 直接将静态插件 `shorts/` 打包为 `apps/shorts-1.0.3.tgapp`。
-3. 使用 Vite 对 `books/`、`comics/`、`cinema/` 进行独立生产编译，输出至 `.build/<name>/`。
+2. 直接将静态插件 `shorts/` 打包为 `apps/shorts-<version>.tgapp`。
+3. 使用 Vite 对 `reader/`、`cinema/` 进行独立生产编译，输出至 `.build/<name>/`。
 4. 自动向产物中复制各第三方依赖的开源许可证及 PDF 所需字型文件。
 5. 调用 `package.mjs`，将编译结果压缩为标准规范的 `.tgapp` 归档。
 6. 扫描所有产物，生成严格符合分发协议的 `catalog.json`（schema_version: 2）和 `SHA256SUMS`（包含 `apps/` 相对路径）。
-7. 对现有已存在版本核验同版本不可篡改规则（摘要、大小与清单）；全部校验通过后，转入根目录 `apps/`、`catalog.json` 与 `SHA256SUMS`。`apps/` 目录仅保留最新四个插件包。
+7. 对现有已存在版本核验同版本不可篡改规则（摘要、大小与清单）；全部校验通过后，转入根目录 `apps/`、`catalog.json` 与 `SHA256SUMS`。`apps/` 目录仅保留最新三个插件包。
 
 可通过环境变量重定向输出分发根目录（其下同样包含 `apps/` 与根目录清单）：
 ```bash
@@ -85,6 +85,12 @@ sha256sum -c SHA256SUMS
 ## 短视频独立浏览器回归
 
 本机安装 `ffmpeg` 与 Playwright Chromium 后运行 `npm run test:shorts`，使用合成 MP4 验证首帧、进度拖动、滑动切换与手机布局。WebKit 可运行 `npm run test:shorts -- --browser=webkit --grep-invert '手机真实上滑'`；触摸注入使用 Chromium CDP。行为说明与验收记录见 [短视频说明](shorts.md)。
+
+## 阅读馆独立浏览器回归
+
+`npm run test:readers` 只构建 `reader/` 合并入口，使用内存 Drive 和合成 TXT、EPUB、PDF、CBZ、ZIP、图片目录；混合书库覆盖手机与桌面、格式筛选、文字/漫画切换和首装分页默认值。原 `kind: books/comics` 表示夹具内容种类，不是分发应用 ID。底层 `books/**/*.test.ts`、`comics/**/*.test.ts` 与漫画几何测试继续保留。
+
+同机仅运行一轮相同套件，或设置不同 `PLAYWRIGHT_READERS_OUTPUT_DIR`，避免 trace 目录互相清理。迭代分发构建使用新的空 `TGDRIVE_APP_BUILD_OUTPUT`，待真实截图确认后再生成最终根分发资产；禁止清除已有目录来绕过同版本保护。最终记录见 [阅读馆验证](reader-validation.md)。
 
 ## 漫画独立浏览器回归
 
@@ -112,10 +118,10 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chromium npm run test:comics
 ## 插件架构细节
 
 - **`shorts/`**：原生纯 JavaScript 页面，体积轻量，无需打包工具介入，由 `package.mjs` 直出。
-- **`books/`**：依赖 `reader/` 共享模块，支持长文本分段分页、EPUB 解压净化与 PDF 适宽渲染。
-- **`comics/`**：依赖 `reader/` 共享模块，支持垂直连续滚动与横向单页翻阅。连续模式仅挂载相邻五页、保留至多四十一页的局部轨道；普通跨页只更新挂载节点，接近轨道边界时才换段。图片尺寸与 Blob 生命周期分离，显式预留高度；异步加载保留当前物理页及页内像素偏移，恢复进度和调整视口保留页内比例。
+- **`books/`**：保留图书底层解析器，独立入口退役；依赖 `reader/` 共享模块，支持长文本分段分页、EPUB 解压净化与 PDF 适宽渲染。
+- **`comics/`**：保留漫画底层解析器及滚动回归，独立入口退役；依赖 `reader/` 共享模块，支持垂直连续滚动与横向单页翻阅。连续模式仅挂载相邻五页、保留至多四十一页的局部轨道；普通跨页只更新挂载节点，接近轨道边界时才换段。图片尺寸与 Blob 生命周期分离，显式预留高度；异步加载保留当前物理页及页内像素偏移，恢复进度和调整视口保留页内比例。
 - **`cinema/`**：深色模式影院，内建本地媒体库缓存索引与 MKV 容器流式解封装（MSE 喂流）。
-- **`reader/`**：阅读器共用基础库，抽象了 Range 字节调度器、虚拟 DOM 视口渲染器、触摸手势判断与进度同步。
+- **`reader/`**：统一阅读馆入口与共用基础库，抽象了 Range 字节调度器、虚拟 DOM 视口渲染器、触摸手势判断与进度同步。
 
 ## 运行跨库 E2E 集成测试
 
@@ -132,12 +138,12 @@ TGDRIVE_HOST_DIR=/path/to/tgdrive npm run test:e2e
 ```
 
 `tests/browser/fixture.mjs` 会：
-1. 在启动外部进程前检查宿主 `${TGDRIVE_HOST_DIR}/frontend/dist/index.html` 和四个当前插件包（默认读取本仓库 `apps/` 目录）；缺失、空文件或只有旧版包时直接提示先构建。
+1. 在启动外部进程前检查宿主 `${TGDRIVE_HOST_DIR}/frontend/dist/index.html` 和三个当前插件包（默认读取本仓库 `apps/` 目录）；缺失、空文件或只有旧版包时直接提示先构建。
 2. 使用 `ffmpeg` 自动合成测试视频和阅读/影视夹具文件。
-3. 启动宿主内置的 `apps::tests::browser_fixture` 测试夹具服务（监听 `127.0.0.1:4187`），显式传入绝对包目录。
+3. 启动宿主内置的 `apps::tests::browser_fixture` 测试夹具服务（监听 `127.0.0.1:4187`），显式传入绝对包目录；`CARGO_TARGET_DIR` 默认复用显式宿主工作区的 `target`，亦可覆盖。
 4. 加载本仓库打包出的真实插件包，启动 Playwright 进行真实浏览器场景回归。
 
-`TGDRIVE_APP_CATALOG_DIR` 默认指向本仓库的 `apps/` 目录，亦可指定自定义包目录，但仍需包含四个当前版本的包。检查只确认构建产物存在，不代替完整集成测试。正式更新前须由维护者记录实际验证宿主的完整 Git SHA 到 `compatibility.json`；拆分起点 SHA 不代表拆分后集成已经通过。
+`TGDRIVE_APP_CATALOG_DIR` 默认指向本仓库的 `apps/` 目录，亦可指定自定义包目录，但仍需包含三个当前版本的包。检查只确认构建产物存在，不代替完整集成测试。正式更新前须由维护者记录实际验证宿主的完整 Git SHA 到 `compatibility.json`；拆分起点 SHA 不代表拆分后集成已经通过；dirty 工作区需记录真实 base SHA 和实际验证状态。
 
 ### 隔离验证与临时目录
 

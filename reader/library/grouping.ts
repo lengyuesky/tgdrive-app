@@ -1,7 +1,7 @@
 /** 只归并完全一致的系列名和明确编号；裸数字、冲突版本与重复编号均待确认。 */
 import { natural } from '../io'
 import type { BibliographicMetadata, ReadingUnit, Work, WorkMember } from './model'
-import { LibraryError, newId, validId } from './model'
+import { LibraryError, contentKind, newId, validId, type LibraryScope } from './model'
 import { cleanMetadata, validateOverrides } from './metadata-value'
 
 export interface ComicName {
@@ -124,8 +124,40 @@ export function validateWorks(works: readonly Work[]): Work[] {
   return parsed
 }
 
+/** 格式变更先规范作品类型；缺失成员保留原类型，已确认变更的成员仍须隔离。 */
+function normalizeWorkKinds(previous: readonly Work[], units: readonly ReadingUnit[]): Work[] {
+  const current = new Map(units.map(unit => [unit.nodeId, unit]))
+  const works = validateWorks(previous)
+  return validateWorks(works.flatMap(work => {
+    const memberKind = (member: WorkMember) => current.has(member.unitId) ? contentKind(current.get(member.unitId)!.format) : work.kind
+    if (work.redirectTo || work.members.every(member => memberKind(member) === work.kind)) return [work]
+    const groups: { kind: Work['kind']; members: WorkMember[] }[] = []
+    for (const member of work.members) {
+      const kind = memberKind(member)
+      const comicGroup = kind === 'comics' ? groups.find(group => group.kind === 'comics') : undefined
+      if (comicGroup) comicGroup.members.push(member)
+      else groups.push({ kind, members: [member] })
+    }
+    // 与人工拆分一致：首组保留主 ID 及其偏好、标志引用，后续组使用新 ID；旧别名不改写。
+    return groups.map((group, index): Work => ({
+      ...structuredClone(work), id: index ? newId() : work.id, kind: group.kind,
+      members: group.members.map(member => ({ ...member, role: group.kind === 'books' ? 'main' : member.role })),
+      firstIndexedAt: Math.min(...group.members.map(member => member.firstIndexedAt ?? current.get(member.unitId)?.firstIndexedAt ?? work.firstIndexedAt)),
+      grouping: groups.length > 1 ? 'manual' : work.grouping,
+      orderConfirmed: group.kind === 'books',
+      seriesKey: group.kind === 'books' ? undefined : work.seriesKey,
+      reviewReason: group.kind === 'books' ? undefined : '文件格式已变化，请确认卷话顺序',
+    }))
+  }))
+}
+
 /** 自动归组可在内嵌信息明确后合并既有单项；保留主 ID 和旧别名，人工整理不被刷新改写。 */
-export function reconcileWorks(previous: readonly Work[], units: readonly ReadingUnit[], kind: Work['kind'], metadata = new Map<number, BibliographicMetadata>()): Work[] {
+export function reconcileWorks(previous: readonly Work[], units: readonly ReadingUnit[], kind: LibraryScope, metadata = new Map<number, BibliographicMetadata>()): Work[] {
+  if (kind === 'all') {
+    const normalized = normalizeWorkKinds(previous, units)
+    const books = reconcileWorks(normalized, units.filter(unit => contentKind(unit.format) === 'books'), 'books', metadata)
+    return reconcileWorks(books, units.filter(unit => contentKind(unit.format) === 'comics'), 'comics', metadata)
+  }
   const works = validateWorks(previous), assigned = new Set(works.flatMap(work => work.members.map(member => member.unitId)))
   const make = (members: ReadingUnit[], names?: ComicName[], seriesKey?: string, reason?: string): Work => ({ id: newId(), kind,
     members: members.map((unit, i) => ({ unitId: unit.nodeId, role: names?.[i]?.extra ? 'extra' : 'main', firstIndexedAt: unit.firstIndexedAt })),
@@ -134,7 +166,7 @@ export function reconcileWorks(previous: readonly Work[], units: readonly Readin
   if (kind === 'books') { for (const unit of units) if (!assigned.has(unit.nodeId)) works.push(make([unit])); return works }
   const byId = new Map(units.map(unit => [unit.nodeId, unit]))
   for (const work of works) {
-    if (work.grouping !== 'automatic') continue
+    if (work.kind !== 'comics' || work.grouping !== 'automatic') continue
     const known = work.members.flatMap(member => byId.has(member.unitId) ? [byId.get(member.unitId)!] : [])
     if (!known.length) continue
     const candidates = groupingCandidates(known, metadata)

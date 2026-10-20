@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "host_repository": "lengyuesky/tgdrive",
-  "host_ref": "c4d8a42247b3348bfbfbb6ebaa52ba24d0125a8c",
-  "host_version": "0.3.1",
-  "min_host_version": "0.3.1",
+  "host_ref": "0100bee95726280268a329ac7c0956179acd9e07",
+  "host_version": "0.3.3",
+  "min_host_version": "0.3.3",
   "api_version": 2,
   "supported_api_versions": [
     1,
@@ -13,6 +13,13 @@
     "required": true,
     "description": "宿主仓库为私有仓库（PRIVATE），公开 CI 仅执行独立检查，不得检出宿主或配置访问凭证。发布前必须在本机通过 TGDRIVE_HOST_DIR 指向宿主工作区运行完整 E2E 验证（npm run test:e2e）。外部贡献者无需私有宿主凭据，可独立运行本地全部测试与构建检查。",
     "fixture_command": "cargo test --locked apps::tests::browser_fixture -- --ignored --exact --nocapture",
-    "fixture_url": "http://127.0.0.1:4187/__apps_fixture"
+    "fixture_url": "http://127.0.0.1:4187/__apps_fixture",
+    "host_ref_kind": "verified_commit",
+    "host_tree": "f4f519b3e090e5c50b56a0feffc8465c72aba657",
+    "worktree_dirty": false,
+    "validation_status": "passed_commit",
+    "validation_date": "2026-10-20",
+    "validation_report": "docs/reader-validation.md",
+    "validation_note": "host_ref 是宿主 0.3.3 实际提交，其 Git tree 与已通过本轮全量测试及本机集成验收的工作区一致；提交未改变源码。实际命令、结果及限制见验证记录。"
   }
 }

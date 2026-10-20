@@ -1,0 +1,11 @@
+阅读馆应用第三方软件说明
+
+本应用复用图书与漫画解析器，构建时将以下依赖打包进插件，运行时不从远程 CDN 加载代码或字体。
+
+pdfjs-dist 6.3.289 legacy 构建由 Mozilla Foundation / Apache Software Foundation 提供，采用 Apache-2.0 许可证，完整文本见 pdfjs.txt。随包分发的 cmaps、standard_fonts 保留各自目录中的许可证与 NOTICE。
+
+PDF legacy 构建包含 core-js 3.50.0 运行时兼容代码，作者 Denis Pushkarev (zloirock.ru) / CoreJS Company (core-js.io)，采用 MIT 许可证，完整文本见 core-js.txt。
+
+DOMPurify 由 cure53 提供，采用 Apache-2.0 / MPL-2.0 许可证，完整文本见 dompurify.txt。
+
+@zip.js/zip.js 2.14.0 由 Gildas Lormeau 及贡献者提供，采用 BSD-3-Clause 许可证，完整文本见 zip-js.txt。

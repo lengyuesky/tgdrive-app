@@ -1,7 +1,7 @@
 /** 阅读状态、想读和收藏相互独立；进度仍以原 fileId 键保存，书签完全不迁移。 */
 import type { Drive, FileEntry, Page, RecordValue } from '../../sdk/types'
 import { validLocation, type Location } from '../state'
-import { LibraryError, timeSlice, validFile, type LibraryProgress, type ReadingStatus, type ReadingSummary, type ReadingUnit, type UnitReading, type UnitState, type Work, type WorkFlags } from './model'
+import { LibraryError, timeSlice, validFile, type LibraryProgress, type ReadingStatus, type ReadingDisplayStatus, type ReadingSummary, type ReadingUnit, type UnitReading, type UnitState, type Work, type WorkFlags } from './model'
 import type { LibraryAccess } from './sources'
 import { resolveWork } from './grouping'
 
@@ -38,15 +38,15 @@ export function validProgress(raw: unknown): raw is LibraryProgress {
 export function readingFrom(file: FileEntry, progress: RecordValue<LibraryProgress> | null, state?: UnitState): UnitReading {
   const usable = !!progress && validProgress(progress.value) && progress.value.file.id === file.id && progress.value.file.content_version === file.content_version
   const savedState = state?.contentVersion === file.content_version ? state.status : undefined
-  return { nodeId: file.id, status: savedState ?? (usable ? 'reading' : 'unread'), updatedAt: progress?.updated_at ?? 0,
-    versionChanged: !!progress && progress.value.file.content_version !== file.content_version,
+  return { nodeId: file.id, status: savedState ?? (usable ? 'reading' : progress || state ? 'unknown' : 'unread'), updatedAt: progress?.updated_at ?? 0,
+    versionChanged: !!progress && progress.value.file.content_version !== file.content_version || !!state && state.contentVersion !== file.content_version,
     location: usable ? progress!.value.location : undefined, summary: usable ? progress!.value.summary : undefined }
 }
-export function aggregateReading(members: readonly (UnitReading | undefined)[]): { status: ReadingStatus; percent?: number; updatedAt: number } {
-  const states = members.map(member => member?.status ?? 'unread')
-  const status = states.length && states.every(state => state === 'read') ? 'read' : states.some(state => state !== 'unread') ? 'reading' : 'unread'
+export function aggregateReading(members: readonly (UnitReading | undefined)[]): { status: ReadingDisplayStatus; percent?: number; updatedAt: number } {
+  const states = members.map(member => member?.status ?? 'unknown')
+  const status = !states.length || states.includes('unknown') ? 'unknown' : states.every(state => state === 'read') ? 'read' : states.some(state => state !== 'unread') ? 'reading' : 'unread'
   return { status, updatedAt: Math.max(0, ...members.map(member => member?.updatedAt ?? 0)),
-    percent: status === 'read' ? 100 : members.length === 1 ? members[0]?.summary?.percent : undefined }
+    percent: status === 'read' ? 100 : status !== 'unknown' && members.length === 1 ? members[0]?.summary?.percent : undefined }
 }
 export function workFlagIds(work: Work, works: readonly Work[]): Set<string> {
   const ids = new Set([(resolveWork(works, work.id) ?? work).id])

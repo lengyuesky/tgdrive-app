@@ -4,51 +4,6 @@
   "entries": [
     {
       "manifest": {
-        "id": "books",
-        "name": "图书",
-        "version": "1.6.7",
-        "api_version": 2,
-        "min_host_version": "0.3.1",
-        "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
-        "author": "tgdrive",
-        "entry": "index.html",
-        "icon": "icon.svg",
-        "permissions": [
-          "files.read",
-          "media.read"
-        ],
-        "settings": [],
-        "integration": {
-          "file_types": [
-            "txt",
-            "epub",
-            "pdf"
-          ],
-          "directories": false,
-          "changelog": "新增宿主全库索引入口，跨子目录分页查找阅读文件并恢复浏览位置，不受 2000 项整理上限限制；文件树变化拒绝旧游标，旧宿主保留原有书库。",
-          "formats": [
-            "TXT",
-            "EPUB 2/3",
-            "PDF"
-          ],
-          "limitations": [
-            "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
-            "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。"
-          ],
-          "homepage": "https://github.com/lengyuesky/tgdrive-app",
-          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
-          "screenshots": [
-            "screenshots/home.png"
-          ],
-          "data_schema": 1
-        }
-      },
-      "sha256": "751509340285b9c80db53361c4a2e8759c34f536495e4158140957918d84e1df",
-      "size": 2335035,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.7.tgapp"
-    },
-    {
-      "manifest": {
         "id": "cinema",
         "name": "影视",
         "version": "1.4.5",
@@ -104,12 +59,12 @@
     },
     {
       "manifest": {
-        "id": "comics",
-        "name": "漫画",
-        "version": "1.4.7",
+        "id": "reader",
+        "name": "阅读馆",
+        "version": "1.0.0",
         "api_version": 2,
-        "min_host_version": "0.3.1",
-        "description": "阅读图片文件夹和 CBZ/ZIP 漫画，支持封面海报、连续滚动、左右单页翻阅、书签和跨设备阅读进度。",
+        "min_host_version": "0.3.3",
+        "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
         "icon": "icon.svg",
@@ -120,31 +75,40 @@
         "settings": [],
         "integration": {
           "file_types": [
+            "txt",
+            "epub",
+            "pdf",
             "cbz",
             "zip"
           ],
           "directories": true,
-          "changelog": "新增宿主全库索引入口，跨子目录分页查找漫画包和图片目录并恢复浏览位置，不受 2000 项整理上限限制；文件树变化拒绝旧游标，旧宿主保留原有书库。",
+          "changelog": "新增统一阅读馆，共享书漫来源、历史、收藏与想读清单，按真实格式选择阅读器，支持混合全库索引与内容筛选。",
           "formats": [
-            "图片目录",
+            "TXT",
+            "EPUB 2/3",
+            "PDF",
             "CBZ",
-            "ZIP"
+            "ZIP",
+            "图片目录"
           ],
           "limitations": [
-            "不支持加密归档、RAR、CBR 或 7Z。",
-            "归档上限 2 GiB，图片章最多 10000 页；按可见范围读取图片。"
+            "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
+            "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。",
+            "不支持加密归档、RAR、CBR 或 7Z；漫画归档上限 2 GiB，图片章最多 10000 页。"
           ],
           "homepage": "https://github.com/lengyuesky/tgdrive-app",
           "support": "https://github.com/lengyuesky/tgdrive-app/issues",
           "screenshots": [
-            "screenshots/home.png"
+            "screenshots/home.png",
+            "screenshots/mobile-library.png",
+            "screenshots/mobile-reading.png"
           ],
           "data_schema": 1
         }
       },
-      "sha256": "36d821cab960f517a02d59a0ce8f30118efb14170780b5e8d63e7f671fcd1883",
-      "size": 346660,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/comics-1.4.7.tgapp"
+      "sha256": "00a5a8f8b7af6916bad849a2d86004d0a369ee71a555ebcc44d03260a303e4fe",
+      "size": 2444117,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.0.tgapp"
     },
     {
       "manifest": {

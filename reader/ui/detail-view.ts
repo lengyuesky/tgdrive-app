@@ -212,7 +212,7 @@ export class DetailView {
   }
 
   private async loadDetailData(unit: ReadingUnit, work?: Work) {
-    const isBooks = this.context.kind === 'books'
+    const isBooks = ['txt', 'epub', 'pdf'].includes(unit.format)
     const signal = this.lifecycle.signal
 
     // 1. 获取元数据并解析人工优先信息
@@ -375,10 +375,10 @@ export class DetailView {
     if (statusBadge) {
       statusBadge.className = `badge-status badge-${status}`
       statusBadge.textContent =
-        status === 'read' ? '已读' : status === 'reading' ? '在读' : '未读'
+        status === 'read' ? '已读' : status === 'reading' ? '在读' : status === 'unread' ? '未读' : '进度未知'
     }
     if (primaryReadBtn) {
-      primaryReadBtn.textContent = status === 'unread' ? '开始阅读' : '继续阅读'
+      primaryReadBtn.textContent = status === 'unknown' ? '打开阅读' : status === 'unread' ? '开始阅读' : '继续阅读'
     }
 
     // 更新 想读/收藏 按钮高亮

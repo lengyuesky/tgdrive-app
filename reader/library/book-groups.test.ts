@@ -79,8 +79,9 @@ describe('图书单分组持久化', () => {
     let library = new ReadingLibrary(mock.drive, 'books')
     await library.initialize(); await library.refresh(); await library.bookGroups.load()
     const id = await library.bookGroups.create('小说'); await library.bookGroups.assign([2, 99], id)
+    const state = await library.loadReadingState()
     for (const view of ['works', 'files'] as const) {
-      expect(library.query({ groupId: id, view, query: '小说', format: 'txt', status: 'unread' }).total).toBe(1)
+      expect(library.query({ groupId: id, view, query: '小说', format: 'txt', status: 'unread' }, state.readings, state.flags).total).toBe(1)
       expect(library.query({ groupId: '', view }).items[0]!.units[0]!.nodeId).toBe(3)
       expect(library.query({ groupId: id, format: 'epub' }).total).toBe(0)
     }

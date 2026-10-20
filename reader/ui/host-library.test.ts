@@ -7,7 +7,7 @@ const active: HostLibraryView[] = []
 afterEach(() => { for (const view of active.splice(0)) view.destroy(); vi.unstubAllGlobals(); document.body.replaceChildren() })
 const entry = (id: number, name = `${id}.txt`) => ({ file: { id, name, path: `/书/${name}`, is_dir: false, size: 1, content_version: 'v1', created_at: 1, modified_at: 1, favorite: false }, format: 'txt', source_ids: [1] })
 const result = (id: number, cursor: string | null = null): HostLibraryPage => ({ entries: [entry(id)], revision: 'revision', has_more: cursor !== null, next_cursor: cursor })
-function setup() {
+function setup(kind: UiContext['kind'] = 'books') {
   vi.stubGlobal('IntersectionObserver', undefined)
   const container = document.createElement('div'); document.body.append(container)
   let saved: any = null
@@ -17,7 +17,7 @@ function setup() {
     if ((saved?.revision ?? null) !== revision) throw new Error('冲突')
     saved = { key, value: structuredClone(value), revision: String(Number(saved?.revision ?? 0) + 1), updated_at: 1 }; return saved
   }) }
-  const context = { kind: 'books', signal: new AbortController().signal, library: { snapshot: { sources: { config: { sources: [{ nodeId: 1, path: '/书' }] } } } },
+  const context = { kind, signal: new AbortController().signal, library: { snapshot: { sources: { config: { sources: [{ nodeId: 1, path: '/书' }] } } } },
     drive: { library: { page }, storage, on: (event: string, fn: () => void) => { listeners.set(event, fn); return () => listeners.delete(event) } },
     openReader: vi.fn().mockResolvedValue(undefined), reportError: vi.fn() } as unknown as UiContext
   const back = vi.fn()
@@ -26,6 +26,40 @@ function setup() {
   return { view, context, container, page, storage, listeners, click, back, saved: () => saved }
 }
 describe('宿主全库分页', () => {
+  it('混合应用可独立筛选图书或漫画，重开恢复筛选范围，切换时清空旧格式和游标', async () => {
+    const x = setup('all')
+    await x.view.render()
+    expect(x.page.mock.calls[0]![0].kind).toBe('all')
+    expect(x.container.querySelectorAll('#host-format option')).toHaveLength(7)
+    const kind = x.container.querySelector<HTMLSelectElement>('#host-kind')!
+    kind.value = 'books'; kind.dispatchEvent(new Event('change'))
+    await vi.waitFor(() => expect(x.saved()?.value.query.kind).toBe('books'))
+    expect(x.page.mock.calls.at(-1)![0]).toMatchObject({ kind: 'books', cursor: null })
+    expect(x.container.querySelectorAll('#host-format option')).toHaveLength(4)
+    x.view.destroy()
+    const reopened = new HostLibraryView(x.container, x.context, x.back); active.push(reopened)
+    await reopened.render()
+    expect(x.page.mock.calls.at(-1)![0].kind).toBe('books')
+    expect(x.container.querySelector<HTMLSelectElement>('#host-kind')!.value).toBe('books')
+    const comic = { ...entry(20, '漫画.cbz'), format: 'cbz' }
+    x.page.mockResolvedValue({ ...result(20), entries: [comic] })
+    x.container.querySelector<HTMLSelectElement>('#host-kind')!.value = 'comics'
+    x.container.querySelector<HTMLSelectElement>('#host-kind')!.dispatchEvent(new Event('change'))
+    await vi.waitFor(() => expect(x.saved()?.value.query.kind).toBe('comics'))
+    expect(x.page.mock.calls.at(-1)![0]).toMatchObject({ kind: 'comics', cursor: null, format: undefined })
+    expect(x.container.querySelector('.card-title')?.textContent).toBe('漫画.cbz')
+    expect(x.context.reportError).not.toHaveBeenCalled()
+  })
+
+  it('全库分页拒绝内容类型或格式筛选范围外的条目', async () => {
+    const x = setup(); await x.view.render()
+    x.page.mockResolvedValueOnce({ ...result(9), entries: [{ ...entry(9, '漫画.cbz'), format: 'cbz' }] })
+    x.click('refresh')
+    await vi.waitFor(() => expect(x.context.reportError).toHaveBeenCalled())
+    expect(x.container.querySelectorAll('.library-card')).toHaveLength(0)
+    expect(x.saved()?.value.query.kind).toBe('books')
+  })
+
   it('只读取当前页、按文件名显示并开读；保存及重开恢复游标，不依赖本地 2000 项索引', async () => {
     const x = setup(); await x.view.render()
     expect(x.page).toHaveBeenCalledWith(expect.objectContaining({ roots: [1], kind: 'books', limit: 40, cursor: null }), expect.anything())

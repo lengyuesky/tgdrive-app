@@ -4,6 +4,8 @@ import { extension, natural } from '../io'
 import type { Location, Progress } from '../state'
 
 export type LibraryKind = 'books' | 'comics'
+/** 应用可查询混合书库；作品自身始终保留真实内容类型。 */
+export type LibraryScope = LibraryKind | 'all'
 export type UnitFormat = 'txt' | 'epub' | 'pdf' | 'cbz' | 'zip' | 'images'
 export interface ReadingUnit {
   nodeId: number
@@ -38,6 +40,7 @@ export interface Work {
   redirectTo?: string
 }
 export type ReadingStatus = 'unread' | 'reading' | 'read'
+export type ReadingDisplayStatus = ReadingStatus | 'unknown'
 export interface ReadingSummary {
   label?: string
   sectionIndex?: number
@@ -52,7 +55,7 @@ export interface WorkFlags { schemaVersion: 1; wantToRead: boolean; favorite: bo
 export interface UnitState { schemaVersion: 1; contentVersion: string; status: ReadingStatus }
 export interface UnitReading {
   nodeId: number
-  status: ReadingStatus
+  status: ReadingDisplayStatus
   updatedAt: number
   location?: Location
   summary?: ReadingSummary
@@ -90,10 +93,12 @@ export function validFile(raw: unknown): raw is FileEntry {
       && Number.isFinite(f.created_at) && Number.isFinite(f.modified_at) && typeof f.favorite === 'boolean'
   } catch { return false }
 }
-export function unitFormat(file: FileEntry, kind: LibraryKind): UnitFormat | undefined {
-  if (file.is_dir) return kind === 'comics' ? 'images' : undefined
+export const contentKind = (format: UnitFormat): LibraryKind => ['cbz', 'zip', 'images'].includes(format) ? 'comics' : 'books'
+export const scopeFormats = (kind: LibraryScope): UnitFormat[] => kind === 'all' ? ['txt', 'epub', 'pdf', 'cbz', 'zip', 'images'] : kind === 'books' ? ['txt', 'epub', 'pdf'] : ['cbz', 'zip', 'images']
+export function unitFormat(file: FileEntry, kind: LibraryScope): UnitFormat | undefined {
+  if (file.is_dir) return kind !== 'books' ? 'images' : undefined
   const ext = extension(file.name)
-  return (kind === 'books' ? ['txt', 'epub', 'pdf'] : ['cbz', 'zip']).includes(ext) ? ext as UnitFormat : undefined
+  return scopeFormats(kind).includes(ext as UnitFormat) ? ext as UnitFormat : undefined
 }
 export function parseUnit(raw: unknown): ReadingUnit {
   const unit = raw as ReadingUnit | null

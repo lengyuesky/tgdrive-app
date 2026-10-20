@@ -8,9 +8,12 @@ import {
   type CatalogItem,
   type ReadingUnit,
   type UnitFormat,
-  type ReadingStatus,
+  type ReadingDisplayStatus,
+  type LibraryKind,
   type ScanProgress,
   unitFormat,
+  contentKind,
+  scopeFormats,
   aggregateReading,
 } from '../library'
 
@@ -74,7 +77,7 @@ export class LibraryView {
           )
         : undefined
 
-    const isBooks = this.context.kind === 'books'
+    const hasGroups = this.context.kind !== 'comics'
     const snapshot = this.context.library.snapshot
     if (this.state.sourceId !== undefined && !snapshot.sources.config.sources.some(source => source.nodeId === this.state.sourceId)) this.state.sourceId = snapshot.indexedSourceId
 
@@ -97,21 +100,10 @@ export class LibraryView {
             </div>
           </div>
           <div class="toolbar-filters-row">
+            ${this.context.kind === 'all' ? '<select id="filter-kind" aria-label="筛选内容类型"><option value="">全部书漫</option><option value="books">图书</option><option value="comics">漫画</option></select>' : ''}
             <select id="filter-format" aria-label="筛选格式">
               <option value="">全部格式</option>
-              ${
-                isBooks
-                  ? `
-                <option value="txt">TXT 文本</option>
-                <option value="epub">EPUB 电子书</option>
-                <option value="pdf">PDF 文档</option>
-              `
-                  : `
-                <option value="cbz">CBZ 归档</option>
-                <option value="zip">ZIP 压缩包</option>
-                <option value="images">图片目录</option>
-              `
-              }
+              ${scopeFormats(this.state.kind ?? this.context.kind).map(format => `<option value="${format}">${format === 'images' ? '图片目录' : format.toUpperCase()}</option>`).join('')}
             </select>
             <select id="filter-source" aria-label="筛选来源">
               <option value="">全部来源</option>
@@ -121,6 +113,7 @@ export class LibraryView {
               <option value="unread">未读</option>
               <option value="reading">在读</option>
               <option value="read">已读</option>
+              <option value="unknown">进度未知</option>
             </select>
             <select id="sort-select" aria-label="排序方式">
               <option value="title">按名称排序</option>
@@ -159,7 +152,7 @@ export class LibraryView {
       </div>
     `
 
-    if (isBooks) {
+    if (hasGroups) {
       const signal = this.lifecycle.signal
       try { await this.context.library.bookGroups.load(signal) }
       catch (error) { if (!signal.aborted) this.context.reportError(error) }
@@ -271,6 +264,15 @@ export class LibraryView {
   }
 
   private bindEvents() {
+    const kindSelect = this.container.querySelector<HTMLSelectElement>('#filter-kind')
+    if (kindSelect) {
+      kindSelect.value = this.state.kind ?? ''
+      kindSelect.onchange = () => {
+        this.state.kind = kindSelect.value ? kindSelect.value as LibraryKind : undefined
+        this.state.format = undefined; this.state.offset = 0; this.sdkPageCursors.clear()
+        void this.render()
+      }
+    }
     // 搜索输入防抖
     const searchInput = this.container.querySelector<HTMLInputElement>('#library-search')
     if (searchInput) {
@@ -374,7 +376,7 @@ export class LibraryView {
     if (statusSelect) {
       statusSelect.value = this.state.status ?? ''
       statusSelect.onchange = () => {
-        this.state.status = (statusSelect.value as ReadingStatus) || undefined
+        this.state.status = (statusSelect.value as ReadingDisplayStatus) || undefined
         this.state.offset = 0
         this.sdkPageCursors.clear()
         void this.loadItems()
@@ -507,7 +509,8 @@ export class LibraryView {
       // 1. 先查询已索引数据
       const result = this.context.library.query(
         {
-          groupId: this.context.kind === 'books' ? this.state.groupId : undefined,
+          groupId: this.state.groupId,
+          kind: this.state.kind,
           query: this.state.query || undefined,
           format: this.state.format,
           sourceId: this.state.sourceId,
@@ -570,8 +573,10 @@ export class LibraryView {
             .filter((f) => {
               const fmt = unitFormat(f, this.context.kind)
               if (!fmt) return false
-              if (this.context.kind === 'books' && !this.context.library.bookGroups.matches(f.id, this.state.groupId)) return false
-              if (this.state.status && this.state.status !== 'unread') return false
+              if (this.state.kind && contentKind(fmt) !== this.state.kind) return false
+              if (this.state.groupId !== undefined && !this.context.library.bookGroups.matches(f.id, this.state.groupId)) return false
+              // 此路径尚未读取该文件的状态；不能把未知记录混入未读筛选。
+              if (this.state.status && this.state.status !== 'unknown') return false
               if (this.state.format && fmt !== this.state.format) return false
               return true
             })
@@ -681,12 +686,12 @@ export class LibraryView {
         ? '已读'
         : item.reading.status === 'reading'
           ? '在读'
-          : '未读'
+          : item.reading.status === 'unread' ? '未读' : '进度未知'
 
     coverArt.append(initial, mark, statusBadge)
 
     // 如果未归组或顺序待确认，显示未归组标签
-    if (this.context.kind === 'comics' && (item.ungrouped || !item.work?.orderConfirmed)) {
+    if (contentKind(firstUnit.format) === 'comics' && (item.ungrouped || !item.work?.orderConfirmed)) {
       const ungroupedBadge = document.createElement('span')
       ungroupedBadge.className = 'badge-ungrouped'
       ungroupedBadge.textContent = '未归组'
@@ -715,7 +720,7 @@ export class LibraryView {
     }
 
     info.append(titleEl, metaEl)
-    if (this.context.kind === 'books') {
+    if (this.context.kind !== 'comics') {
       const badge = document.createElement('span'); badge.className = 'book-group-badge'
       const store = this.context.library.bookGroups
       badge.textContent = store.ready ? (store.groups.find(group => group.id === store.groupFor(firstUnit.nodeId))?.name ?? '未分组') : '分组未加载'

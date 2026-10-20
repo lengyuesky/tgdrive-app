@@ -5,8 +5,8 @@ import { seedReaderSource, revealReader, closeReaderPanel } from './reader-helpe
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 const frame = (page: Page) => page.frameLocator('iframe')
 async function install(page: Page) {
-  expect((await page.request.patch('/api/apps/books/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
-  await page.goto('/apps/books')
+  expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
+  await page.goto('/apps/reader')
   // 阅读馆重构后应用先落在首页；先进入「书库」视图再等待完整列表。
   await expect(frame(page).locator('#btn-home-view-all')).toBeVisible()
   await frame(page).locator('#btn-home-view-all').click()
@@ -69,10 +69,10 @@ test.beforeEach(async ({ page }) => {
   await page.request.post('/__apps_fixture/media', { data: { enabled: false } })
   const index = await (await page.request.get('/api/apps')).json()
   for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
-  const book = index.available.find((item: any) => item.manifest.id === 'books')
-  expect(book.manifest.version).toBe(JSON.parse(readFileSync(new URL('../../books/app.json', import.meta.url), 'utf8')).version)
-  expect((await page.request.post('/api/apps/catalog/books/install', { data: { digest: book.digest } })).ok()).toBe(true)
-  await seedReaderSource(page, 'books', '/测试图书')
+  const book = index.available.find((item: any) => item.manifest.id === 'reader')
+  expect(book.manifest.version).toBe(JSON.parse(readFileSync(new URL('../../reader/app.json', import.meta.url), 'utf8')).version)
+  expect((await page.request.post('/api/apps/catalog/reader/install', { data: { digest: book.digest } })).ok()).toBe(true)
+  await seedReaderSource(page, 'reader', '/测试图书')
 })
 
 test('手机只显示正文，菜单不挤压页面，真实轻点与横向滑动按页前进', async ({ page }, info) => {
@@ -369,7 +369,7 @@ test('纯图片章节不会在加载期间把末页进度覆盖成首页，停�
   await expect.poll(async () => Number(await frame(page).locator('#position').getAttribute('data-pages'))).toBeGreaterThan(1)
   await expect.poll(async () => { const node = frame(page).locator('#position'); return Number(await node.getAttribute('data-page')) === Number(await node.getAttribute('data-pages')) - 1 }).toBe(true)
   await expect.poll(async () => (await savedLocation(page) as any).ratio).toBe(1)
-  expect((await page.request.post('/api/apps/books/state', { data: { enabled: false } })).ok()).toBe(true)
+  expect((await page.request.post('/api/apps/reader/state', { data: { enabled: false } })).ok()).toBe(true)
   await page.evaluate(() => window.dispatchEvent(new Event('tgdrive-apps-changed')))
   await expect(page.locator('iframe')).toHaveCount(0)
   await expect(page.locator('.host-toolbar')).toBeVisible()
@@ -411,13 +411,9 @@ test('未声明沉浸能力的旧宿主保留工具栏，图书分页仍可正�
 
 test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两侧和滑动翻页及 RTL 联动', async ({ page }, info) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
-  const index = await (await page.request.get('/api/apps')).json()
-  const comic = index.available.find((item: any) => item.manifest.id === 'comics')
-  expect(comic).toBeTruthy()
-  expect((await page.request.post('/api/apps/catalog/comics/install', { data: { digest: comic.digest } })).ok()).toBe(true)
-  await seedReaderSource(page, 'comics', '/测试漫画')
-  expect((await page.request.patch('/api/apps/comics/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
-  await page.goto('/apps/comics')
+  await seedReaderSource(page, 'reader', '/测试漫画')
+  expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
+  await page.goto('/apps/reader')
   await expect(frame(page).locator('#btn-home-view-all')).toBeVisible()
   await frame(page).locator('#btn-home-view-all').click()
   await expect(frame(page).locator('#items button').first()).toBeVisible()

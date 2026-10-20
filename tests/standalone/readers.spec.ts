@@ -10,8 +10,7 @@ import type { FileEntry } from '../../sdk/types'
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const modules = resolve(root, 'node_modules')
 
-let booksOutDir = ''
-let comicsOutDir = ''
+let readerOutDir = ''
 let stagingTmp = ''
 
 // 生成各类合成测试文件数据
@@ -43,13 +42,12 @@ const raggedStrip = zip(raggedPages.map((data, i) => [`${String(i + 1).padStart(
 
 test.beforeAll(async () => {
   stagingTmp = await mkdtemp(join(tmpdir(), 'tgdrive-readers-build-'))
-  booksOutDir = join(stagingTmp, 'books')
-  comicsOutDir = join(stagingTmp, 'comics')
+  readerOutDir = join(stagingTmp, 'reader')
 
-  // 1. 真实 Vite 构建 books
+  // 统一入口使用真实 Vite 构建；kind 只决定合成内容，不决定应用 ID。
   await build({
     configFile: false,
-    root: resolve(root, 'books'),
+    root: resolve(root, 'reader'),
     base: './',
     publicDir: false,
     resolve: {
@@ -61,7 +59,7 @@ test.beforeAll(async () => {
       },
     },
     build: {
-      outDir: booksOutDir,
+      outDir: readerOutDir,
       emptyOutDir: true,
       target: 'es2022',
       sourcemap: false,
@@ -69,25 +67,7 @@ test.beforeAll(async () => {
     },
   })
 
-  // 2. 真实 Vite 构建 comics
-  await build({
-    configFile: false,
-    root: resolve(root, 'comics'),
-    base: './',
-    publicDir: false,
-    resolve: {
-      alias: {
-        '@zip.js/zip.js': resolve(modules, '@zip.js/zip.js'),
-      },
-    },
-    build: {
-      outDir: comicsOutDir,
-      emptyOutDir: true,
-      target: 'es2022',
-      sourcemap: false,
-      chunkSizeWarningLimit: 2000,
-    },
-  })
+
 })
 
 test.afterAll(async () => {
@@ -100,7 +80,7 @@ test.afterAll(async () => {
 async function setupApp(
   page: Page,
   options: {
-    kind: 'books' | 'comics'
+    kind: 'books' | 'comics' | 'mixed'
     viewport?: { width: number; height: number }
     unindexedFiles?: FileEntry[]
     readDelay?: number
@@ -250,13 +230,13 @@ async function setupApp(
     })),
   ]
 
-  const activeFiles = kind === 'books' ? bookFiles : comicFiles
+  const activeFiles = kind === 'mixed' ? [...bookFiles, ...comicFiles] : kind === 'books' ? bookFiles : comicFiles
   const allEntries: FileEntry[] = [rootDir, ...activeFiles.map((f) => f.entry), ...unindexedFiles]
   const dataMap = new Map<number, Buffer>()
   activeFiles.forEach((f) => dataMap.set(f.entry.id, f.data))
 
   // 虚拟 origin 静态文件拦截服务
-  const outDir = kind === 'books' ? booksOutDir : comicsOutDir
+  const outDir = readerOutDir
   await page.route('**/*', async (route) => {
     const url = route.request().url()
     if (!url.startsWith('http://standalone.local/')) {
@@ -296,6 +276,7 @@ async function setupApp(
       const storageStore = new Map<string, { key: string; value: any; revision: string; updated_at: number }>()
       const source = entries.find((file: any) => file.path === '/书库' && file.is_dir)!
       storageStore.set('library:sources', { key: 'library:sources', value: { schemaVersion: 1, sources: [{ nodeId: source.id, path: source.path, contentVersion: source.content_version, addedAt: 1, rootConfirmed: false }] }, revision: 'sources-1', updated_at: 1 })
+      if (kind !== 'mixed') storageStore.set('preferences', { key: 'preferences', value: { mode: 'scroll', fit: 'width' }, revision: 'prefs-1', updated_at: 1 })
       let revCount = 0
 
       const dataEntries = new Map<number, Uint8Array>()
@@ -310,9 +291,9 @@ async function setupApp(
 
       ;(window as any).tgdrive = {
         ready: Promise.resolve({
-          id: kind,
-          name: kind === 'books' ? '图书' : '漫画',
-          version: '1.2.0',
+          id: 'reader',
+          name: '阅读馆',
+          version: '1.0.0',
           api_version: 2,
           dark: false,
         }),
@@ -410,6 +391,50 @@ async function setupApp(
 }
 
 test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
+  for (const width of [390, 1280]) {
+    test(`阅读馆混合书库同入口筛选并切换文字与漫画 ${width}`, async ({ page }) => {
+      const errors: string[] = []
+      page.on('pageerror', error => errors.push(error.message))
+      const { outsideRequests } = await setupApp(page, { kind: 'mixed', viewport: { width, height: 900 } })
+      await page.locator('#nav-library, #tab-library').filter({ visible: true }).first().click()
+      const cards = page.locator('#items .library-card')
+      await expect(cards.filter({ hasText: '长篇' })).toBeVisible()
+      await expect(cards.filter({ hasText: '漫画01' })).toBeVisible()
+      // kind 仍表示夹具内容；合并应用需识别每个文件的格式来选择底层解析器。
+      for (const [format, title, marker] of [
+        ['txt', '长篇', '.flow-content'],
+        ['cbz', '漫画01', '.comic-page img'],
+        ['epub', '示例', '.flow-content'],
+        ['pdf', '标准', 'canvas'],
+        ['images', '参差条漫', '.comic-page img'],
+      ]) {
+        await page.getByRole('combobox', { name: '筛选格式', exact: true }).selectOption(format!)
+        await expect(cards.filter({ hasText: title! })).toHaveCount(1)
+        await cards.filter({ hasText: title! }).click()
+        await expect(page.locator('#reader')).toBeVisible()
+        await expect(page.locator('#reading-status')).toHaveText('')
+        await expect(page.locator(`#viewport ${marker}`)).toBeVisible()
+        if (format === 'txt' || format === 'epub') await expect(page.locator('#mode')).toHaveValue('page')
+        else {
+          await expect(page.locator('#fit')).toHaveValue('page')
+          if (format !== 'pdf') await expect(page.locator('#comic-mode')).toHaveValue('single')
+        }
+        if (await page.locator('#app.immersive').count()) {
+          await page.locator('#viewport').focus()
+          await page.keyboard.press('Escape')
+        }
+        await page.locator('#back').click()
+        await expect(page.locator('#app-ui')).toBeVisible()
+      }
+      await page.getByRole('combobox', { name: '筛选格式', exact: true }).selectOption('')
+      await expect(cards.filter({ hasText: '长篇' })).toBeVisible()
+      await expect(cards.filter({ hasText: '漫画01' })).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      expect(outsideRequests).toEqual([])
+      expect(errors).toEqual([])
+    })
+  }
+
   test('1. 多视口适配（320、390、430、横屏844x390、768、1440）与触控尺寸及无水平溢出', async ({
     page,
   }) => {
@@ -440,6 +465,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await page.locator('#items .library-card', { hasText: '长篇' }).first().click()
       await expect(page.locator('#reader')).toBeVisible()
       await expect(page.locator('#viewport')).toContainText('这是第一章的内容')
+      // 正文可先于 open() 完成挂载；位置出现后，opened() 才已完成默认收起工具栏。
+      await expect(page.locator('#position')).not.toHaveText('')
 
       // 手机/平板窄屏下阅读器自进入沉浸模式：先唤出工具栏再操作菜单。
       // 桌面端视口下验证设置面板步进按钮触控尺寸满足 >= 44px

@@ -9,21 +9,21 @@
 根目录及包目录资产规范如下：
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
-- `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
+- `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共三包）：
   - `apps/shorts-1.4.6.tgapp`
-  - `apps/books-1.6.7.tgapp`
-  - `apps/comics-1.4.7.tgapp`
+  - `apps/reader-1.0.0.tgapp`
   - `apps/cinema-1.4.5.tgapp`
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/books-1.6.7.tgapp
 <sha256>  apps/cinema-1.4.5.tgapp
-<sha256>  apps/comics-1.4.7.tgapp
+<sha256>  apps/reader-1.0.0.tgapp
 <sha256>  apps/shorts-1.4.6.tgapp
 <sha256>  catalog.json
 ```
+
+`books`、`comics` 不再生成独立官方包，解析器源码继续保留；reader 包必须同时带齐 ZIP、DOMPurify、PDF worker、cmaps、standard_fonts 及全部对应许可证和 NOTICE。最终构建须在真实截图完成后执行。
 
 ## catalog 协议（schema_version: 2）
 
@@ -32,7 +32,7 @@
 
 ### 完整 JSON 结构
 
-以下示例展示合法的 schema_version: 2 结构。条目信息由真实归档生成：
+以下示例展示合法的 schema_version: 2 结构。manifest 对应 reader 源清单；示例摘要和大小仅为合法占位，发布时必须从真实归档计算：
 
 ```json
 {
@@ -41,12 +41,12 @@
   "entries": [
     {
       "manifest": {
-        "id": "books",
-        "name": "图书",
-        "version": "1.6.7",
+        "id": "reader",
+        "name": "阅读馆",
+        "version": "1.0.0",
         "api_version": 2,
-        "min_host_version": "0.3.1",
-        "description": "阅读网盘里的 TXT、EPUB 和 PDF，支持章节、排版设置、书签和跨设备阅读进度。",
+        "min_host_version": "0.3.3",
+        "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
         "author": "tgdrive",
         "entry": "index.html",
         "icon": "icon.svg",
@@ -59,30 +59,38 @@
           "file_types": [
             "txt",
             "epub",
-            "pdf"
+            "pdf",
+            "cbz",
+            "zip"
           ],
-          "directories": false,
-          "changelog": "新增宿主全库索引入口，跨子目录分页查找阅读文件并恢复浏览位置，不受 2000 项整理上限限制；文件树变化拒绝旧游标，旧宿主保留原有书库。",
+          "directories": true,
+          "changelog": "新增统一阅读馆，共享书漫来源、历史、收藏与想读清单，按真实格式选择阅读器，支持混合全库索引与内容筛选。",
           "formats": [
             "TXT",
             "EPUB 2/3",
-            "PDF"
+            "PDF",
+            "CBZ",
+            "ZIP",
+            "图片目录"
           ],
           "limitations": [
             "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
-            "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。"
+            "支持 TXT 64 MiB、EPUB 128 MiB、PDF 512 MiB；大文件采用按需读取。",
+            "不支持加密归档、RAR、CBR 或 7Z；漫画归档上限 2 GiB，图片章最多 10000 页。"
           ],
           "homepage": "https://github.com/lengyuesky/tgdrive-app",
           "support": "https://github.com/lengyuesky/tgdrive-app/issues",
           "screenshots": [
-            "screenshots/home.png"
+            "screenshots/home.png",
+            "screenshots/mobile-library.png",
+            "screenshots/mobile-reading.png"
           ],
           "data_schema": 1
         }
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/books-1.6.7.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.0.tgapp"
     }
   ]
 }

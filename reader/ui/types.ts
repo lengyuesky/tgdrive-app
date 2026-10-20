@@ -7,7 +7,9 @@ import type {
   CatalogItem,
   LibrarySnapshot,
   ReadingLibrary,
-  ReadingStatus,
+  ReadingDisplayStatus,
+  LibraryKind,
+  LibraryScope,
   ReadingUnit,
   UnitFormat,
   Work,
@@ -17,11 +19,12 @@ import type {
 export type UiView = 'home' | 'library' | 'detail' | 'me'
 
 export interface LibraryFilterState {
+  kind?: LibraryKind
   groupId?: string
   query: string
   format?: UnitFormat
   sourceId?: number
-  status?: ReadingStatus
+  status?: ReadingDisplayStatus
   sort: 'title' | 'added' | 'recent'
   view: 'works' | 'files'
   offset: number
@@ -31,7 +34,7 @@ export interface LibraryFilterState {
 export interface UiContext {
   drive: Drive
   library: ReadingLibrary
-  kind: 'books' | 'comics'
+  kind: LibraryScope
   signal: AbortSignal
   openReader: (nodeId: number, location?: Location) => Promise<void>
   openDetail: (item: CatalogItem | { unit: ReadingUnit; work?: Work }) => void
