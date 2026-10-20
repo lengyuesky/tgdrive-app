@@ -249,7 +249,7 @@ test('TXT 字符锚点跨模式字号横竖屏与重开保持可见，跨分段�
   await expect.poll(async () => { const node = frame(page).locator('#position'); return Number(await node.getAttribute('data-page')) === Number(await node.getAttribute('data-pages')) - 1 }).toBe(true)
 })
 
-test('桌面保留导航，跨设备以字符恢复分页和书签，冲突能唤出操作', async ({ page, browser }, info) => {
+test('桌面悬浮导航不占正文空间，跨设备以字符恢复分页和书签，冲突能唤出操作', async ({ page, browser }, info) => {
   await install(page); await open(page, '长篇.txt'); await setMode(page, 'page')
   await frame(page).locator('#next').click(); await frame(page).locator('#next').click()
   await expect(frame(page).locator('#sync')).toHaveText('已同步')
@@ -262,7 +262,7 @@ test('桌面保留导航，跨设备以字符恢复分页和书签，冲突能�
   try {
     await context.addCookies(await page.context().cookies())
     const desktop = await context.newPage(); await install(desktop); await open(desktop, '长篇.txt')
-    await expect(desktop.locator('.host-toolbar')).toBeVisible()
+    await expect(desktop.locator('.host-toolbar')).not.toBeVisible()
     await expect(frame(desktop).locator('.reader-toolbar')).toBeVisible()
     await expect(frame(desktop).locator('#viewport')).toHaveAttribute('data-mode', 'page')
     await expect(frame(desktop).locator('.flow-pages')).toHaveCSS('width', '760px')

@@ -147,7 +147,7 @@ export class MeView {
               required
             />
             <button id="btn-choose-source" class="btn-primary" type="button">选择并授权目录</button>
-            <button id="btn-submit-source" class="btn-primary" type="submit">添加目录</button>
+            <button id="btn-submit-source" class="btn-primary" type="button">添加目录</button>
           </form>
           <p id="add-source-error" class="error-text" hidden></p>
         </div>
@@ -250,49 +250,58 @@ export class MeView {
     const form = subview.querySelector<HTMLFormElement>('#form-add-source')
     const pathInput = subview.querySelector<HTMLInputElement>('#input-source-path')
     const errText = subview.querySelector<HTMLElement>('#add-source-error')
-
+    const submit = subview.querySelector<HTMLButtonElement>('#btn-submit-source')
     const choose = subview.querySelector<HTMLButtonElement>('#btn-choose-source')
+    let adding = false
+    const addSource = async () => {
+      if (!form || !pathInput || !errText || adding || !form.reportValidity()) return
+      const signal = this.lifecycle.signal
+      adding = true
+      if (submit) submit.disabled = true
+      if (choose) choose.disabled = true
+      errText.hidden = true
+      try {
+        const path = pathInput.value.trim()
+        if (!path) return
+        const confirmedRoot = path === '/' && await showConfirmModal({
+          title: '添加根目录来源确认',
+          message: '添加根目录（/）将授权扫描整个网盘。扫描包含大量文件时可能耗时较长。是否确认添加？',
+          confirmText: '确认添加根目录',
+          signal,
+        })
+        if (signal.aborted || path === '/' && !confirmedRoot) return
+        const added = await this.context.library.addSource(path, {
+          confirmedRoot,
+          base: this.context.library.snapshot.sources,
+          signal,
+        })
+        void added.scan.catch(() => {})
+        if (signal.aborted) return
+        pathInput.value = ''
+        await this.renderSourcesSubView()
+      } catch (err) {
+        if (signal.aborted) return
+        errText.textContent = `添加失败：${err instanceof Error ? err.message : String(err)}`
+        errText.hidden = false
+      } finally {
+        adding = false
+        if (submit) submit.disabled = false
+        if (choose) choose.disabled = false
+      }
+    }
+    // 宿主沙箱不开放 allow-forms；按钮、回车和目录选择均走显式 JS，不请求原生提交。
+    if (submit) submit.onclick = () => { void addSource() }
+    if (form) form.onsubmit = event => { event.preventDefault(); void addSource() }
+    if (pathInput) pathInput.onkeydown = event => {
+      if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void addSource() }
+    }
     if (choose) {
       choose.hidden = !this.context.drive.can?.('ui.authorizeDirectory')
       choose.onclick = async () => {
         try {
           const selected = await this.context.drive.ui.authorizeDirectory?.(pathInput?.value || '/')
-          if (selected && pathInput) { pathInput.value = selected; form?.requestSubmit() }
-        } catch (error) { this.context.reportError(error) }
-      }
-    }
-    if (form && pathInput && errText) {
-      form.onsubmit = async (e) => {
-        e.preventDefault()
-        errText.hidden = true
-        const path = pathInput.value.trim()
-        if (!path) return
-
-        let confirmedRoot = false
-        if (path === '/') {
-          const confirmed = await showConfirmModal({
-            title: '添加根目录来源确认',
-            message:
-              '添加根目录（/）将授权扫描整个网盘。扫描包含大量文件时可能耗时较长。是否确认添加？',
-            confirmText: '确认添加根目录',
-          })
-          if (!confirmed) return
-          confirmedRoot = true
-        }
-
-        const base = this.context.library.snapshot.sources
-        try {
-          const added = await this.context.library.addSource(path, {
-            confirmedRoot,
-            base,
-          })
-          void added.scan.catch(() => {})
-          pathInput.value = ''
-          await this.renderSourcesSubView()
-        } catch (err) {
-          errText.textContent = `添加失败：${err instanceof Error ? err.message : String(err)}`
-          errText.hidden = false
-        }
+          if (selected && pathInput && !this.lifecycle.signal.aborted) { pathInput.value = selected; await addSource() }
+        } catch (error) { if (!this.lifecycle.signal.aborted) this.context.reportError(error) }
       }
     }
   }

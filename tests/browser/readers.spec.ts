@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { seedReaderSource, revealReader, closeReaderPanel } from './reader-helpers'
+import type { Progress } from '../../reader/state'
 const base = 'http://127.0.0.1:4187'
 async function authenticate(page: Page) {
   expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
@@ -279,8 +280,11 @@ test('长漫画窗口、末页定位及 TXT 调整字号后保持字符位置', 
   await frame.locator('#viewport').evaluate((node) => { node.scrollTop = 1000 })
   await revealReader(page)
   await frame.locator('#retry-save').click(); await expect(frame.locator('#sync')).toHaveText('已同步')
-  const saved = () => frame.locator('body').evaluate(async () => (await (window as any).tgdrive.storage.list({prefix:'progress:',limit:1})).records[0].value.location.offset as number)
-  const before = await saved(); expect(before).toBeGreaterThan(100)
+  // 同一阅读馆保留漫画进度；按 TXT 节点取记录，不能假设最近列表首条就是当前书。
+  const textId = await frame.locator('body').evaluate(async () => (await window.tgdrive.files.stat({ path: '/测试图书/长篇.txt' })).id)
+  const saved = () => frame.locator('body').evaluate(async (_node, id) => (await window.tgdrive.storage.get<Progress>(`progress:${id}`))?.value.location.offset ?? -1, textId)
+  await expect.poll(saved).toBeGreaterThan(100)
+  const before = await saved()
   await frame.locator('#preferences-toggle').click()
   await frame.locator('#font-size').evaluate((node) => { const range=node as HTMLInputElement; range.value='26'; range.dispatchEvent(new Event('change')); range.value='30'; range.dispatchEvent(new Event('change')) })
   await expect(frame.locator('.flow-content')).toHaveCSS('font-size','30px')
@@ -301,8 +305,10 @@ test('坏归档被拒绝，退出阅读取消服务端范围读取', async ({ pa
   await page.request.post('/__apps_fixture/media', { data: { enabled: true } })
   await frame.getByRole('button', { name: /大漫画.zip/ }).click()
   await expect.poll(async () => (await (await page.request.get('/__apps_fixture/media')).json()).active).toBeGreaterThan(0)
-  await page.getByRole('button', { name: '返回文件', exact: true }).click()
-  await expect(page.locator('iframe')).toHaveCount(0)
+  await revealReader(page)
+  await frame.locator('#back').click()
+  await expect(frame.locator('#app-ui')).toBeVisible()
+  await expect(page.locator('.host-toolbar')).toBeVisible()
   await expect.poll(async () => (await (await page.request.get('/__apps_fixture/media')).json()).active, { timeout: 5000 }).toBe(0)
 })
 
@@ -312,16 +318,27 @@ test('条漫模式连续滚动时平滑推进，跨页不跳动不闪烁', async
   await frame.getByRole('button', { name: /长册.cbz/ }).click()
   await expect(frame.locator('#reading-status')).toHaveText('')
   const viewport = frame.locator('#viewport')
-  let lastScrollTop = 0
-  for (let step = 1; step <= 5; step++) {
-    await viewport.evaluate((node, step) => { node.scrollTop = step * 600 }, step)
-    await page.waitForTimeout(60)
-    const currentScrollTop = await viewport.evaluate((node) => node.scrollTop)
+  await expect(viewport).toHaveAttribute('data-comic-mode', 'scroll')
+  await viewport.hover()
+  let lastScrollTop = await viewport.evaluate(node => node.scrollTop)
+  for (let index = 1; index <= 5; index++) {
+    // 全屏适宽会放大小图；按真实页高滚动跨页，不把固定 600px 当作一页。
+    const next = viewport.locator(`.comic-page[data-index="${index}"]`)
+    await expect.poll(() => next.locator('img').evaluate(node => (node as HTMLImageElement).naturalWidth)).toBe(120)
+    const target = await next.evaluate(node => {
+      const viewport = document.getElementById('viewport')!, rect = node.getBoundingClientRect()
+      return viewport.scrollTop + rect.top - viewport.getBoundingClientRect().top + rect.height * .4
+    })
+    await page.mouse.wheel(0, target - await viewport.evaluate(node => node.scrollTop))
+    await expect(frame.locator('#position')).toHaveText(`${index + 1} / 200`)
+    await expect.poll(async () => Math.abs(await viewport.evaluate(node => node.scrollTop) - target)).toBeLessThan(1)
+    const currentScrollTop = await viewport.evaluate(node => node.scrollTop)
     expect(currentScrollTop).toBeGreaterThan(lastScrollTop)
     lastScrollTop = currentScrollTop
+    const first = Math.max(0, index - 2), last = Math.min(200, index + 3)
+    await expect.poll(() => viewport.locator('.comic-page').evaluateAll(nodes => nodes.map(node => Number((node as HTMLElement).dataset.index))))
+      .toEqual(Array.from({ length: last - first }, (_, offset) => first + offset))
   }
-  await expect(frame.locator('.comic-page')).toHaveCount(5)
-  expect(await frame.locator('#position').textContent()).toContain('200')
 })
 
 test('正文搜索在真实沙箱中跨章节定位并高亮，关闭面板后仍可阅读', async ({ page }, info) => {

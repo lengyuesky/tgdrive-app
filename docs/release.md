@@ -11,16 +11,16 @@
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共三包）：
   - `apps/shorts-1.4.6.tgapp`
-  - `apps/reader-1.0.0.tgapp`
+  - `apps/reader-1.0.1.tgapp`
   - `apps/cinema-1.4.5.tgapp`
 
-根目录现有分发资产为 reader 1.0.0；工作区 1.0.1 正在完成全屏/侧栏验证，使用新的隔离输出目录构建，未覆盖此处基线，未授权发布。下面的包列表描述现有根目录资产，JSON 示例对应 1.0.1 源清单；当前结果见 [独立验证记录](reader-layout-validation.md)。
+根目录分发资产为 reader 1.0.1。本版包含全屏漫画、书库侧栏、宿主沙箱目录添加修复和四张真实界面截图；已完成独立门禁及本机完整集成验收，详见 [1.0.1 发布验收记录](reader-1.0.1-release.md)。已安装 reader 1.0.0 的普通升级保留来源、偏好、进度和书签；首次替换旧 books/comics 的清理行为仍须单独确认。
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
 <sha256>  apps/cinema-1.4.5.tgapp
-<sha256>  apps/reader-1.0.0.tgapp
+<sha256>  apps/reader-1.0.1.tgapp
 <sha256>  apps/shorts-1.4.6.tgapp
 <sha256>  catalog.json
 ```
@@ -85,7 +85,8 @@
           "screenshots": [
             "screenshots/home.png",
             "screenshots/mobile-library.png",
-            "screenshots/mobile-reading.png"
+            "screenshots/mobile-reading.png",
+            "screenshots/mobile-sidebar.png"
           ],
           "data_schema": 1
         }

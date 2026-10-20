@@ -61,7 +61,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -82,7 +82,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "新增统一阅读馆，共享书漫来源、历史、收藏与想读清单，按真实格式选择阅读器，支持混合全库索引与内容筛选。",
+          "changelog": "新增按内容类型、来源目录和自定义分组切换的书库侧栏，手机支持书库抽屉；漫画等比例铺满可用视口，桌面阅读菜单悬浮并联动宿主全屏。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -101,14 +101,15 @@
           "screenshots": [
             "screenshots/home.png",
             "screenshots/mobile-library.png",
-            "screenshots/mobile-reading.png"
+            "screenshots/mobile-reading.png",
+            "screenshots/mobile-sidebar.png"
           ],
           "data_schema": 1
         }
       },
-      "sha256": "00a5a8f8b7af6916bad849a2d86004d0a369ee71a555ebcc44d03260a303e4fe",
-      "size": 2444117,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.0.tgapp"
+      "sha256": "5af19fc61b5b4d4f56e10487ff7e1af33f0a133c41afd55915e0f965c859ce68",
+      "size": 2477343,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.1.tgapp"
     },
     {
       "manifest": {

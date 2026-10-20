@@ -7,10 +7,10 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 | 插件 ID | 名称 | 版本 | API 版本 | 说明 |
 |---|---|---|---|---|
 | `shorts` | 短视频 | `1.4.6` | 2 | 分页加载视频队列，支持滑动切换、进度拖动、收藏与下载 |
-| `reader` | 阅读馆 | `1.0.1`（待发布） | 2 | 混合书漫书库，按类型、来源和分组导航；漫画全屏等比例适配，最低宿主 0.3.3 |
+| `reader` | 阅读馆 | `1.0.1` | 2 | 混合书漫书库，按类型、来源和分组导航；漫画全屏等比例适配，最低宿主 0.3.3 |
 | `cinema` | 影视 | `1.4.5` | 2 | 媒体库、片头片尾设置、定时停止、字幕与客户端 MKV 流式解封装 |
 
-工作区阅读馆 1.0.1 尚未更新根目录分发资产；`apps/` 与 `catalog.json` 保留上一版 1.0.0。当前界面改动与独立验证见 [全屏与侧栏验证记录](docs/reader-layout-validation.md)，不能把旧版本的宿主集成验收当作本版已通过。
+阅读馆 1.0.1 的安装包、四张真实界面截图、`catalog.json` 与 `SHA256SUMS` 同步分发。构建、独立回归、宿主全量测试和本机集成验收见 [1.0.1 发布验收记录](docs/reader-1.0.1-release.md)；旧版 1.0.0 的验收仅作为历史记录。
 
 所有插件遵循统一沙箱规范，使用沙箱内 iframe 隔离运行，无服务器转码或外部 CDN 依赖。宿主声明 `media.bytes` 能力时，阅读器走票据直连的字节数据面（Range 读取不经宿主页面二次缓冲）；旧宿主自动降级到消息通道。
 
@@ -87,7 +87,7 @@ sha256sum -c SHA256SUMS
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.4.6.tgapp`、`reader-1.0.0.tgapp`、`cinema-1.4.5.tgapp`）
+- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.4.6.tgapp`、`reader-1.0.1.tgapp`、`cinema-1.4.5.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 
@@ -111,11 +111,13 @@ sha256sum -c SHA256SUMS
 - [代码贡献指南](docs/contributing.md)
 - [插件分发与目录协议说明](docs/release.md)
 
-本轮实际验收见[阅读馆验证记录](docs/reader-validation.md)；四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
+本版实际验收见 [阅读馆 1.0.1 发布验收记录](docs/reader-1.0.1-release.md)；1.0.0 验收见 [历史验证记录](docs/reader-validation.md)，四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
 
 ### 阅读馆与旧应用迁移
 
-阅读馆承接图书与漫画，旧应用的替换及恢复边界见 [阅读馆迁移说明](docs/reader.md)。本轮最终实际验证见 [验证记录](docs/reader-validation.md)。
+阅读馆承接图书与漫画，旧应用的替换及恢复边界见 [阅读馆迁移说明](docs/reader.md)。本版实际验证见 [1.0.1 发布验收记录](docs/reader-1.0.1-release.md)。
+
+在宿主 0.3.3 或更高版本的「应用中心」刷新目录后安装或更新阅读馆。已安装 `reader 1.0.0` 的普通升级保留来源、偏好、进度和书签；首次替换旧 `books`、`comics` 仍需单独确认清理其私有数据。可直接下载 [reader-1.0.1.tgapp](https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.1.tgapp) 导入，宿主已满足最低版本时无需重建镜像或重启。
 
 阅读馆主页侧栏可按图书、漫画、TXT、EPUB、PDF、图片目录、真实来源目录与自定义分组切换书库。手机点击左上角菜单打开同一侧栏抽屉，点击分类后自动关闭。分类切换会清空旧搜索、阅读状态和分页，书库内仍可叠加筛选。
 

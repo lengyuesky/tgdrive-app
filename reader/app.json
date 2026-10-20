@@ -22,7 +22,7 @@
     ],
     "homepage": "https://github.com/lengyuesky/tgdrive-app",
     "support": "https://github.com/lengyuesky/tgdrive-app/issues",
-    "screenshots": ["screenshots/home.png", "screenshots/mobile-library.png", "screenshots/mobile-reading.png"],
+    "screenshots": ["screenshots/home.png", "screenshots/mobile-library.png", "screenshots/mobile-reading.png", "screenshots/mobile-sidebar.png"],
     "data_schema": 1
   }
 }

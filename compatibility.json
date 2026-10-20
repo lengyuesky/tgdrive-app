@@ -18,8 +18,8 @@
     "host_tree": "f4f519b3e090e5c50b56a0feffc8465c72aba657",
     "worktree_dirty": false,
     "validation_status": "passed_commit",
-    "validation_date": "2026-10-20",
-    "validation_report": "docs/reader-validation.md",
-    "validation_note": "host_ref 是宿主 0.3.3 实际提交，其 Git tree 与已通过本轮全量测试及本机集成验收的工作区一致；提交未改变源码。实际命令、结果及限制见验证记录。"
+    "validation_date": "2026-10-21",
+    "validation_report": "docs/reader-1.0.1-release.md",
+    "validation_note": "host_ref 是本版阅读馆 1.0.1 实际通过本机集成验收的宿主 0.3.3 完整提交，工作区干净且 Git tree 匹配。最终分发包通过全部 61 项 E2E，包含真实 1.0.0 升级保留数据与四张界面截图验收；命令、初轮失败修正及剩余限制见验证记录。"
   }
 }
