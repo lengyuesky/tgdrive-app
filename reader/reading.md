@@ -10,8 +10,8 @@
 
 | 方法或类型 | 契约 |
 | --- | --- |
-| `load(signal?)` → `PreferencesSnapshot` | 读取 `preferences`；返回 `value/revision/migrated`。旧无版本 flat 或明确 V1 只在内存映射，不自动写回。 |
-| `PreferencesV2` | `{ schemaVersion: 2, text, comic, pdf }`。不能直接传给阅读视图。 |
+| `load(signal?)` → `PreferencesSnapshot` | 读取 `preferences`；返回 `value/revision/migrated`。旧无版本 flat 或明确 V1 只在内存映射。阅读馆 1.0.2 对无标记的旧 V2 默认组合执行下述一次迁移。 |
+| `PreferencesV2` | `{ schemaVersion: 2, text, comic, pdf, comicWidthDefault?: 1 }`。迁移标记仅属于持久记录，不能直接传给阅读视图。 |
 | `saveFormat(base, format, patch, signal?)` | 用表单打开时的 `base.revision` CAS，合并该格式的局部字段；其他格式保留。返回新快照。 |
 | `loadWork(workId, signal?)` → `WorkPreferencesSnapshot` | 读取 `preferences:work:<主WorkId>`；返回 `workId/value/revision`。不存在时使用空覆盖。 |
 | `saveWork(base, format, patch, signal?)` | 逐记录 CAS，保存稀疏作品覆盖，不复制无关默认字段。 |
@@ -19,6 +19,9 @@
 | `resolvePreferences(global.value, format, work?.value)` | 合成并校验当前格式的平面 `Preferences`。作品局部覆盖优先，未覆盖字段跟随最新格式默认。 |
 | `preferenceFormat(locationFormat)` | `txt/epub → text`，`comic → comic`，`pdf → pdf`。索引的 `cbz/zip/images` 应先归为 `comic`，不是直接传入此方法。 |
 | `defaultPreferences()` | 返回独立的 V2 默认对象；不能在存储读取失败后把它当成可写基线。 |
+| `readerDefaultPreferences()` | 阅读馆首装默认：文字分页、漫画单页适宽、PDF 适页，包含 `comicWidthDefault: 1`。 |
+
+阅读馆使用 `PreferenceStore(drive, readerDefaultPreferences)`。读取无标记的旧 V2 “单页＋整页＋100%”组合时，只将漫画 `fit` 改为 `width` 并以原修订号保存标记；冲突或保存未确认直接报告，不自动重试覆盖。已带标记的整页设置、滚动/双页模式、自定义缩放、文字/PDF 设置及作品覆盖不被重置；旧 flat/V1 仍只内存映射。
 
 `WorkPreferencesV2` 的结构为 `{ schemaVersion: 2, overrides: { text?: Partial<TextPreferences>, comic?: Partial<ComicPreferences>, pdf?: Partial<PdfPreferences> } }`。进入旧作品路由时先使用数据层 `resolveWork()` 得到主 Work，再读取覆盖；偏好不做别名 OR 合并。拆分首组保留主 ID 及覆盖，新 ID 使用默认，各卷进度和书签不变。
 
@@ -52,7 +55,7 @@
 | 应用范围 / 恢复默认 | 格式默认用 `saveFormat`；仅本作用 `saveWork`；取消覆盖用 `clearWork` | 切换范围不会删除进度或书签。 |
 | TXT 编码 | `TextReader.setEncoding(utf-8/utf-16le/utf-16be/gb18030)` | 编码随 `Location.encoding` 保存，不是跨作品偏好字段。 |
 
-旧 flat/V1 的主题映射到三个格式；字号、行距、宽度保留给 text；方向保留给 comic；zoom 保留给 comic/pdf；旧 `page` 对应文字 `page`、漫画 `single`。未指定 fit 的旧 PDF 始终按适宽，旧漫画 page 按适页。没有旧设置时仍默认 scroll，不探测设备指纹。
+旧 flat/V1 的主题映射到三个格式；字号、行距、宽度保留给 text；方向保留给 comic；zoom 保留给 comic/pdf；旧 `page` 对应文字 `page`、漫画 `single`。未指定 fit 的旧 PDF 始终按适宽，旧漫画 page 按适页。底层解析器默认仍为 scroll；统一阅读馆使用上方显式首装默认，不探测设备指纹。
 
 ## 导航与独立详情目录
 
@@ -117,6 +120,6 @@ scroll 保留五页挂载窗口、四十一页局部轨道，以及惯性滚动�
 
 `ReaderChrome` 的 `enter/opened/leave`、`togglePanel/closePanel`、焦点圈定、Escape 及宿主 capability 降级继续沿用。手机中央轻点唤出菜单；不要在正文上覆盖新的点击层。设置 `ReadingGestures.paged()` 时排除 scroll、面板及需要原生横向平移的状态；已有选区、长按、多指、链接、纵向滚动或实际发生的横向平移不能顺带翻页。
 
-当前阶段没有接入 `reader/app.ts` 的新版控件/偏好路径；该外壳仍是旧读写方式。UI 集成必须一起替换旧 flat 存储路径并引入增量样式，不能一边写 V2 一边继续旧 `savePreference()`。
+`reader/app.ts` 已接入分格式 V2 与作品级偏好路径，并引入增量阅读样式。不得恢复旧 flat `savePreference()` 写法，或将 V2 记录直接交给平面 `preferences()`/`view.configure()`。漫画适宽下允许纵向原生滚动，只有整页且未放大时才限制单/双页滚动。
 
 浏览器几何、真机、宿主兼容及正式包许可/构建是独立门禁。中间构建遵循最新实施契约，在新建且复制公开基线的隔离草稿目录正常校验；根 catalog/apps/SHA256SUMS 留到全流程审查后由父侧生成，不绕过同版本校验。

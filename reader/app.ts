@@ -44,6 +44,7 @@ import { LibraryView } from './ui/library-view'
 import { DetailView } from './ui/detail-view'
 import { MeView } from './ui/me-view'
 import { showConfirmModal } from './ui/modals'
+import { showShelfModal } from './ui/shelves'
 import './style.css'
 import './reading.css'
 
@@ -329,6 +330,7 @@ export async function startApp(options: AppOptions) {
   }
 
   const context = await drive.ready
+  const manualShelves = options.id === 'reader'
   let taskAt = 0, scanCancelled = false
   get('host-show-file').hidden = !drive.can?.('ui.showFile')
   get('host-file-details').hidden = !drive.can?.('ui.fileDetails')
@@ -355,7 +357,8 @@ export async function startApp(options: AppOptions) {
       },
       changed: snapshot => { navManager?.refreshLibraries(snapshot) },
     },
-    options.openPdf
+    options.openPdf,
+    manualShelves
   )
   const unbindLibrary = bindLibraryLifecycle(library)
   const offTaskCancel = drive.on('task.cancel', value => { if (value?.id === 'library-scan') { scanCancelled = true; library.cancelScan(); void drive.ui.task?.({ id: 'library-scan', title: '整理内容库', completed: library.snapshot.progress?.nodes ?? 0, state: 'cancelled' }).catch(() => {}) } })
@@ -391,6 +394,10 @@ export async function startApp(options: AppOptions) {
 
     navManager?.setActive(view)
 
+    if (view === 'home' && manualShelves) {
+      libraryView?.setState({ sourceId: undefined, kind: undefined, format: undefined, groupId: undefined, offset: 0, scrollTop: 0 })
+      await library.selectSource(undefined, appLifecycle.signal, false)
+    }
     if (view === 'home') {
       await homeView?.render()
     } else if (view === 'library') {
@@ -427,7 +434,7 @@ export async function startApp(options: AppOptions) {
     if (kind === 'groups') pendingGroups = true
     if (kind === 'sources') pendingSources = true
     if (kind === 'works') pendingWorks = true
-    if (kind === 'files' || kind === 'sources') { if (!paths) pendingFull = true; else paths.forEach(path => pendingPaths.add(path)) }
+    if (kind === 'files' || kind === 'sources' && !manualShelves) { if (!paths) pendingFull = true; else paths.forEach(path => pendingPaths.add(path)) }
     clearTimeout(hostEventTimer)
     hostEventTimer = setTimeout(() => {
       hostEventTimer = undefined
@@ -439,8 +446,9 @@ export async function startApp(options: AppOptions) {
         if (groups && !sources && !works && !full && !paths.length && !state && await library.bookGroups.isCurrent(appLifecycle.signal)) return
         if (sources) await library.initialize()
         else if (works) await library.reloadWorks()
-        if (full || paths.length) await library.refresh(undefined, full ? undefined : paths)
-        else await library.loadReadingState()
+        if (full || paths.length) {
+          if (!manualShelves || library.snapshot.indexedSourceId !== undefined) await library.refresh(undefined, full ? undefined : paths)
+        } else await library.loadReadingState()
         if (groups) await library.bookGroups.load(appLifecycle.signal)
         await rerenderCurrentView()
         navManager?.refreshLibraries()
@@ -453,13 +461,16 @@ export async function startApp(options: AppOptions) {
     if (visible) library.invalidateReadingState(key)
     if (key === 'library:book-groups') { scheduleLibraryRefresh('groups'); return }
     if (drive.storage.wroteRecently?.(key)) return
-    if (key === 'library:sources') scheduleLibraryRefresh('sources')
+    if (key === library.sources.key) scheduleLibraryRefresh('sources')
     else if (key === 'library:works') scheduleLibraryRefresh('works')
     else if (visible) scheduleLibraryRefresh('state')
   })
   const offFileEvents = drive.on('files.changed', (value) => {
     const paths = (value as { paths?: unknown } | undefined)?.paths
-    if (!filesChangeAffectsSources(library.access.sources, paths)) return
+    const activeSources = manualShelves
+      ? library.access.sources.filter(source => source.nodeId === library.snapshot.indexedSourceId)
+      : library.access.sources
+    if (!activeSources.length || !filesChangeAffectsSources(activeSources, paths)) return
     scheduleLibraryRefresh('files', Array.isArray(paths) && paths.every(path => typeof path === 'string') ? paths : undefined)
   })
   const offSyncEvents = drive.on('sync.hint', async value => {
@@ -1441,6 +1452,11 @@ export async function startApp(options: AppOptions) {
     library,
     kind: options.kind,
     signal: appLifecycle.signal,
+    createShelf: async () => {
+      const nodeId = await showShelfModal(uiContext)
+      if (nodeId !== null) await switchView('library', { sourceId: nodeId })
+    },
+    editShelf: async nodeId => { await showShelfModal(uiContext, nodeId) },
     openReader,
     openDetail,
     switchView,
@@ -1489,7 +1505,18 @@ export async function startApp(options: AppOptions) {
       if (launchFile) {
         const file = await drive.files.stat({ id: launchFile.id, content_version: launchFile.content_version }, { signal: appLifecycle.signal })
         const sourcePath = file.is_dir ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) || '/'
-        if (!snapshot.sources.config.sources.some(source => source.path === '/' || file.path === source.path || file.path.startsWith(source.path + '/'))) {
+        if (manualShelves) {
+          const source = snapshot.sources.config.sources.filter(source => file.path === source.path || file.path.startsWith(source.path === '/' ? '/' : source.path + '/'))
+            .sort((a, b) => b.path.length - a.path.length)[0]
+          if (!source) {
+            await switchView('home')
+            report(new Error('请先手动创建书库并绑定此文件所在目录；不会自动创建或扫描书库。'))
+            await drive.lifecycle?.report('ready')
+            show('startup-error', false); get('app-ui').inert = false
+            return
+          }
+          await switchView('library', { sourceId: source.nodeId })
+        } else if (!snapshot.sources.config.sources.some(source => source.path === '/' || file.path === source.path || file.path.startsWith(source.path + '/'))) {
           const added = await library.addSource(sourcePath, { confirmedRoot: sourcePath === '/', signal: appLifecycle.signal })
           void added.scan.catch(report)
         }
@@ -1499,7 +1526,7 @@ export async function startApp(options: AppOptions) {
         get('app-ui').inert = false
         return
       }
-      if (!snapshot.sources.config.sources.length && context.scope?.mode === 'selected') {
+      if (!manualShelves && !snapshot.sources.config.sources.length && context.scope?.mode === 'selected') {
         for (const path of context.scope.paths.slice(0, 16)) {
           const added = await library.addSource(path, { confirmedRoot: path === '/', signal: appLifecycle.signal })
           await added.scan
@@ -1510,7 +1537,10 @@ export async function startApp(options: AppOptions) {
       void library.purgeLegacyCovers(appLifecycle.signal).catch(() => {})
 
       // 未配置来源时进入“我的”，只使用当前来源管理
-      if (snapshot.sources.config.sources.length === 0) {
+      if (manualShelves) {
+        // 授权范围不是书库。打开应用只展示用户创建的书库，不扫全盘或自动采用旧来源。
+        await switchView('home')
+      } else if (snapshot.sources.config.sources.length === 0) {
         await switchView('me')
       } else {
         // 如果已有来源，缓存优先展示；如果缓存为空，自动触发轻扫描发现新增

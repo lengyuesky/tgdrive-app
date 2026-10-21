@@ -1,6 +1,8 @@
 /** 书库视图：两列封面、搜索筛选排序、作品/文件切换、部分范围提示、SDK文件分页兜底与滚动恢复。 */
 import { fillGroupSelect, showBookGroups } from './book-groups'
 import { HostLibraryView } from './host-library'
+import { renderShelves } from './shelves'
+import { sourceLabel } from '../library/sources'
 import type { UiContext, LibraryFilterState, LibrarySelection } from './types'
 import type { FileEntry } from '../../sdk/types'
 import {
@@ -91,8 +93,14 @@ export class LibraryView {
     this.destroy()
     this.lifecycle = new AbortController()
     const signal = this.lifecycle.signal
+    if (this.context.library.manualShelves && this.state.sourceId === undefined) {
+      await this.context.library.selectSource(undefined, signal, false)
+      if (signal.aborted) return
+      renderShelves(this.container, this.context, 'library')
+      return
+    }
     if (this.hostMode && this.context.drive.can?.('library.page') && this.context.drive.library) {
-      this.hostView = new HostLibraryView(this.container, this.context, () => { this.hostMode = false; void this.render() })
+      this.hostView = new HostLibraryView(this.container, this.context, () => { this.hostMode = false; void this.render() }, this.context.library.manualShelves ? this.state.sourceId : undefined)
       await this.hostView.render()
       return
     }
@@ -106,7 +114,10 @@ export class LibraryView {
 
     const hasGroups = this.context.kind !== 'comics'
     let snapshot = this.context.library.snapshot
-    if (this.state.sourceId !== undefined && !snapshot.sources.config.sources.some(source => source.nodeId === this.state.sourceId)) this.state.sourceId = snapshot.indexedSourceId
+    if (this.state.sourceId !== undefined && !snapshot.sources.config.sources.some(source => source.nodeId === this.state.sourceId)) {
+      this.state.sourceId = undefined
+      if (this.context.library.manualShelves) { await this.render(); return }
+    }
     if (this.state.sourceId !== snapshot.indexedSourceId) {
       this.container.innerHTML = '<p class="library-status-msg" role="status">正在切换来源书库…</p>'
       try { await this.context.library.selectSource(this.state.sourceId, signal) }
@@ -133,7 +144,7 @@ export class LibraryView {
             />
             <button id="btn-library-refresh" class="btn-refresh" title="刷新书库">刷新</button>
             <div class="view-toggle">
-              ${this.context.drive.can?.('library.page') && this.context.drive.library ? '<button id="btn-view-host" class="toggle-btn" type="button">全库</button>' : ''}
+              ${this.context.drive.can?.('library.page') && this.context.drive.library ? `<button id="btn-view-host" class="toggle-btn" type="button">${this.context.library.manualShelves ? '目录全部文件' : '全库'}</button>` : ''}
               <button id="btn-view-works" class="toggle-btn ${this.state.view === 'works' ? 'active' : ''}" type="button">作品</button>
               <button id="btn-view-files" class="toggle-btn ${this.state.view === 'files' ? 'active' : ''}" type="button">文件</button>
             </div>
@@ -198,6 +209,17 @@ export class LibraryView {
       this.renderGroupControls()
     }
     this.bindEvents()
+    if (this.context.library.manualShelves) {
+      const source = snapshot.sources.config.sources.find(item => item.nodeId === this.state.sourceId)!
+      const header = document.createElement('div'), title = document.createElement('h2'), back = document.createElement('button')
+      header.className = 'shelves-header'; title.textContent = sourceLabel(source)
+      back.type = 'button'; back.className = 'btn-link'; back.textContent = '返回书库列表'
+      back.onclick = () => { void this.selectLibrary({}) }
+      const path = document.createElement('p'); path.className = 'card-subtitle'; path.textContent = source.path
+      header.append(title, back); this.container.querySelector('.library-view-container')!.prepend(header, path)
+      const sourceFilter = this.container.querySelector<HTMLSelectElement>('#filter-source')!
+      sourceFilter.hidden = true
+    }
     const hostButton = this.container.querySelector<HTMLButtonElement>('#btn-view-host')
     if (hostButton) hostButton.onclick = () => { this.hostMode = true; void this.render() }
     this.container.querySelector<HTMLButtonElement>('#btn-library-retry')!.onclick = () => { void this.loadItems() }
@@ -396,7 +418,7 @@ export class LibraryView {
       sources.forEach((s) => {
         const opt = document.createElement('option')
         opt.value = String(s.nodeId)
-        opt.textContent = s.path || ('来源 ' + s.nodeId)
+        opt.textContent = this.context.library.manualShelves ? sourceLabel(s) : s.path || ('来源 ' + s.nodeId)
         sourceSelect.append(opt)
       })
       sourceSelect.value =
@@ -571,7 +593,7 @@ export class LibraryView {
       const currentPage = Math.floor(this.state.offset / this.pageSize) + 1
 
       // 2. 如果处于文件视图且索引不完整（或已索引条目已展示完毕/无匹配），使用 SDK 游标分页兜底
-      if (isFilesView && (!isComplete || this.state.offset >= result.total)) {
+      if (!this.context.library.manualShelves && isFilesView && (!isComplete || this.state.offset >= result.total)) {
         const sources = snapshot.sources.config.sources
         const targetSourceId = this.state.sourceId ?? sources[0]?.nodeId
         if (targetSourceId !== undefined) {
@@ -656,6 +678,10 @@ export class LibraryView {
       // 部分范围提示：如果书库索引未完成或存在限制
       if (scopeNotice) {
         scopeNotice.hidden = isComplete
+        if (this.context.library.manualShelves && !isComplete) {
+          this.container.querySelector('#scope-notice-text')!.textContent = '书库尚未扫描完成，仅显示已保存的索引；可点击刷新继续扫描这个目录。'
+          this.container.querySelector<HTMLElement>('#btn-switch-file-view')!.hidden = true
+        }
       }
 
       if (!displayItems.length) {

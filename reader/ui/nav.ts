@@ -1,5 +1,5 @@
 /** 书库导航：桌面常驻侧栏，手机复用可关闭、圈定焦点的书库抽屉。 */
-import { contentKind, scopeFormats, type LibrarySnapshot } from '../library'
+import { contentKind, sourceLabel, scopeFormats, type LibrarySnapshot } from '../library'
 import type { LibrarySelection, UiContext, UiView } from './types'
 
 interface LibraryShortcut {
@@ -27,6 +27,11 @@ export class NavManager {
     private context: UiContext
   ) {
     this.render()
+    if (this.context.library.manualShelves) {
+      const create = document.createElement('button')
+      create.id = 'btn-sidebar-create-shelf'; create.type = 'button'; create.className = 'sidebar-action-btn'; create.textContent = '创建书库'
+      this.container.querySelector('.sidebar-actions')!.prepend(create)
+    }
     this.refreshLibraries()
     const click = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null
@@ -42,6 +47,9 @@ export class NavManager {
         this.run(() => target.dataset.view === 'library' && this.context.openLibrary
           ? this.context.openLibrary({})
           : this.context.switchView(target.dataset.view as UiView))
+      } else if (target.id === 'btn-sidebar-create-shelf') {
+        this.closeDrawer()
+        this.run(() => this.context.createShelf?.())
       } else if (target.id === 'btn-mobile-libraries') {
         this.openDrawer()
       } else if (target.id === 'btn-sidebar-dismiss' || target.id === 'sidebar-backdrop') {
@@ -138,7 +146,7 @@ export class NavManager {
     ]
     const sources: LibraryShortcut[] = snapshot.sources.config.sources.map(source => ({
       id: `source:${source.nodeId}`,
-      label: source.path === '/' ? '网盘根目录' : source.path.split('/').pop() || source.path,
+      label: sourceLabel(source),
       icon: '▱',
       title: source.path,
       selection: { sourceId: source.nodeId },
@@ -147,11 +155,13 @@ export class NavManager {
     const groups: LibraryShortcut[] = this.context.kind === 'comics' ? [] : store.groups.map(group => ({
       id: `group:${group.id}`, label: group.name, icon: '◇', selection: { groupId: group.id }, disabled: !store.ready,
     }))
-    const sections = [
-      { title: '内容类型', entries: types },
-      { title: '来源书库', entries: sources },
-      ...(this.context.kind === 'comics' ? [] : [{ title: '自定义分组', entries: groups }]),
-    ]
+    const sections = this.context.library.manualShelves
+      ? [{ title: '我的书库', entries: sources }]
+      : [
+          { title: '内容类型', entries: types },
+          { title: '来源书库', entries: sources },
+          ...(this.context.kind === 'comics' ? [] : [{ title: '自定义分组', entries: groups }]),
+        ]
     const signature = JSON.stringify(sections)
     if (signature === this.signature) { this.updateActive(); return }
     this.signature = signature
@@ -179,7 +189,7 @@ export class NavManager {
       if (!section.entries.length) {
         const hint = document.createElement('p')
         hint.className = 'sidebar-empty'
-        hint.textContent = section.title === '来源书库' ? '在“我的”添加目录' : '在书库中管理分组'
+        hint.textContent = this.context.library.manualShelves ? '点击“创建书库”绑定目录' : section.title === '来源书库' ? '在“我的”添加目录' : '在书库中管理分组'
         nav.append(hint)
       }
       libraries.append(nav)
@@ -201,7 +211,8 @@ export class NavManager {
 
   private updateActive() {
     const selected = this.selection
-    const id = selected.groupId !== undefined ? `group:${selected.groupId}`
+    const id = this.context.library.manualShelves && selected.sourceId !== undefined ? `source:${selected.sourceId}`
+      : selected.groupId !== undefined ? `group:${selected.groupId}`
       : selected.sourceId !== undefined ? `source:${selected.sourceId}`
       : selected.format ? `format:${selected.format}` : selected.kind ? `kind:${selected.kind}` : undefined
     for (const button of this.container.querySelectorAll<HTMLButtonElement>('.nav-item, .bottom-tab')) {

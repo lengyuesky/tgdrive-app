@@ -12,6 +12,11 @@ export function unit(entry: FileEntry, sources = [1], firstIndexedAt = 10): Read
 export function sources(...directories: FileEntry[]): SourcesSnapshot {
   return { revision: 'sources-1', config: { schemaVersion: 1, sources: directories.map(dir => ({ nodeId: dir.id, path: dir.path, contentVersion: dir.content_version, addedAt: 1, rootConfirmed: dir.path === '/' })) } }
 }
+export function shelves(...directories: FileEntry[]): SourcesSnapshot {
+  const snapshot = sources(...directories)
+  snapshot.config.sources.forEach(source => { source.name = source.path === '/' ? '我的网盘' : source.path.split('/').pop()! })
+  return snapshot
+}
 export function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void, reject!: (reason: unknown) => void
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })

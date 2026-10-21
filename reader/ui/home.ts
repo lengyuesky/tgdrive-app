@@ -1,5 +1,6 @@
 /** 首页视图：续读卡直接进阅读器，最近加入与想读封面进详情。 */
 import type { UiContext } from './types'
+import { renderShelves } from './shelves'
 import {
   ViewportCoverLoader,
   type CatalogItem,
@@ -20,6 +21,10 @@ export class HomeView {
   async render() {
     this.destroy()
     this.lifecycle = new AbortController()
+    if (this.context.library.manualShelves) {
+      renderShelves(this.container, this.context, 'home')
+      return
+    }
     const signal = this.lifecycle.signal
     this.coverLoader =
       typeof IntersectionObserver !== 'undefined'

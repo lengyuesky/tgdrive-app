@@ -1,16 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
-import { seedReaderSource, revealReader, closeReaderPanel } from './reader-helpers'
+import { seedReaderSource, enterReaderShelf, revealReader, closeReaderPanel } from './reader-helpers'
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 const frame = (page: Page) => page.frameLocator('iframe')
 async function install(page: Page) {
   expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto('/apps/reader')
-  // 阅读馆重构后应用先落在首页；先进入「书库」视图再等待完整列表。
-  await expect(frame(page).locator('#btn-home-view-all')).toBeVisible()
-  await frame(page).locator('#btn-home-view-all').click()
-  await expect(frame(page).locator('#items button').first()).toBeVisible()
+  await enterReaderShelf(page)
 }
 async function open(page: Page, name: string) {
   await frame(page).getByRole('button', { name: new RegExp(name.replaceAll('.', '\\.')) }).click()
@@ -414,9 +411,7 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   await seedReaderSource(page, 'reader', '/测试漫画')
   expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto('/apps/reader')
-  await expect(frame(page).locator('#btn-home-view-all')).toBeVisible()
-  await frame(page).locator('#btn-home-view-all').click()
-  await expect(frame(page).locator('#items button').first()).toBeVisible()
+  await enterReaderShelf(page)
   await frame(page).getByRole('button', { name: /自然页序.cbz/ }).click()
   await expect(frame(page).locator('#reading-status')).toHaveText('')
   await expect(page.locator('.host-toolbar')).not.toBeVisible()
@@ -426,6 +421,10 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   const viewport = frame(page).locator('#viewport')
   expect(await viewport.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('0px')
   expect(await viewport.evaluate((el) => getComputedStyle(el).paddingRight)).toBe('0px')
+  await expect(frame(page).locator('#fit')).toHaveValue('width')
+  await expect(viewport).toHaveCSS('overflow', 'auto')
+  const image = viewport.locator('img').first()
+  await expect.poll(async () => (await image.boundingBox())!.width).toBe((await viewport.boundingBox())!.width)
   await tapContent(page)
   await expect(frame(page).locator('.reader-toolbar')).toBeVisible()
   await expect(frame(page).locator('.reader-footer')).toBeVisible()
@@ -437,7 +436,7 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   await tapContent(page)
   await expect(frame(page).locator('.reader-footer')).not.toBeVisible()
   await expect(frame(page).locator('.comic-page figcaption')).not.toBeVisible()
-  expect(await viewport.evaluate((el) => getComputedStyle(el).overflow)).toBe('hidden')
+  await expect(viewport).toHaveCSS('overflow', 'auto')
   await tapContent(page, .9)
   await expect(frame(page).locator('#position')).toHaveText('2 / 3')
   await swipe(page, .8, .2)
@@ -451,6 +450,12 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   await expect(frame(page).locator('#position')).toHaveText('2 / 3')
   await tapContent(page, .1)
   await expect(frame(page).locator('#position')).toHaveText('3 / 3')
+  await tapContent(page)
+  await frame(page).locator('#preferences-toggle').click()
+  await frame(page).locator('#fit').selectOption('page')
+  await closeReaderPanel(page)
+  await tapContent(page)
+  await expect(viewport).toHaveCSS('overflow', 'hidden')
   await tapContent(page)
   await frame(page).locator('#back').click()
   await expect(page.locator('.host-toolbar')).toBeVisible()

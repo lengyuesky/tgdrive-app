@@ -4,6 +4,7 @@ import {
   type CatalogItem,
   type HistoryEntry,
   type SourceRoots,
+  sourceLabel,
 } from '../library'
 import { showConfirmModal } from './modals'
 
@@ -55,6 +56,7 @@ export class MeView {
       </div>
     `
 
+    if (this.context.library.manualShelves) this.container.querySelector('#me-tab-sources')!.textContent = '书库管理'
     this.bindSubTabEvents()
     await this.renderCurrentSubTab()
   }
@@ -103,6 +105,7 @@ export class MeView {
     if (!subview) return
 
     const snapshot = this.context.library.snapshot
+    if (this.context.library.manualShelves) { this.renderShelfManagement(subview); return }
     let roots: SourceRoots = { roots: [], unavailable: [] }
     try {
       roots = await this.context.library.access.roots(this.lifecycle.signal)
@@ -303,6 +306,40 @@ export class MeView {
           if (selected && pathInput && !this.lifecycle.signal.aborted) { pathInput.value = selected; await addSource() }
         } catch (error) { if (!this.lifecycle.signal.aborted) this.context.reportError(error) }
       }
+    }
+  }
+
+  /** 手动书库只显示用户创建的目录；每个条目的刷新仅针对该书库。 */
+  private renderShelfManagement(container: HTMLElement) {
+    container.replaceChildren()
+    const header = document.createElement('div'), title = document.createElement('h3'), create = document.createElement('button')
+    header.className = 'shelves-header'; title.textContent = '书库管理'
+    create.id = 'btn-me-create-shelf'; create.type = 'button'; create.className = 'btn-primary'; create.textContent = '创建书库'
+    create.onclick = () => { void this.context.createShelf?.().catch(this.context.reportError) }
+    header.append(title, create)
+    const hint = document.createElement('p'); hint.className = 'card-subtitle'; hint.textContent = '每个书库绑定一个目录，创建后扫描并保存到应用数据。旧来源不会自动采用，删除书库不删除文件、阅读进度或书签。'
+    container.append(header, hint)
+    const sources = this.context.library.snapshot.sources.config.sources
+    if (!sources.length) { const empty = document.createElement('p'); empty.className = 'empty-state'; empty.textContent = '还没有书库，请自行创建。'; container.append(empty) }
+    for (const source of sources) {
+      const row = document.createElement('div'), info = document.createElement('div'), name = document.createElement('strong'), path = document.createElement('span'), actions = document.createElement('div')
+      row.className = 'source-list-item'; row.dataset.sourceId = String(source.nodeId); info.className = 'source-item-info'; name.textContent = sourceLabel(source); path.textContent = source.path; path.className = 'source-item-path'; actions.className = 'shelf-actions'
+      info.append(name, path)
+      const button = (label: string, action: () => Promise<unknown>) => {
+        const item = document.createElement('button'); item.type = 'button'; item.className = 'btn-sm'; item.textContent = label
+        item.onclick = () => { item.disabled = true; void action().catch(this.context.reportError).finally(() => { if (!this.lifecycle.signal.aborted) item.disabled = false }) }
+        actions.append(item)
+      }
+      button('打开书库', async () => { await this.context.openLibrary?.({ sourceId: source.nodeId }) })
+      button('修改名称', async () => { await this.context.editShelf?.(source.nodeId); if (!this.lifecycle.signal.aborted) this.renderShelfManagement(container) })
+      button('重新扫描', async () => { await this.context.library.selectSource(source.nodeId, this.lifecycle.signal, false); await this.context.library.refresh(this.lifecycle.signal); if (!this.lifecycle.signal.aborted) this.renderShelfManagement(container) })
+      button('删除书库', async () => {
+        const base = this.context.library.snapshot.sources
+        if (!await showConfirmModal({ title: '删除书库', message: `删除“${sourceLabel(source)}”的目录绑定吗？网盘文件、阅读进度和书签不会被删除。`, confirmText: '确认删除书库', danger: true, signal: this.lifecycle.signal })) return
+        await this.context.library.removeSource(source.nodeId, base, this.lifecycle.signal)
+        if (!this.lifecycle.signal.aborted) this.renderShelfManagement(container)
+      })
+      row.append(info, actions); container.append(row)
     }
   }
 

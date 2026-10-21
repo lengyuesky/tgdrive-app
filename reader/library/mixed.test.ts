@@ -111,11 +111,11 @@ describe('统一阅读馆数据链', () => {
     } finally { library.destroy() }
   })
 
-  it('新阅读馆空偏好默认分页与整页，已存 V1 保留滚动、RTL 与适宽，不自动重写', async () => {
+  it('新阅读馆空偏好默认文字分页与漫画适宽，已存 V1 保留滚动、RTL 与适宽，不自动重写', async () => {
     const mock = memoryDrive(), store = new PreferenceStore(mock.drive, readerDefaultPreferences)
     const initial = await store.load()
     expect(resolvePreferences(initial.value, 'text').mode).toBe('page')
-    expect(resolvePreferences(initial.value, 'comic')).toMatchObject({ mode: 'single', fit: 'page' })
+    expect(resolvePreferences(initial.value, 'comic')).toMatchObject({ mode: 'single', fit: 'width' })
     expect(resolvePreferences(initial.value, 'pdf').fit).toBe('page')
     const old = mock.seed('preferences', { mode: 'scroll', direction: 'rtl', fit: 'width', theme: 'dark' })
     const loaded = await store.load()

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { seedReaderSource } from './reader-helpers'
+import { seedReaderSource, enterReaderShelf } from './reader-helpers'
 
 for (const width of [390, 1280]) test(`宿主全库子目录分页、重开恢复、文件变更拒绝旧游标（${width}）`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
@@ -13,23 +13,23 @@ for (const width of [390, 1280]) test(`宿主全库子目录分页、重开恢�
   expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'selected', paths: ['/全库分页'] } })).ok()).toBe(true)
   await page.goto('/apps/reader')
   const frame = page.frameLocator('iframe')
-  await frame.locator('#btn-home-view-all').click()
+  await enterReaderShelf(page)
   await frame.locator('#btn-view-host').click()
   await expect(frame.locator('#host-items .library-card')).toHaveCount(40)
   await expect(frame.locator('#host-items')).toContainText('书000.txt')
   await frame.locator('#host-next').click()
   await expect(frame.locator('#host-items')).toContainText('书040.txt')
   await expect(frame.locator('#host-page')).toHaveText('第 2 页')
-  await expect.poll(() => frame.locator('body').evaluate(async () => (await window.tgdrive.storage.get<any>('library:host-position:v1'))?.value.page)).toBe(2)
+  await expect.poll(() => frame.locator('body').evaluate(async () => (await window.tgdrive.storage.get<any>('library:host-position:v1:source:' + (await window.tgdrive.files.stat({ path: '/全库分页' })).id))?.value.page)).toBe(2)
   await page.reload()
-  await frame.locator('#btn-home-view-all').click()
+  await enterReaderShelf(page)
   await frame.locator('#btn-view-host').click()
   await expect(frame.locator('#host-page')).toHaveText('第 2 页')
   await expect(frame.locator('#host-items')).toContainText('书040.txt')
   await frame.locator('#host-next').click()
   await expect(frame.locator('#host-items .library-card')).toHaveCount(5)
   await expect(frame.locator('#host-next')).toBeDisabled()
-  const query = await frame.locator('body').evaluate(async () => (await window.tgdrive.storage.get<any>('library:host-position:v1'))?.value.query)
+  const query = await frame.locator('body').evaluate(async () => (await window.tgdrive.storage.get<any>('library:host-position:v1:source:' + (await window.tgdrive.files.stat({ path: '/全库分页' })).id))?.value.query)
   expect((await page.request.post('/api/fs/mkdir', { data: { path: `/全库分页/修订${width}` } })).ok()).toBe(true)
   const error = await frame.locator('body').evaluate(async (_node, query) => {
     try { await window.tgdrive.library!.page(query); return null } catch (error) { return (error as any).code }

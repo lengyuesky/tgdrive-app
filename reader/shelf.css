@@ -36,6 +36,21 @@ body[data-theme="sepia"] #app[data-app="reader"] { --accent: #456d35; --soft: #e
 #app.reader-desktop .preferences { inset-inline: auto 0; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 20px; }
 #app.reader-desktop .preferences label { justify-content: space-between; }
 
+/* 手动书库列表只展示用户创建的名称与目录，未选择书库时不展示图书网格。 */
+#app[data-app="reader"] .shelves-view-container { padding:24px; }
+.shelves-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.shelves-header h2, .shelves-header h3 { margin:0; overflow-wrap:anywhere; }
+.shelves-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr)); gap:16px; margin-top:24px; }
+.shelf-card { min-height:116px; display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:20px; text-align:left; border:1px solid var(--line); background:var(--surface); border-radius:12px; }
+.shelf-card strong { font-size:18px; overflow-wrap:anywhere; }
+.shelf-card .file-meta { width:100%; overflow-wrap:anywhere; }
+.shelf-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.shelf-actions button, .shelves-header button { min-height:44px; }
+@media (max-width:768px), (pointer:coarse) {
+  #app[data-app="reader"] .shelves-view-container { padding:18px 16px; }
+  #app[data-app="reader"] .source-list-item { align-items:flex-start; flex-direction:column; }
+}
+
 @media (max-width: 768px), (pointer: coarse) {
   #app[data-app="reader"] .home-container,
   #app[data-app="reader"] .library-view-container { padding: 18px 16px; }

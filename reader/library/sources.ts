@@ -4,7 +4,9 @@ import { gate, isAbort } from '../io'
 import { LIBRARY_LIMITS, LibraryError, errorMessage, filePath, parentPath, validFile, validId, within } from './model'
 
 export const SOURCES_KEY = 'library:sources'
-export interface LibrarySource { nodeId: number; path: string; contentVersion: string; addedAt: number; rootConfirmed: boolean }
+/** 手动书库单独存储，旧来源与宿主目录授权都不自动变成书库。 */
+export const SHELVES_KEY = 'library:shelves:v1'
+export interface LibrarySource { nodeId: number; path: string; contentVersion: string; addedAt: number; rootConfirmed: boolean; name?: string }
 export interface SourcesConfig { schemaVersion: 1; sources: LibrarySource[] }
 export interface SourcesSnapshot { config: SourcesConfig; revision: string | null }
 export interface ResolvedSource { source: LibrarySource; file: FileEntry }
@@ -12,6 +14,12 @@ export interface SourceRoots { roots: ResolvedSource[]; unavailable: { source: L
 /** 宿主批量信封的单次上限；更多节点分批核对。 */
 const BATCH_LIMIT = 16
 type StatOutcome = { file: FileEntry; error?: undefined } | { error: unknown; file?: undefined }
+
+export function shelfName(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim() || raw.trim().length > 80 || /[\x00-\x1f\x7f]/.test(raw)) throw new LibraryError('invalid_shelf_name', '书库名称须为 1～80 个字符，不能含控制字符')
+  return raw.trim()
+}
+export const sourceLabel = (source: LibrarySource) => source.name ?? (source.path === '/' ? '网盘根目录' : source.path.split('/').pop() || source.path)
 
 export function parseSources(raw: unknown): SourcesConfig {
   const value = raw as SourcesConfig | null
@@ -23,9 +31,10 @@ export function parseSources(raw: unknown): SourcesConfig {
       || typeof source.contentVersion !== 'string' || !source.contentVersion || source.contentVersion.length > 256
       || !Number.isFinite(source.addedAt) || source.addedAt < 0 || typeof source.rootConfirmed !== 'boolean') throw new LibraryError('invalid_sources', '来源标识无效或重复')
     const path = filePath(source.path)
+    const name = source.name === undefined ? undefined : shelfName(source.name)
     if (path === '/' && !source.rootConfirmed) throw new LibraryError('confirm_root', '添加根目录前必须确认包含整个网盘')
     seen.add(source.nodeId)
-    return { ...source, path }
+    return { ...source, path, ...(name === undefined ? {} : { name }) }
   })
   return { schemaVersion: 1, sources }
 }
@@ -44,22 +53,33 @@ export function sourcesIdentity(snapshot: SourcesSnapshot): string {
 }
 
 export class SourcesStore {
-  constructor(private drive: Drive) {}
+  readonly key: string
+  constructor(private drive: Drive, readonly manualShelves = false) { this.key = manualShelves ? SHELVES_KEY : SOURCES_KEY }
+  private parse(raw: unknown) {
+    const config = parseSources(raw)
+    if (this.manualShelves) {
+      const names = config.sources.map(source => source.name)
+      if (names.some(name => !name) || new Set(names).size !== names.length) throw new LibraryError('invalid_shelves', '书库配置的名称缺失或重复，未采用或覆盖旧来源')
+    }
+    return config
+  }
   async load(signal?: AbortSignal): Promise<SourcesSnapshot> {
     signal?.throwIfAborted()
-    const record = await this.drive.storage.get(SOURCES_KEY, { signal })
+    const record = await this.drive.storage.get(this.key, { signal })
     signal?.throwIfAborted()
-    return { config: record ? parseSources(record.value) : { schemaVersion: 1, sources: [] }, revision: record?.revision ?? null }
+    return { config: record ? this.parse(record.value) : { schemaVersion: 1, sources: [] }, revision: record?.revision ?? null }
   }
   async save(config: SourcesConfig, revision: string | null, signal?: AbortSignal): Promise<SourcesSnapshot> {
-    const value = parseSources(config)
+    const value = this.parse(config)
     signal?.throwIfAborted()
-    const record = await this.drive.storage.set(SOURCES_KEY, value, revision, { signal })
+    const record = await this.drive.storage.set(this.key, value, revision, { signal })
     signal?.throwIfAborted()
-    return { config: parseSources(record.value), revision: record.revision }
+    return { config: this.parse(record.value), revision: record.revision }
   }
-  async add(base: SourcesSnapshot, path: string, confirmRoot = false, signal?: AbortSignal) {
-    const config = parseSources(base.config), selected = filePath(path)
+  async add(base: SourcesSnapshot, path: string, confirmRoot = false, signal?: AbortSignal, name?: string) {
+    const config = this.parse(base.config), selected = filePath(path)
+    const label = this.manualShelves ? shelfName(name) : name === undefined ? undefined : shelfName(name)
+    if (this.manualShelves && config.sources.some(source => source.name === label)) throw new LibraryError('duplicate_shelf_name', '此书库名称已使用，请换一个名称')
     if (selected === '/' && !confirmRoot) throw new LibraryError('confirm_root', '添加根目录前必须确认包含整个网盘')
     if (config.sources.length >= LIBRARY_LIMITS.sources) throw new LibraryError('source_limit', '每个应用最多添加 16 个来源')
     signal?.throwIfAborted()
@@ -71,8 +91,14 @@ export class SourcesStore {
     const current = await this.drive.files.stat({ id: directory.id }, { signal })
     signal?.throwIfAborted()
     if (!sameNode(directory, current)) throw new LibraryError('source_changed', '所选来源发生变化，请重新选择')
-    config.sources.push({ nodeId: current.id, path: current.path, contentVersion: current.content_version, addedAt: Date.now(), rootConfirmed: selected === '/' && confirmRoot })
+    config.sources.push({ nodeId: current.id, path: current.path, contentVersion: current.content_version, addedAt: Date.now(), rootConfirmed: selected === '/' && confirmRoot, ...(label === undefined ? {} : { name: label }) })
     return this.save(config, base.revision, signal)
+  }
+  rename(base: SourcesSnapshot, nodeId: number, name: string, signal?: AbortSignal) {
+    const config = this.parse(base.config), label = shelfName(name)
+    if (!config.sources.some(source => source.nodeId === nodeId)) throw new LibraryError('source_removed', '此书库已移除，请重新读取配置')
+    if (config.sources.some(source => source.nodeId !== nodeId && source.name === label)) throw new LibraryError('duplicate_shelf_name', '此书库名称已使用，请换一个名称')
+    return this.save({ ...config, sources: config.sources.map(source => source.nodeId === nodeId ? { ...source, name: label } : source) }, base.revision, signal)
   }
   remove(base: SourcesSnapshot, nodeId: number, signal?: AbortSignal) {
     const config = parseSources(base.config)

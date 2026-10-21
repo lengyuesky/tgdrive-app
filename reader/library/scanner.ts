@@ -57,7 +57,11 @@ export class LibraryScanner {
     }
     const result = (async (): Promise<ScanResult> => {
       try {
-        roots = await readRoots()
+        const available = await readRoots()
+        roots = options.sourceId === undefined ? available : {
+          roots: available.roots.filter(root => root.source.nodeId === options.sourceId),
+          unavailable: available.unavailable.filter(item => item.source.nodeId === options.sourceId),
+        }
         for (const item of roots.unavailable) issues.push({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message })
         const selected = roots.roots.filter(root => (options.sourceId === undefined || root.source.nodeId === options.sourceId)
           && (!options.changedPaths || options.changedPaths.some(path => within(path, root.file.path) || within(root.file.path, path))))
@@ -90,7 +94,7 @@ export class LibraryScanner {
             const add = (file: typeof page.directory, format: ReadingUnit['format']) => {
               if (units.has(file.id)) return
               if (units.size >= LIBRARY_LIMITS.units) { end = 'unit-limit'; return }
-              const sourceIds = roots.roots.filter(root => within(file.path, root.file.path)).map(root => root.source.nodeId)
+              const sourceIds = page.sourceIds
               if (!sourceIds.length) throw new LibraryError('source_changed', '来源范围在扫描期间变化')
               const unit: ReadingUnit = { nodeId: file.id, file, format, sourceIds, firstIndexedAt: options.firstIndexedAt?.get(file.id) ?? old.get(file.id)?.firstIndexedAt ?? Date.now() }
               units.set(file.id, unit); batch.push(unit)

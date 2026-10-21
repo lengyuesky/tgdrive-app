@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { seedReaderSource, revealReader, closeReaderPanel } from './reader-helpers'
+import { seedReaderSource, enterReaderShelf, revealReader, closeReaderPanel } from './reader-helpers'
 import type { Progress } from '../../reader/state'
 const base = 'http://127.0.0.1:4187'
 async function authenticate(page: Page) {
@@ -17,10 +17,8 @@ async function install(page: Page, id: string, directory: string, legacyPreferen
   expect((await page.request.patch(`/api/apps/${id}/scope`, { data: { mode: 'all', paths: [] } })).ok()).toBe(true)
   await page.goto(`/apps/${id}`)
   await expect(page.locator('.host-status')).toHaveCount(0)
-  // 阅读馆重构后应用先落在首页；先进入「书库」视图再等待完整列表。
-  await expect(page.frameLocator('iframe').locator('#btn-home-view-all')).toBeVisible()
-  await page.frameLocator('iframe').locator('#btn-home-view-all').click()
-  await expect(page.frameLocator('iframe').locator('#items button').first()).toBeVisible()
+  // 夹具显式创建的单目录书库；进入后只加载该书库内容。
+  await enterReaderShelf(page)
 }
 test.beforeEach(async ({ page }) => {
   await authenticate(page)
@@ -51,7 +49,8 @@ for (const width of [390, 1280]) {
       await expect(frame.locator(`#viewport ${marker}`)).toBeVisible()
       if (format === 'txt' || format === 'epub') await expect(frame.locator('#mode')).toHaveValue('page')
       else {
-        await expect(frame.locator('#fit')).toHaveValue('page')
+        if (format === 'pdf') await expect(frame.locator('#fit')).toHaveValue('page')
+        else await expect(frame.locator('#fit')).toHaveValue('width')
         if (format !== 'pdf') await expect(frame.locator('#comic-mode')).toHaveValue('single')
       }
       await revealReader(page)
@@ -82,7 +81,7 @@ test('漫画封面写入服务器封面库，重新打开直接显示而不再�
   reads.length = 0
   await page.reload()
   await expect(page.locator('.host-status')).toHaveCount(0)
-  await frame.locator('#btn-home-view-all').click()
+  await enterReaderShelf(page)
   await expect.poll(background).toMatch(/^url\("data:image\//)
   expect(reads).not.toContain(id)
 })
@@ -94,9 +93,7 @@ test('反复冷启动后图书和漫画的首次点击均进入阅读器', async
       const frame = page.frameLocator('iframe')
       if (opening) {
         await page.reload()
-        await expect(frame.locator('#btn-home-view-all')).toBeVisible()
-        await frame.locator('#btn-home-view-all').click()
-        await expect(frame.locator('#items button').first()).toBeVisible()
+        await enterReaderShelf(page)
       }
       await frame.locator('#items').getByRole('button', { name: new RegExp(file!) }).click()
       await expect(frame.locator('#reader')).toBeVisible()
@@ -242,9 +239,7 @@ test('跨浏览器恢复进度、书签及并发冲突保护', async ({ page, br
   const secondPage = await context.newPage(); await authenticate(secondPage); await secondPage.goto('/apps/reader'); await secondPage.bringToFront()
   await expect(secondPage.locator('.host-status')).toHaveCount(0)
   const second = secondPage.frameLocator('iframe')
-  await expect(second.locator('#btn-home-view-all')).toBeVisible()
-  await second.locator('#btn-home-view-all').click()
-  await expect(second.locator('#items button').first()).toBeVisible()
+  await enterReaderShelf(secondPage)
   await second.getByRole('button', { name: /中文.pdf/ }).click()
   await expect(second.locator('#reader')).toBeVisible()
   await expect(second.locator('#reading-status')).toHaveText('')
@@ -378,14 +373,14 @@ test('图书分组通过宿主存储持久化并在两个页面同步，删除�
   await first.getByRole('button', { name: '移动', exact: true }).click()
   await expect(first.locator('#items .library-card').filter({ hasText: 'GBK' }).locator('.book-group-badge')).toHaveText('我的书单')
   await page.reload()
-  await first.locator('#btn-home-view-all').click()
+  await enterReaderShelf(page)
   await expect(first.locator('#items .library-card').filter({ hasText: 'GBK' }).locator('.book-group-badge')).toHaveText('我的书单')
 
   const other = await page.context().newPage()
   try {
     await other.goto('/apps/reader')
     const second = other.frameLocator('iframe')
-    await second.locator('#btn-home-view-all').click()
+    await enterReaderShelf(other)
     await second.getByRole('combobox', { name: '筛选分组', exact: true }).selectOption({ label: '我的书单' })
     await expect(second.locator('#items .library-card')).toHaveCount(1)
     await expect(second.locator('#items .library-card')).toContainText('GBK')

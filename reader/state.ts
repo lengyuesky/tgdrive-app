@@ -39,7 +39,7 @@ export interface ComicPreferences {
 export interface PdfPreferences { theme: Preferences['theme']; fit: ReaderFit; zoom: number }
 export interface FormatPreferences { text: TextPreferences; comic: ComicPreferences; pdf: PdfPreferences }
 /** 持久化配置和视图平面配置分离，不能将 V2 记录直接传给 configure。 */
-export interface PreferencesV2 extends FormatPreferences { schemaVersion: 2 }
+export interface PreferencesV2 extends FormatPreferences { schemaVersion: 2; comicWidthDefault?: 1 }
 export interface WorkPreferencesV2 {
   schemaVersion: 2
   overrides: { [K in PreferenceFormat]?: Partial<FormatPreferences[K]> }
@@ -65,7 +65,7 @@ export function defaultPreferences(): PreferencesV2 {
 export function readerDefaultPreferences(): PreferencesV2 {
   const value = defaultPreferences()
   value.text.mode = 'page'
-  value.comic.mode = 'single'; value.comic.fit = 'page'
+  value.comic.mode = 'single'; value.comic.fit = 'width'; value.comicWidthDefault = 1
   value.pdf.fit = 'page'
   return value
 }
@@ -97,8 +97,9 @@ function parseFormat<K extends PreferenceFormat>(format: K, raw: unknown, partia
 export function parsePreferences(raw: unknown): PreferencesV2 {
   if (!object(raw)) throw unknownPreferences()
   if (raw.schemaVersion === 2) {
-    if (Object.keys(raw).some(key => key !== 'schemaVersion' && !formats.includes(key as PreferenceFormat))) throw unknownPreferences()
-    return { schemaVersion: 2, text: parseFormat('text', raw.text, false) as TextPreferences,
+    if (Object.keys(raw).some(key => key !== 'schemaVersion' && key !== 'comicWidthDefault' && !formats.includes(key as PreferenceFormat))
+      || raw.comicWidthDefault !== undefined && raw.comicWidthDefault !== 1) throw unknownPreferences()
+    return { schemaVersion: 2, ...(raw.comicWidthDefault === 1 ? { comicWidthDefault: 1 as const } : {}), text: parseFormat('text', raw.text, false) as TextPreferences,
       comic: parseFormat('comic', raw.comic, false) as ComicPreferences, pdf: parseFormat('pdf', raw.pdf, false) as PdfPreferences }
   }
   const legacyFields = ['theme', 'fontSize', 'lineHeight', 'width', 'mode', 'direction', 'zoom', 'font', 'margin', 'fit', 'coverAlone', 'spreadOffset']
@@ -138,7 +139,18 @@ export class PreferenceStore {
   async load(signal?: AbortSignal): Promise<PreferencesSnapshot> {
     signal?.throwIfAborted()
     const record = await this.drive.storage.get('preferences', { signal }); signal?.throwIfAborted()
-    return { value: record ? parsePreferences(record.value) : this.initialPreferences(), revision: record?.revision ?? null,
+    const initial = this.initialPreferences(), value = record ? parsePreferences(record.value) : initial
+    if (record && initial.comicWidthDefault === 1 && value.comicWidthDefault !== 1) {
+      value.comicWidthDefault = 1
+      // 1.0.1 保存的首次默认按屏高缩小图片；只升级该默认组合，不改用户滚动模式或自定义缩放。
+      if ((record.value as { schemaVersion?: unknown })?.schemaVersion === 2
+        && value.comic.mode === 'single' && value.comic.fit === 'page' && value.comic.zoom === 1) {
+        value.comic.fit = 'width'
+        const saved = await this.save('preferences', value, record.revision, signal)
+        return { value: parsePreferences(saved.value), revision: saved.revision, migrated: true }
+      }
+    }
+    return { value, revision: record?.revision ?? null,
       migrated: !!record && (record.value as { schemaVersion?: unknown } | null)?.schemaVersion !== 2 }
   }
   private workKey(workId: string) {

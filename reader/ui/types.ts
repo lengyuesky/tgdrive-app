@@ -41,6 +41,8 @@ export interface UiContext {
   openReader: (nodeId: number, location?: Location) => Promise<void>
   openDetail: (item: CatalogItem | { unit: ReadingUnit; work?: Work }) => void
   switchView: (view: UiView) => void
+  createShelf?: () => Promise<void>
+  editShelf?: (nodeId: number) => Promise<void>
   openLibrary?: (selection: LibrarySelection) => Promise<void>
   librarySelectionChanged?: (selection: LibrarySelection) => void
   reportError: (error: unknown) => void

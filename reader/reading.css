@@ -1,8 +1,8 @@
 /* 阅读器增量样式：由阅读馆集成入口在 style.css 之后引入，不改变书库布局。 */
 /* 漫画贴边无留白：适用桌面与沉浸阅读，宿主已预留安全区。 */
 #app .reading-viewport[data-format="comic"] { padding: 0; }
-/* 单/双页未放大时禁止滚动残留，消除 iOS 橡皮筋回弹与误触发拖动；放大后仍保留平移滚动。 */
-#app.immersive .reading-viewport[data-format="comic"][data-swipe="true"]:is([data-comic-mode="single"], [data-comic-mode="double"]) { overflow: hidden; }
+/* 仅整页且未放大时禁止滚动残留；适宽必须保留纵向滚动，长图不会按屏高缩小。 */
+#app.immersive .reading-viewport[data-format="comic"][data-fit="page"][data-swipe="true"]:is([data-comic-mode="single"], [data-comic-mode="double"]) { overflow: hidden; }
 /* iOS 长按页面不弹文本选择放大镜；图片不可拖拽出阅读层。 */
 #app .reading-viewport[data-format="comic"] { -webkit-user-select: none; user-select: none; }
 #app .reading-viewport[data-format="comic"] img { -webkit-user-drag: none; }

@@ -1,7 +1,7 @@
 /** 全库文件分页：宿主维护索引；只驻留当前页，不把作品元数据筛选冒充全库查询。 */
 import type { HostLibraryPage, HostLibraryQuery, RecordValue } from '../../sdk/types'
 import { parseUnit, contentKind, scopeFormats, type LibraryScope, type ReadingUnit } from '../library/model'
-import { ViewportCoverLoader } from '../library'
+import { ViewportCoverLoader, sourceLabel } from '../library'
 import type { UiContext } from './types'
 
 const POSITION_KEY = 'library:host-position:v1'
@@ -31,10 +31,12 @@ export class HostLibraryView {
   private saving = Promise.resolve()
   private unsubscribers: (() => void)[] = []
   private validPage = false
-  constructor(private container: HTMLElement, private context: UiContext, private back: () => void) {
+  private readonly positionKey: string
+  constructor(private container: HTMLElement, private context: UiContext, private back: () => void, private sourceId?: number) {
+    this.positionKey = POSITION_KEY + (sourceId === undefined ? '' : ':source:' + sourceId)
     this.query = { kind: context.kind, roots: this.roots(), sort: 'title', limit: 40, cursor: null }
   }
-  private roots() { return this.context.library.snapshot.sources.config.sources.map(source => source.nodeId).sort((a, b) => a - b) }
+  private roots() { return this.context.library.snapshot.sources.config.sources.filter(source => this.sourceId === undefined || source.nodeId === this.sourceId).map(source => source.nodeId).sort((a, b) => a - b) }
   private get<T extends HTMLElement = HTMLElement>(id: string): T { return this.container.querySelector<T>(`#host-${id}`)! }
   private status(message: string) { this.get('status').textContent = message }
   async render() {
@@ -54,7 +56,7 @@ export class HostLibraryView {
           <select id="host-sort" aria-label="全库排序"><option value="title">按文件名</option><option value="added">按文件创建时间</option></select>
         </div>
       </div>
-      <p>全库索引由宿主实时维护，无需在页面扫描；包含子目录，不受 2000 项整理上限限制。这里只按文件名与格式查询；作者、作品分组和阅读状态筛选请返回已整理书库。</p>
+      <p id="host-description">全库索引由宿主实时维护，无需在页面扫描；包含子目录，不受 2000 项整理上限限制。这里只按文件名与格式查询；作者、作品分组和阅读状态筛选请返回已整理书库。</p>
       <p id="host-status" class="library-status-msg" role="status"></p>
       <p id="host-save-status" role="status"></p>
       <button id="host-retry" type="button" class="btn-primary" hidden>重试本页</button>
@@ -68,7 +70,12 @@ export class HostLibraryView {
     this.get('back').onclick = () => { this.destroy(); this.back() }
     const source = this.get<HTMLSelectElement>('source')
     for (const item of this.context.library.snapshot.sources.config.sources) {
-      const option = document.createElement('option'); option.value = String(item.nodeId); option.textContent = item.path; source.append(option)
+      const option = document.createElement('option'); option.value = String(item.nodeId); option.textContent = item.name ? sourceLabel(item) : item.path; source.append(option)
+    }
+    if (this.sourceId !== undefined) {
+      source.value = String(this.sourceId); source.hidden = true
+      this.get('description').textContent = '只分页查询当前书库绑定的目录及子目录，不聚合其他书库。创建时已扫描并保存应用索引；此视图用于继续查找超过整理上限的目录文件。'
+      this.get<HTMLInputElement>('search').placeholder = '搜索这个书库的文件名…'
     }
     const kind = this.get<HTMLSelectElement>('kind')
     if (kind) kind.onchange = () => { this.fillFormats(kind.value as LibraryScope); this.apply() }
@@ -97,7 +104,7 @@ export class HostLibraryView {
     }
     this.status('正在读取浏览位置…')
     try {
-      this.record = await this.context.drive.storage.get(POSITION_KEY, { signal })
+      this.record = await this.context.drive.storage.get(this.positionKey, { signal })
       if (signal.aborted) return
       const saved = position(this.record?.value, this.context.kind, this.roots())
       if (saved) { this.query = saved.query; this.page = saved.page }
@@ -116,7 +123,7 @@ export class HostLibraryView {
     await this.load()
   }
   private apply() {
-    const selected = this.get<HTMLSelectElement>('source').value
+    const selected = this.sourceId === undefined ? this.get<HTMLSelectElement>('source').value : String(this.sourceId)
     this.query = { roots: selected ? [Number(selected)] : this.roots(), kind: this.get<HTMLSelectElement>('kind')?.value as LibraryScope || this.context.kind, q: this.get<HTMLInputElement>('search').value.trim(),
       format: this.get<HTMLSelectElement>('format').value || undefined, sort: this.get<HTMLSelectElement>('sort').value === 'added' ? 'added' : 'title', limit: 40, cursor: null }
     this.page = 1; this.history = []; void this.load()
@@ -159,7 +166,7 @@ export class HostLibraryView {
       this.saving = this.saving.then(async () => {
         if (!current() || !this.storageHealthy) return
         try {
-          const record = await this.context.drive.storage.set(POSITION_KEY, { schemaVersion: 1, query, page: pageNumber }, this.record?.revision ?? null, { signal: this.lifetime.signal })
+          const record = await this.context.drive.storage.set(this.positionKey, { schemaVersion: 1, query, page: pageNumber }, this.record?.revision ?? null, { signal: this.lifetime.signal })
           this.record = record
         } catch {
           this.storageHealthy = false

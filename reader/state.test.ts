@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ProgressStore, PreferenceStore, PreferenceSaveError, defaultPreferences, parsePreferences, preferences, preferenceFormat, resolvePreferences, validLocation, type Preferences, type Progress } from './state'
+import { ProgressStore, PreferenceStore, PreferenceSaveError, defaultPreferences, readerDefaultPreferences, parsePreferences, preferences, preferenceFormat, resolvePreferences, validLocation, type Preferences, type Progress } from './state'
 import { memoryDrive } from './library/test-fixtures'
 import type { Drive, FileEntry, RecordValue } from '../sdk/types'
 const file: FileEntry = { id:2, name:'书.pdf',path:'/书.pdf',content_version:'a',size:10,is_dir:false,created_at:1,modified_at:1,favorite:false }
@@ -53,6 +53,88 @@ describe('跨设备阅读记录', () => {
     expect(validLocation({format:'txt',index:-1})).toBe(false)
     expect(validLocation({format:'comic',index:1,ratio:Infinity})).toBe(false)
     expect(preferences({fontSize:Infinity,width:-2,theme:'bad' as never})).toMatchObject({fontSize:18,width:360,theme:'system'})
+  })
+})
+
+describe('阅读馆 1.0.2 漫画适宽默认迁移', () => {
+  const previousDefaults = () => {
+    const value = defaultPreferences()
+    value.text.mode = 'page'; value.comic.mode = 'single'; value.comic.fit = 'page'; value.pdf.fit = 'page'
+    return value
+  }
+
+  it('首次默认适宽且不写空记录，旧默认用原修订号仅迁移一次，随后可保留用户选择的整页', async () => {
+    const mock = memoryDrive(), store = new PreferenceStore(mock.drive, readerDefaultPreferences)
+    expect((await store.load()).value).toMatchObject({ comicWidthDefault: 1, comic: { mode: 'single', fit: 'width', zoom: 1 } })
+    expect(mock.set).not.toHaveBeenCalled()
+    const value = previousDefaults(), original = mock.seed('preferences', value)
+    const work = mock.seed('preferences:work:' + 'a'.repeat(32), { schemaVersion: 2, overrides: { comic: { fit: 'page', zoom: 1.5 } } })
+    const progress = mock.seed('progress:2', { location: { format: 'comic', index: 4 } })
+    const bookmark = mock.seed('bookmark:2:a', { title: '原书签' })
+    const migrated = await store.load()
+    expect(migrated).toMatchObject({ migrated: true, value: { ...value, comicWidthDefault: 1, comic: { ...value.comic, fit: 'width' } } })
+    expect(migrated.revision).not.toBe(original.revision)
+    expect(mock.set).toHaveBeenCalledExactlyOnceWith('preferences', migrated.value, original.revision, { signal: undefined })
+    expect(await store.load()).toEqual({ ...migrated, migrated: false })
+    expect(mock.set).toHaveBeenCalledTimes(1)
+    expect(resolvePreferences(migrated.value, 'comic', (await store.loadWork('a'.repeat(32))).value)).toMatchObject({ fit: 'page', zoom: 1.5 })
+    expect(mock.records.get(work.key)).toEqual(work)
+    expect(mock.records.get(progress.key)).toEqual(progress); expect(mock.records.get(bookmark.key)).toEqual(bookmark)
+    const chosen = await store.saveFormat(migrated, 'comic', { fit: 'page' })
+    mock.set.mockClear()
+    expect((await store.load()).value).toEqual(chosen.value)
+    expect(chosen.value).toMatchObject({ comicWidthDefault: 1, comic: { fit: 'page' } })
+    expect(mock.set).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['scroll', 'page', 1], ['double', 'page', 1], ['single', 'page', .75], ['single', 'width', 1],
+  ] as const)('保留旧版自定义模式 %s、适配 %s、缩放 %s，不自动写回', async (mode, fit, zoom) => {
+    const mock = memoryDrive(), store = new PreferenceStore(mock.drive, readerDefaultPreferences), value = previousDefaults()
+    value.comic = { ...value.comic, mode, fit, zoom, direction: 'rtl', theme: 'dark' }
+    const original = mock.seed('preferences', value), loaded = await store.load()
+    expect(loaded.value.comic).toEqual(value.comic)
+    expect(loaded.value.text).toEqual(value.text); expect(loaded.value.pdf).toEqual(value.pdf)
+    expect(loaded.revision).toBe(original.revision); expect(loaded.migrated).toBe(false)
+    expect(mock.records.get('preferences')).toEqual(original); expect(mock.set).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, 1])('旧 flat/V1 整页仍只在内存映射，不按 V2 默认迁移（%s）', async schemaVersion => {
+    const mock = memoryDrive(), store = new PreferenceStore(mock.drive, readerDefaultPreferences)
+    const original = mock.seed('preferences', { ...(schemaVersion === undefined ? {} : { schemaVersion }), mode: 'page', fit: 'page', zoom: 1 })
+    expect((await store.load()).value.comic).toMatchObject({ mode: 'single', fit: 'page', zoom: 1 })
+    expect(mock.records.get('preferences')).toEqual(original); expect(mock.set).not.toHaveBeenCalled()
+  })
+
+  it('迁移 CAS 冲突不重试、不覆盖另一设备的新偏好，保留适宽草稿', async () => {
+    const mock = memoryDrive(), store = new PreferenceStore(mock.drive, readerDefaultPreferences), value = previousDefaults()
+    const original = mock.seed('preferences', value)
+    let remote: RecordValue | undefined
+    mock.get.mockImplementationOnce(async () => {
+      remote = mock.seed('preferences', { ...value, text: { ...value.text, fontSize: 31 } })
+      return structuredClone(original)
+    })
+    await expect(store.load()).rejects.toMatchObject({ code: 'storage_conflict', key: 'preferences', draft: { comicWidthDefault: 1, comic: { fit: 'width' } } })
+    expect(mock.set).toHaveBeenCalledTimes(1); expect(mock.records.get('preferences')).toEqual(remote)
+  })
+
+  it('迁移保存失败或取消不能冒充已同步，未知迁移标记不覆盖原记录', async () => {
+    const mock = memoryDrive(), store = new PreferenceStore(mock.drive, readerDefaultPreferences)
+    const original = mock.seed('preferences', previousDefaults())
+    mock.set.mockRejectedValueOnce(new Error('配额不足'))
+    await expect(store.load()).rejects.toMatchObject({ code: 'preferences_not_saved', draft: { comic: { fit: 'width' } } })
+    expect(mock.records.get('preferences')).toEqual(original)
+    mock.set.mockClear()
+    const controller = new AbortController(), get = mock.get.getMockImplementation()!
+    mock.get.mockImplementationOnce(async (key, options) => { const record = await get(key, options); controller.abort(); return record })
+    await expect(store.load(controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mock.set).not.toHaveBeenCalled()
+    for (const comicWidthDefault of [0, 2, '1', null]) {
+      const bad = mock.seed('preferences', { ...previousDefaults(), comicWidthDefault })
+      await expect(store.load()).rejects.toMatchObject({ code: 'unknown_preferences' })
+      expect(mock.records.get('preferences')).toEqual(bad)
+    }
+    expect(mock.set).not.toHaveBeenCalled()
   })
 })
 

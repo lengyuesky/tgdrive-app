@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { createReaderShelf, seedReaderSource } from './reader-helpers'
 
 async function clean(page: Page) {
   expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
@@ -25,7 +26,9 @@ test('新安装先授权，从文件打开图书并定位回文件页', async ({
   await picker.getByTitle('/测试图书', { exact: true }).click()
   await picker.getByRole('button', { name: '确定', exact: true }).click()
   await page.getByRole('dialog', { name: '授权目录', exact: true }).getByRole('button', { name: '允许读取', exact: true }).click()
-  await expect(page.frameLocator('iframe').locator('#btn-home-view-all')).toBeVisible()
+  await expect(page.frameLocator('iframe').locator('#btn-home-create-shelf')).toBeVisible()
+  await expect(page.frameLocator('iframe').locator('.shelf-card')).toHaveCount(0)
+  await createReaderShelf(page, '我的图书', '/测试图书')
   const installed = await (await page.request.get('/api/apps/reader')).json()
   expect(installed.scope_mode).toBe('selected'); expect(installed.scope).toEqual(['/测试图书'])
   await page.goto('/files/测试图书')
@@ -57,6 +60,7 @@ test('三款应用通过节点任务打开指定内容，记录就绪状态', as
       const search = await (await page.request.post(`/api/apps/${id}/rpc`, { data: { session: launch.session, method: 'files.searchPage', params: { under: id === 'cinema' ? '/测试影视' : '/测试视频', extensions: ['webm'], limit: 10 } } })).json()
       path = search.results[0].path
     }
+    if (id === 'reader') await seedReaderSource(page, id, path.includes('/测试漫画/') ? '/测试漫画' : '/测试图书')
     await page.goto(`/apps/${id}?open=${encodeURIComponent(path)}`)
     const frame = page.frameLocator('iframe')
     if (id === 'reader') { await expect(frame.locator('#reader')).toBeVisible(); await expect(frame.locator('#reading-status')).toHaveText('') }
@@ -74,7 +78,10 @@ test('应用详情截图来自真实渲染的合成测试库', async ({ page }, 
     if (id === 'shorts') expect((await page.request.patch(`/api/apps/${id}/settings`, { data: { source_dir: directory } })).ok()).toBe(true)
     await page.goto(`/apps/${id}`)
     const frame = page.frameLocator('iframe')
-    if (id === 'reader') { await expect(frame.locator('#btn-home-view-all')).toBeVisible(); await frame.locator('#btn-home-view-all').click(); await expect(frame.locator('#items button').first()).toBeVisible() }
+    if (id === 'reader') {
+      await expect(frame.locator('#btn-home-create-shelf')).toBeVisible()
+      await createReaderShelf(page, '我的图书', directory!)
+    }
     else if (id === 'cinema') await expect(frame.locator('#app')).toBeVisible()
     else await expect.poll(() => frame.locator('#video').evaluate(node => (node as HTMLVideoElement).currentTime)).toBeGreaterThan(.1)
     // 验收截图只写测试产物；源码分发截图由维护者在最终根构建前独立生成。
