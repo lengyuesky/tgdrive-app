@@ -7,7 +7,7 @@ import { defaultPreferences } from '../../reader/state'
 /** 旧包路径必须显式指向本机隔离目录，不从生产安装或远程站点取包。 */
 for (const migrateDefault of [false, true]) test(migrateDefault
   ? '阅读馆真实 1.0.1 升级后把旧整页默认迁移为铺满宽度，并保留阅读记录'
-  : '阅读馆真实 1.0.1 升级到 1.0.3 不采用旧来源，手动重建后保留偏好、进度与书签', async ({ page }) => {
+  : '阅读馆真实 1.0.1 升级到 1.0.4 不采用旧来源，手动重建后保留偏好、进度与书签', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   const previous = process.env.TGDRIVE_READER_PREVIOUS_PACKAGE
   test.skip(!previous, '真实旧包升级验收需要显式提供 TGDRIVE_READER_PREVIOUS_PACKAGE')
@@ -46,17 +46,17 @@ for (const migrateDefault of [false, true]) test(migrateDefault
   await rpc('storage.set', { key: 'library:sources', expected_revision: null, value: { schemaVersion: 1, sources: [{ nodeId: root.id, path: root.path, contentVersion: root.content_version, addedAt: 1, rootConfirmed: false }] } })
   const sources = await rpc('storage.get', { key: 'library:sources' })
   const packagePath = process.env.TGDRIVE_APP_CATALOG_DIR
-    ? join(process.env.TGDRIVE_APP_CATALOG_DIR, 'reader-1.0.3.tgapp')
-    : new URL('../../apps/reader-1.0.3.tgapp', import.meta.url)
+    ? join(process.env.TGDRIVE_APP_CATALOG_DIR, 'reader-1.0.4.tgapp')
+    : new URL('../../apps/reader-1.0.4.tgapp', import.meta.url)
   const currentBytes = await readFile(packagePath)
   await page.goto('/apps')
-  await page.locator('input[type="file"][accept=".tgapp,.zip"]').setInputFiles({ name: 'reader-1.0.3.tgapp', mimeType: 'application/octet-stream', buffer: currentBytes })
+  await page.locator('input[type="file"][accept=".tgapp,.zip"]').setInputFiles({ name: 'reader-1.0.4.tgapp', mimeType: 'application/octet-stream', buffer: currentBytes })
   const dialog = page.getByRole('dialog', { name: '更新应用', exact: true })
-  await expect(dialog).toContainText('1.0.3')
+  await expect(dialog).toContainText('1.0.4')
   await dialog.getByRole('button', { name: '同意并更新', exact: true }).click()
   await expect(dialog).toBeHidden()
   const installed = await (await page.request.get('/api/apps/reader')).json()
-  expect(installed.manifest.version).toBe('1.0.3')
+  expect(installed.manifest.version).toBe('1.0.4')
   expect(installed.digest).not.toBe(preview.digest)
   const refreshed = await (await page.request.post('/api/apps/reader/launch')).json()
   launch.session = refreshed.session

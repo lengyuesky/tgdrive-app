@@ -61,7 +61,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.0.3",
+        "version": "1.0.4",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -82,7 +82,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "手机书库默认收起筛选与分组，已启用条件显示数量；压紧顶栏、书库标题和目录路径，保留 44px 点击区域。批量分组使用独立移动栏，桌面筛选直接显示；从 1.0.2 更新保留已有书库、分组、进度和书签。",
+          "changelog": "修复 iOS 漫画滚动瞬跳：尺寸变化已被占位补偿吸收时不再回写旧坐标，换窗与图片尺寸修改前先保护滚动范围；保留原生惯性、五页挂载和有界预读。从 1.0.3 更新保留书库、分组、进度、书签与自定义偏好。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -107,9 +107,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "30d0b556919dc90e5ff755575ed0713f333c7bc9bf227d070c7d687f522bdc9b",
-      "size": 2419210,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.3.tgapp"
+      "sha256": "30fc57fb7e85de912063d31f30df5421c175fe1ec2e172e8ea74cd0d247fe760",
+      "size": 2419307,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.4.tgapp"
     },
     {
       "manifest": {

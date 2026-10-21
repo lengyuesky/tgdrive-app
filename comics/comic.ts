@@ -174,6 +174,7 @@ export class ComicReader implements ReaderView {
       // 探测落地必须沿上次已知好锚点重排，不能把被截断的坐标当成阅读位置。
       const resized = this.context.viewport.clientWidth !== this.width || this.context.viewport.clientHeight !== this.height
       const anchor = this.capture(resized)
+      if (this.continuous && !this.rendering) this.guardScroll()
       for (const [index, size] of pending) this.installProbe(index, size)
       this.measure(anchor)
     })
@@ -260,10 +261,20 @@ export class ComicReader implements ReaderView {
       const delta = target - this.debt - origin
       const keys = [...this.nodes.keys()], room = keys.length ? this.sum(this.trackFirst, Math.min(...keys)) : 0
       // 本次差值记入滚动债；上方占位放不下的部分（占位不能为负，向上换窗后占位也会变短）退还给坐标改写。
-      this.debt = Math.min(this.debt + delta, room)
-    } else this.debt = 0
-    this.updateSpacers()
-    // 完全吸收时 DOM 目标就是捕获锚点时的坐标：只有浏览器在中途截断过 scrollTop 才会真正改写。
+      const debt = this.debt + delta
+      this.debt = Math.min(debt, room)
+      this.updateSpacers()
+      if (debt <= room) {
+        // 已完全吸收，不能再与捕获锚点的旧坐标比较：iOS 合成器可能在同步重排期间
+        // 继续推进原生滚动，回写旧坐标会瞬跳并中断惯性。保留实时坐标及这段用户位移。
+        this.scrollPosition = viewport.scrollTop
+        return
+      }
+    } else {
+      this.debt = 0
+      this.updateSpacers()
+    }
+    // 只有占位吸收不下的余量或显式定位才同步坐标。
     this.syncScroll(target)
   }
   /** 停稳后结清滚动债：上方占位恢复真实高度并同步补偿坐标，同一任务内完成、画面不动。 */
@@ -365,6 +376,7 @@ export class ComicReader implements ReaderView {
     const last = continuous ? Math.min(this.pages.length, this.index + 3) : spread.at(-1)! + 1
     if (this.before.parentElement !== this.root) this.root.prepend(this.before)
     if (this.after.parentElement !== this.root) this.root.append(this.after)
+    if (continuous) this.guardScroll()
     for (const [key, node] of this.nodes) {
       if (key < first || key >= last) {
         this.observer.unobserve(node)
@@ -406,6 +418,7 @@ export class ComicReader implements ReaderView {
       if (this.stopped) return
       // 必须在图片改尺寸、浏览器截断 scrollTop 之前捕获位置；实时阅读保留像素偏移。
       const anchor = this.capture()
+      if (this.continuous) this.guardScroll()
       mutate()
       this.measure(anchor)
     }, { maxVisible: 5, verticalMargin: 2, sampleTarget: 3 })
@@ -427,6 +440,12 @@ export class ComicReader implements ReaderView {
     const style = getComputedStyle(this.context.viewport)
     const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0)
     return Math.max(200, Math.max(40, width - padding) * this.zoom)
+  }
+  /** 在任何可能缩短布局的变更之前扩大下方占位，避免浏览器先截断 scrollTop。
+   *  measure 完成后由 updateSpacers 还原；同一任务内的临时高度不会被绘制。 */
+  private guardScroll() {
+    const height = Math.min(196_640 * 82, this.sum(this.trackFirst, this.trackEnd) * 2)
+    if (height > (parseFloat(this.after.style.height) || 0)) this.after.style.height = `${height}px`
   }
   private updateSpacers() {
     const keys = [...this.nodes.keys()], continuous = this.continuous
@@ -478,6 +497,7 @@ export class ComicReader implements ReaderView {
     const layoutWidth = this.availableWidth(width), layoutHeight = contentSize(this.context.viewport).height
     const resized = width !== this.width || height !== this.height || layoutWidth !== this.layoutWidth || this.fit !== this.layoutFit || this.zoom !== this.layoutZoom
     const anchor = forced ?? this.capture(resized)
+    this.guardScroll()
     let changed = resized
     if (layoutWidth !== this.layoutWidth || this.fit !== this.layoutFit || this.zoom !== this.layoutZoom || this.fit === 'page' && layoutHeight !== this.layoutHeight) {
       if (this.layoutWidth) this.heights = this.heights.map((h, index) => {
@@ -489,10 +509,6 @@ export class ComicReader implements ReaderView {
     }
     if (this.root.style.width !== `${layoutWidth}px`) this.root.style.width = `${layoutWidth}px`
     this.width = width; this.height = height; this.layoutWidth = layoutWidth; this.layoutHeight = layoutHeight; this.layoutFit = this.fit; this.layoutZoom = this.zoom
-    // 下方占位先临时加长到两个轨道的高度：接下来的同步测量会触发布局，若图片或占位在此刻缩短，
-    // 浏览器会当场把 scrollTop 截断到新的滚动上限——那是一次无法吸收、只能改写坐标的跳动。
-    // 最终高度由随后的 updateSpacers 写回，中间状态不会被绘制。
-    this.after.style.height = `${Math.min(196_640 * 82, this.sum(this.trackFirst, this.trackEnd) * 2)}px`
     // 先完成所有样式写入，再统一测量，避免逐页交替写样式和强制同步布局。
     const styled = new Map<number, number>()
     for (const [index, node] of this.nodes) {

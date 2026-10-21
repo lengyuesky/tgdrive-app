@@ -569,7 +569,7 @@ describe('build.mjs 与独立分发输出行为', () => {
     expect(packages).toHaveLength(3)
     expect(packages.map(pkg => pkg.manifest.id)).toEqual(['cinema', 'reader', 'shorts'])
     const reader = packages.find(pkg => pkg.manifest.id === 'reader')!
-    expect(reader.manifest).toMatchObject({ version: '1.0.3', min_host_version: '0.3.3' })
+    expect(reader.manifest).toMatchObject({ version: '1.0.4', min_host_version: '0.3.3' })
     // 同一归档必须同时携带两类阅读器资源，不能依赖退役包或外部 CDN。
     for (const path of ['licenses/zip-js.txt', 'licenses/dompurify.txt', 'licenses/pdfjs.txt', 'licenses/core-js.txt', 'licenses/NOTICE.txt', 'cmaps/LICENSE', 'cmaps/Adobe-GB1-UCS2.bcmap', 'standard_fonts/LICENSE_FOXIT', 'standard_fonts/FoxitSerif.pfb']) {
       expect(extractFileFromZip(reader.buffer, path)?.length, path).toBeGreaterThan(0)

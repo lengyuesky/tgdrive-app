@@ -245,6 +245,8 @@ async function setupApp(
   const outDir = readerOutDir
   await page.route('**/*', async (route) => {
     const url = route.request().url()
+    // WebKit 会拦截内存 blob: 图片；仅放行本夹具 origin 创建的本地资源，外部请求仍阻断。
+    if (url.startsWith('blob:http://standalone.local/')) { await route.continue(); return }
     if (!url.startsWith('http://standalone.local/')) {
       await route.abort()
       return

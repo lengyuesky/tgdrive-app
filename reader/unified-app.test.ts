@@ -28,7 +28,7 @@ async function setup(options: { configured?: boolean; scope?: ReadyContext['scop
       turn: async () => {}, go: async () => {}, restore: async () => {}, configure: async () => {}, destroy: () => {}, }
   })
   window.tgdrive = Object.assign(mock.drive, {
-    ready: Promise.resolve({ id: 'reader', name: '阅读馆', api_version: 2, version: '1.0.3', dark: false, scope: options.scope, launch: options.launch }),
+    ready: Promise.resolve({ id: 'reader', name: '阅读馆', api_version: 2, version: '1.0.4', dark: false, scope: options.scope, launch: options.launch }),
     on: (event: string, callback: (value: unknown) => unknown) => { listeners.set(event, callback); return () => listeners.delete(event) },
     ui: { close: vi.fn(async () => {}), download: vi.fn(async () => {}) },
   }) as Drive

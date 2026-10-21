@@ -7,10 +7,10 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 | 插件 ID | 名称 | 版本 | API 版本 | 说明 |
 |---|---|---|---|---|
 | `shorts` | 短视频 | `1.4.6` | 2 | 分页加载视频队列，支持滑动切换、进度拖动、收藏与下载 |
-| `reader` | 阅读馆 | `1.0.3` | 2 | 手机书库紧凑布局、筛选与分组按需展开；保留手动书库与漫画适宽，最低宿主 0.3.3 |
+| `reader` | 阅读馆 | `1.0.4` | 2 | 修复 iOS 漫画滚动瞬跳；保留原生惯性、手动书库与紧凑筛选，最低宿主 0.3.3 |
 | `cinema` | 影视 | `1.4.5` | 2 | 媒体库、片头片尾设置、定时停止、字幕与客户端 MKV 流式解封装 |
 
-阅读馆 1.0.3 的安装包、四张真实界面截图、`catalog.json` 与 `SHA256SUMS` 同步分发。构建、独立回归、旧包升级和本机集成验收见 [1.0.3 发布验收记录](docs/reader-1.0.3-release.md)；旧版验收保留为历史记录。
+阅读馆 1.0.4 的安装包、四张真实界面截图、`catalog.json` 与 `SHA256SUMS` 同步分发。构建、独立回归、旧包升级和本机集成验收见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)；旧版验收保留为历史记录。
 
 所有插件遵循统一沙箱规范，使用沙箱内 iframe 隔离运行，无服务器转码或外部 CDN 依赖。宿主声明 `media.bytes` 能力时，阅读器走票据直连的字节数据面（Range 读取不经宿主页面二次缓冲）；旧宿主自动降级到消息通道。
 
@@ -87,7 +87,7 @@ sha256sum -c SHA256SUMS
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.4.6.tgapp`、`reader-1.0.3.tgapp`、`cinema-1.4.5.tgapp`）
+- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.4.6.tgapp`、`reader-1.0.4.tgapp`、`cinema-1.4.5.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 
@@ -111,13 +111,15 @@ sha256sum -c SHA256SUMS
 - [代码贡献指南](docs/contributing.md)
 - [插件分发与目录协议说明](docs/release.md)
 
-本版实际验收见 [阅读馆 1.0.3 发布验收记录](docs/reader-1.0.3-release.md)；1.0.2 见 [上一版记录](docs/reader-1.0.2-release.md)，1.0.1 见 [1.0.1 记录](docs/reader-1.0.1-release.md)，1.0.0 见 [历史验证记录](docs/reader-validation.md)，四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
+本版实际验收见 [阅读馆 1.0.4 发布验收记录](docs/reader-1.0.4-release.md)；1.0.3 见 [上一版记录](docs/reader-1.0.3-release.md)，1.0.2 见 [1.0.2 记录](docs/reader-1.0.2-release.md)，1.0.1 见 [1.0.1 记录](docs/reader-1.0.1-release.md)，1.0.0 见 [历史验证记录](docs/reader-validation.md)，四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
 
 ### 阅读馆与旧应用迁移
 
-阅读馆承接图书与漫画，旧应用的替换及恢复边界见 [阅读馆迁移说明](docs/reader.md)。本版实际验证见 [1.0.3 发布验收记录](docs/reader-1.0.3-release.md)。
+阅读馆承接图书与漫画，旧应用的替换及恢复边界见 [阅读馆迁移说明](docs/reader.md)。本版实际验证见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)。
 
-在宿主 0.3.3 或更高版本的「应用中心」刷新目录后安装或更新阅读馆。同 ID 升级保留阅读进度、书签、作品和自定义偏好；从 1.0.2 更新也保留已有手动书库和分组，无需重建书库。仅旧 1.0.0/1.0.1 的来源记录保留但不作为书库采用，需要用户手动创建书库。首次替换旧 `books`、`comics` 仍需单独确认清理其私有数据。可直接下载 [reader-1.0.3.tgapp](https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.3.tgapp) 导入，宿主已满足最低版本时无需重建镜像或重启。
+在宿主 0.3.3 或更高版本的「应用中心」刷新目录后安装或更新阅读馆。同 ID 升级保留阅读进度、书签、作品和自定义偏好；从 1.0.2/1.0.3 更新也保留已有手动书库和分组，无需重建书库。仅旧 1.0.0/1.0.1 的来源记录保留但不作为书库采用，需要用户手动创建书库。首次替换旧 `books`、`comics` 仍需单独确认清理其私有数据。可直接下载 [reader-1.0.4.tgapp](https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.4.tgapp) 导入，宿主已满足最低版本时无需重建镜像或重启。
+
+1.0.4 修复漫画滚动中的旧坐标回写及换窗瞬时滚动范围缩短，保留 iOS 原生惯性。尺寸探测、预读、五页挂载和四十一页局部轨道仍有界；书签与进度不迁移、不清空。WebKit 自动化不能替代 iPhone Safari/主屏幕窗口真机验收。
 
 首页与“全部书库”只列出用户创建的书库，不按类型虚构入口，也不把目录授权或旧来源自动变成书库。点击“创建书库”，填写名称并选择一个目录，确认“创建并扫描”后才扫描该目录及子目录，并将索引保存到应用数据；进入书库只显示该目录的图书和漫画。根目录需要额外确认，最多 16 个书库，同目录不能重复绑定。手机左上角菜单打开同一书库侧栏；书库内可按格式、类型、分组、阅读状态筛选。
 

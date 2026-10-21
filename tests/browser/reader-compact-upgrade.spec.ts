@@ -4,9 +4,11 @@ import { expect, test } from '@playwright/test'
 import { createReaderShelf, enterReaderShelf, expandReaderFilters, revealReader } from './reader-helpers'
 
 /** 必须安装真实旧包，再从宿主更新界面升级，不用合成清单冒充旧版。 */
-test('阅读馆真实 1.0.2 升级到 1.0.3 保留已有书库、分组、进度和书签', async ({ page }) => {
-  const previous = process.env.TGDRIVE_READER_PREVIOUS_STABLE_PACKAGE
-  test.skip(!previous, '需显式提供 TGDRIVE_READER_PREVIOUS_STABLE_PACKAGE 指向隔离的 1.0.2 包')
+for (const previousVersion of ['1.0.2', '1.0.3']) test(`阅读馆真实 ${previousVersion} 升级到 1.0.4 保留已有书库、分组、进度和书签`, async ({ page }) => {
+  const previous = previousVersion === '1.0.3'
+    ? process.env.TGDRIVE_READER_PREVIOUS_LATEST_PACKAGE
+    : process.env.TGDRIVE_READER_PREVIOUS_STABLE_PACKAGE
+  test.skip(!previous, `需显式提供 ${previousVersion === '1.0.3' ? 'TGDRIVE_READER_PREVIOUS_LATEST_PACKAGE' : 'TGDRIVE_READER_PREVIOUS_STABLE_PACKAGE'} 指向隔离的 ${previousVersion} 包`)
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
   expect((await page.request.post('/api/auth/login', { data: { username: 'apps-test', password: 'apps-test-only' } })).ok()).toBe(true)
@@ -17,7 +19,7 @@ test('阅读馆真实 1.0.2 升级到 1.0.3 保留已有书库、分组、进度
   const inspected = await page.request.post('/api/apps/inspect', { data: bytes, headers: { 'Content-Type': 'application/octet-stream' } })
   expect(inspected.ok()).toBe(true)
   const preview = await inspected.json()
-  expect(preview.manifest).toMatchObject({ id: 'reader', version: '1.0.2' })
+  expect(preview.manifest).toMatchObject({ id: 'reader', version: previousVersion })
   expect((await page.request.post('/api/apps/install', {
     params: { digest: preview.digest }, data: bytes, headers: { 'Content-Type': 'application/octet-stream' },
   })).ok()).toBe(true)
@@ -26,6 +28,7 @@ test('阅读馆真实 1.0.2 升级到 1.0.3 保留已有书库、分组、进度
   await createReaderShelf(page, '升级前的书库', '/混合书库')
   const frame = page.frameLocator('iframe')
   await expect(frame.locator('#items .library-card')).toHaveCount(6)
+  await expandReaderFilters(page)
   await frame.getByRole('button', { name: '管理分组', exact: true }).click()
   await frame.getByRole('textbox', { name: '新分组名称', exact: true }).fill('我收藏的书')
   await frame.getByRole('button', { name: '新建', exact: true }).click()
@@ -67,18 +70,18 @@ test('阅读馆真实 1.0.2 升级到 1.0.3 保留已有书库、分组、进度
   expect(before.records.some(record => record.key === 'preferences')).toBe(true)
   const grant = await (await page.request.get('/api/apps/reader')).json()
   const packagePath = process.env.TGDRIVE_APP_CATALOG_DIR
-    ? join(process.env.TGDRIVE_APP_CATALOG_DIR, 'reader-1.0.3.tgapp')
-    : new URL('../../apps/reader-1.0.3.tgapp', import.meta.url)
+    ? join(process.env.TGDRIVE_APP_CATALOG_DIR, 'reader-1.0.4.tgapp')
+    : new URL('../../apps/reader-1.0.4.tgapp', import.meta.url)
   await page.goto('/apps')
   await page.locator('input[type="file"][accept=".tgapp,.zip"]').setInputFiles({
-    name: 'reader-1.0.3.tgapp', mimeType: 'application/octet-stream', buffer: await readFile(packagePath),
+    name: 'reader-1.0.4.tgapp', mimeType: 'application/octet-stream', buffer: await readFile(packagePath),
   })
   const dialog = page.getByRole('dialog', { name: '更新应用', exact: true })
-  await expect(dialog).toContainText('1.0.3')
+  await expect(dialog).toContainText('1.0.4')
   await dialog.getByRole('button', { name: '同意并更新', exact: true }).click()
   await expect(dialog).toBeHidden()
   const upgraded = await (await page.request.get('/api/apps/reader')).json()
-  expect(upgraded.manifest.version).toBe('1.0.3')
+  expect(upgraded.manifest.version).toBe('1.0.4')
   expect(upgraded.digest).not.toBe(preview.digest)
   expect(upgraded.scope_mode).toBe(grant.scope_mode)
   expect(upgraded.scope).toEqual(grant.scope)

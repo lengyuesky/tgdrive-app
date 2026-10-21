@@ -19,7 +19,7 @@
     "worktree_dirty": false,
     "validation_status": "passed_commit",
     "validation_date": "2026-10-21",
-    "validation_report": "docs/reader-1.0.3-release.md",
-    "validation_note": "host_ref 是本版阅读馆 1.0.3 实际通过本机集成验收的宿主 0.3.3 完整提交，源码工作区干净且 Git tree 匹配。最终候选包通过全部 65 项 E2E，包含 390/1280px 紧凑筛选与多选、真实 1.0.2 升级保留现有书库和分组、两种 1.0.1 升级、手动书库与漫画适宽及四张截图。发布构建、根资产一致性核验和剩余审计风险见报告。"
+    "validation_report": "docs/reader-1.0.4-release.md",
+    "validation_note": "host_ref 是阅读馆 1.0.4 实际通过本机集成验收的宿主 0.3.3 完整提交，源码工作区干净且 Git tree 匹配。最终候选包通过全部 69 项 E2E，包含三项新包滚动补偿回归、真实 1.0.3/1.0.2 升级及两种 1.0.1 升级、手机沉浸安全区、全部阅读格式与四张截图。独立漫画 Chromium 11 项及 WebKit 9 项通过（2 项 CDP 专属用例跳过）；正式根资产与候选逐字节一致。未执行实体 iPhone 或生产部署，剩余审计风险见报告。"
   }
 }

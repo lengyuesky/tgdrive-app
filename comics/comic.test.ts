@@ -70,6 +70,12 @@ function fixture(count = 1500, initialHeight = 1450, autoLoad = true, entrySizes
       set: (value: number) => { scrollWrites.push(value); scroll = Math.max(0, Math.min(value, viewport.scrollHeight - height)) },
     },
   })
+  // JSDOM 不会在每次 DOM 变更后重排，主动读取一次坐标模拟真实浏览器的即时截断。
+  const originalRemove = HTMLElement.prototype.remove
+  vi.spyOn(HTMLElement.prototype, 'remove').mockImplementation(function (this: HTMLElement) {
+    originalRemove.call(this)
+    if (this.classList.contains('comic-page')) void viewport.scrollTop
+  })
   const file: FileEntry = { id: 1, name: '长漫画', path: '/长漫画', is_dir: true, size: 0, content_version: 'a'.repeat(64), created_at: 1, modified_at: 1, favorite: false }
   const entries = Array.from({ length: count }, (_, index) => ({ ...file, id: index + 2, name: `${index + 1}.png`, is_dir: false, size: entrySizes?.[index] ?? 0 }))
   const context: ViewContext = {
@@ -103,12 +109,14 @@ function fixture(count = 1500, initialHeight = 1450, autoLoad = true, entrySizes
     // 惯性结束：浏览器派发 scrollend，阅读器结清滚动债。
     settle: () => viewport.dispatchEvent(new Event('scrollend')),
     touch: (down: boolean) => viewport.dispatchEvent(new Event(down ? 'touchstart' : 'touchend')),
-    loadPages: (sizes: [number, number][]) => pictureHooks.layout(() => {
+    // 模拟 iOS 合成器在锚点捕获后推进原生滚动，坐标更新尚未派发 scroll 事件。
+    loadPages: (sizes: [number, number][], nativeDelta = 0) => pictureHooks.layout(() => {
       for (const [index, height] of sizes) {
         pageHeights.set(index, height)
         const image = viewport.querySelector<HTMLImageElement>(`img[data-resource="${index}"]`)
         if (image) setDimensions(image, index)
       }
+      scroll += nativeDelta
     }),
     // 头部探测：同步告知未加载页的真实尺寸（图片宽固定 1000）。
     probe: (sizes: [number, number][]) => {
@@ -155,6 +163,35 @@ describe('长漫画滚动定位', () => {
     expect(reader.current()).toMatchObject({ index: 455, ratio: .4 })
     // 每次只有用户输入的一次写入，不能在跨页时追加 scrollTop 赋值打断惯性。
     expect(scrollWrites).toHaveLength(6)
+  })
+
+  it.each([80, -80])('尺寸重排期间原生滚动推进 %ipx 时，不回写捕获锚点的旧坐标', async nativeDelta => {
+    const { reader, viewport, finish, scrollBy, loadPages, scrollWrites, domTop, touch, settle } = fixture(150, 1000)
+    await finish(reader.open({ format: 'comic', index: 50, ratio: .4 }))
+    touch(true)
+    await scrollBy(200)
+    const position = viewport.scrollTop, top = domTop(50) - position
+    scrollWrites.length = 0
+    loadPages([[49, 1800]], nativeDelta)
+    // 上方高度变化完全吸收进占位；不得把合成器已推进的坐标拉回旧锚点。
+    expect(scrollWrites).toEqual([])
+    expect(viewport.scrollTop).toBe(position + nativeDelta)
+    expect(reader.current()).toMatchObject({ index: 50, ratio: (600 + nativeDelta) / 1000 })
+    expect(domTop(50) - viewport.scrollTop).toBe(top - nativeDelta)
+    touch(false); settle()
+    expect(scrollWrites).toHaveLength(1)
+    expect(domTop(50) - viewport.scrollTop).toBe(top - nativeDelta)
+  })
+
+  it('章节末尾删除旧页之前先保护滚动范围，换窗不因布局截断而回写坐标', async () => {
+    const { reader, viewport, finish, scrollBy, scrollWrites, domTop } = fixture(100, 1000)
+    await finish(reader.open({ format: 'comic', index: 98, ratio: .4 }))
+    scrollWrites.length = 0
+    await scrollBy(1000)
+    expect(reader.current()).toMatchObject({ index: 99, ratio: .4 })
+    // 除用户输入之外无坐标改写；当前页图像与页内像素偏移仍一致。
+    expect(scrollWrites).toHaveLength(1)
+    expect(domTop(99) + 400).toBe(viewport.scrollTop)
   })
 
   it('快速向上回看多页不会被错误纠偏拉回原页', async () => {

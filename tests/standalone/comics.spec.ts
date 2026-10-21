@@ -150,6 +150,18 @@ test('真实滚轮逐页前进时保留原生坐标，不触发额外滚动写�
   await expect.poll(async () => (await current(page)).index).toBeLessThan(453)
 })
 
+test('章节末尾跨挂载窗口时，布局不能临时缩短并触发滚动坐标回写', async ({ page }) => {
+  await open(page, { count: 100, location: { format: 'comic', index: 98, ratio: .4 } })
+  await loaded(page, 97); await loaded(page, 98); await loaded(page, 99)
+  await page.waitForTimeout(250)
+  await page.evaluate(() => { window.comicFixture.writes.length = 0 })
+  await page.mouse.move(500, 350)
+  await page.mouse.wheel(0, 1200)
+  await expect.poll(async () => (await current(page)).index).toBe(99)
+  expect((await current(page)).ratio).toBeCloseTo(.4, 2)
+  expect(await page.evaluate(() => window.comicFixture.writes)).toEqual([])
+})
+
 test('上方迟到图片大幅缩短布局后，当前画面不因 scrollTop 截断而跳动', async ({ page }) => {
   const short = [...png(1000, 300, [120, 80, 100])]
   await open(page, { count: 100, location: { format: 'comic', index: 98, ratio: .4 }, blocked: [96, 97], overrides: [[96, short], [97, short]] })
@@ -220,7 +232,46 @@ test.describe('手机触摸滚动', () => {
     expect(rect.bottom).toBeGreaterThan(0)
   })
 
-  test('连续触摸与松手后的惯性滚动跨页时单调前进', async ({ page }) => {
+  for (const nativeDelta of [80, -80]) test(`异步尺寸重排期间原生滚动推进 ${nativeDelta}px 时，不回写旧坐标`, async ({ page }) => {
+    await open(page, { count: 150, location: { format: 'comic', index: 50, ratio: .4 }, blocked: [49], overrides: [[49, [...png(1000, 5000, [120, 80, 100])]]] })
+    await loaded(page, 50); await loaded(page, 51)
+    await expect(imageAt(page, 49)).not.toHaveAttribute('width')
+    const before = await page.evaluate(nativeDelta => {
+      const { viewport, writes } = window.comicFixture
+      const image = viewport.querySelector<HTMLImageElement>('img[data-resource="49"]')!
+      const width = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'width')!
+      const scroll = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!
+      // 在尺寸变更的同步任务中模拟 iOS 合成器推进原生坐标，尚未派发 scroll 事件。
+      // 只拦截 DOM 的 width setter，锚点捕获和布局补偿仍由真实阅读器完成。
+      Object.defineProperty(image, 'width', {
+        configurable: true,
+        get() { return width.get!.call(this) },
+        set(value: number) {
+          width.set!.call(this, value)
+          Object.defineProperty(this, 'width', width)
+          scroll.set!.call(viewport, viewport.scrollTop + nativeDelta)
+        },
+      })
+      viewport.dispatchEvent(new Event('touchstart'))
+      writes.length = 0
+      return { top: viewport.querySelector('img[data-resource="50"]')!.getBoundingClientRect().top }
+    }, nativeDelta)
+    await page.evaluate(() => window.comicFixture.release(49))
+    await expect(imageAt(page, 49)).toHaveAttribute('height', '5000')
+    await loaded(page, 49)
+    expect((await current(page)).index).toBe(50)
+    expect(Math.abs(await imageAt(page, 50).evaluate(image => image.getBoundingClientRect().top) - (before.top - nativeDelta))).toBeLessThanOrEqual(1)
+    expect(await page.evaluate(() => window.comicFixture.writes)).toEqual([])
+    await page.evaluate(() => {
+      window.comicFixture.viewport.dispatchEvent(new Event('touchend'))
+      window.comicFixture.viewport.dispatchEvent(new Event('scrollend'))
+    })
+    expect(await page.evaluate(() => window.comicFixture.writes)).toHaveLength(1)
+    expect(Math.abs(await imageAt(page, 50).evaluate(image => image.getBoundingClientRect().top) - (before.top - nativeDelta))).toBeLessThanOrEqual(1)
+  })
+
+  test('连续触摸与松手后的惯性滚动跨页时单调前进', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', '真实触摸注入依赖 Chromium CDP；WebKit 使用异步滚动与几何回归。')
     await open(page, { image: [...png(1000, 2000, [80, 120, 180])], location: { format: 'comic', index: 449, ratio: .7 } })
     await loaded(page, 449); await loaded(page, 450); await loaded(page, 451)
     await page.evaluate(() => {
@@ -257,7 +308,7 @@ test.describe('手机触摸滚动', () => {
     expect(await page.evaluate(() => window.comicFixture.writes)).toEqual([])
   })
 
-  test('探测先于整图到达时估高仍能学习，连续甩动到达的当前页不会被后台重新选择', async ({ page }) => {
+  test('探测先于整图到达时估高仍能学习，连续甩动到达的当前页不会被后台重新选择', async ({ page, browserName }) => {
     // 真实网络形态：64 KiB 头部探测 300ms、整图 1200ms；各页字节相同、真实高 5000（初始估高 ≈ 2.2 个视口高 ≈ 1857）。
     const strip = padded(390, 5000, [88, 120, 200], 200_000)
     await open(page, { count: 300, location: { format: 'comic', index: 0 }, image: strip, delays: { head: 300, full: 1200 } })
@@ -277,11 +328,17 @@ test.describe('手机触摸滚动', () => {
     const offset = await imageAt(page, before.index).evaluate((image) => -image.getBoundingClientRect().top)
     expect(offset).toBeCloseTo(30_000 - before.index * 844 * 2.2, 0)
     // 学习仍用于后续布局，不关闭探测或冻结所有未知页来掩盖跳动。
-    await page.mouse.move(195, 422); await page.mouse.wheel(0, 5000)
+    if (browserName === 'webkit') {
+      // 移动 WebKit 不支持 mouse.wheel，使用原生 setter 推进后核对页码映射。
+      await page.locator('#viewport').evaluate(node => { node.scrollTop += 5000 })
+    } else {
+      await page.mouse.move(195, 422); await page.mouse.wheel(0, 5000)
+    }
     await expect.poll(async () => (await current(page)).index).toBe(before.index + 1)
   })
 
-  test('惯性滚动中锚点上方页面陆续探测出真实尺寸时不改写 scrollTop、画面不往回跳，停稳后才一次结清', async ({ page }) => {
+  test('惯性滚动中锚点上方页面陆续探测出真实尺寸时不改写 scrollTop、画面不往回跳，停稳后才一次结清', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', '真实触摸注入依赖 Chromium CDP；WebKit 使用异步滚动与几何回归。')
     // 长短交替的参差条漫（3000/7000，字节几乎相同）：估高只能落在中间，每一页探测到达都会修正锚点上方高度。
     // 真实网络形态：探测 300ms 先到、整图 1200ms 后到。
     const short = padded(390, 3000, [88, 120, 200], 200_000), long = padded(390, 7000, [200, 120, 88], 200_000)
