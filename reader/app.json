@@ -1,7 +1,7 @@
 {
   "id": "reader",
   "name": "阅读馆",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "api_version": 2,
   "min_host_version": "0.3.3",
   "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -13,7 +13,7 @@
   "integration": {
     "file_types": ["txt", "epub", "pdf", "cbz", "zip"],
     "directories": true,
-    "changelog": "书库由用户手动命名并一库绑定一个目录，创建后仅扫描该目录并持久保存索引；不自动采用旧来源或授权目录。漫画默认铺满屏幕宽度并可纵向滚动，保留进度和书签。",
+    "changelog": "手机书库默认收起筛选与分组，已启用条件显示数量；压紧顶栏、书库标题和目录路径，保留 44px 点击区域。批量分组使用独立移动栏，桌面筛选直接显示；从 1.0.2 更新保留已有书库、分组、进度和书签。",
     "formats": ["TXT", "EPUB 2/3", "PDF", "CBZ", "ZIP", "图片目录"],
     "limitations": [
       "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",

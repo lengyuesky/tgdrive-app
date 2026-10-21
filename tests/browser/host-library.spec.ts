@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { seedReaderSource, enterReaderShelf } from './reader-helpers'
+import { seedReaderSource, enterReaderShelf, expandReaderFilters } from './reader-helpers'
 
 for (const width of [390, 1280]) test(`宿主全库子目录分页、重开恢复、文件变更拒绝旧游标（${width}）`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
@@ -14,6 +14,7 @@ for (const width of [390, 1280]) test(`宿主全库子目录分页、重开恢�
   await page.goto('/apps/reader')
   const frame = page.frameLocator('iframe')
   await enterReaderShelf(page)
+  await expandReaderFilters(page)
   await frame.locator('#btn-view-host').click()
   await expect(frame.locator('#host-items .library-card')).toHaveCount(40)
   await expect(frame.locator('#host-items')).toContainText('书000.txt')
@@ -23,6 +24,7 @@ for (const width of [390, 1280]) test(`宿主全库子目录分页、重开恢�
   await expect.poll(() => frame.locator('body').evaluate(async () => (await window.tgdrive.storage.get<any>('library:host-position:v1:source:' + (await window.tgdrive.files.stat({ path: '/全库分页' })).id))?.value.page)).toBe(2)
   await page.reload()
   await enterReaderShelf(page)
+  await expandReaderFilters(page)
   await frame.locator('#btn-view-host').click()
   await expect(frame.locator('#host-page')).toHaveText('第 2 页')
   await expect(frame.locator('#host-items')).toContainText('书040.txt')

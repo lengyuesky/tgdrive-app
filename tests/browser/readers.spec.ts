@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { seedReaderSource, enterReaderShelf, revealReader, closeReaderPanel } from './reader-helpers'
+import { seedReaderSource, enterReaderShelf, expandReaderFilters, revealReader, closeReaderPanel } from './reader-helpers'
 import type { Progress } from '../../reader/state'
 const base = 'http://127.0.0.1:4187'
 async function authenticate(page: Page) {
@@ -39,6 +39,7 @@ for (const width of [390, 1280]) {
       ['zip', '漫画压缩包.zip', '.comic-page img'],
       ['images', '图片目录', '.comic-page img'],
     ]) {
+      await expandReaderFilters(page)
       await frame.getByRole('combobox', { name: '筛选格式', exact: true }).selectOption(format!)
       await expect(cards).toHaveCount(1)
       const nodeId = await frame.locator('body').evaluate(async (_node, path) => (await window.tgdrive.files.stat({ path })).id, `/混合书库/${title}`)

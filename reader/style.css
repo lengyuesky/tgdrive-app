@@ -217,6 +217,7 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .mobile-title { font-size: 18px; margin: 0; white-space: nowrap; }
 .mobile-actions { display: flex; gap: 6px; }
 .mobile-action-btn { padding: 6px 10px; font-size: 12px; }
+.mobile-action-icon { display: none; }
 .mobile-bottom-nav { display: none; align-items: center; justify-content: space-around; height: 56px; border-top: 1px solid var(--line); background: var(--surface); flex-shrink: 0; z-index: 10; }
 .bottom-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; border: none; background: transparent; padding: 4px; gap: 2px; font-size: 11px; cursor: pointer; color: var(--muted); }
 .bottom-tab.active { color: var(--accent); font-weight: 700; }
@@ -260,8 +261,26 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 /* 书库样式 */
 .library-view-container { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
 .library-toolbar { display: flex; flex-direction: column; gap: 10px; }
+.library-toolbar-main { display: flex; align-items: center; gap: 10px; }
+.library-toolbar-main .toolbar-search-row { flex: 1; min-width: 0; flex-wrap: nowrap; }
+.library-toolbar-main .toolbar-search-row input[type="search"] { width: 100%; min-width: 0; }
+.library-toolbar-main .btn-refresh { flex-shrink: 0; width: 44px; min-width: 44px; min-height: 44px; padding: 0; font-size: 22px; }
 .toolbar-search-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .toolbar-search-row input[type="search"] { flex: 1; min-width: 180px; }
+.toolbar-options-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
+.library-filters-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; font-size: 13px; white-space: nowrap; }
+.filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--accent); color: var(--surface); font-size: 11px; font-weight: 700; }
+.filter-chevron { transition: transform .15s; }
+.library-filters-toggle[aria-expanded="true"] .filter-chevron { transform: rotate(180deg); }
+.library-filter-panel { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.library-filter-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.library-filter-actions > button { min-height: 36px; font-size: 12px; padding: 6px 10px; }
+#btn-library-filters-done { margin-left: auto; }
+.library-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.library-heading-meta { min-width: 0; flex: 1; }
+.library-heading h2 { margin: 0; font-size: 20px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-heading-path { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-heading > button { flex-shrink: 0; min-height: 44px; font-size: 13px; padding: 6px 10px; }
 .view-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .toggle-btn { border: none; border-radius: 0; padding: 6px 12px; background: var(--surface); font-size: 13px; }
 .toggle-btn.active { background: var(--accent); color: #fff; }
@@ -383,11 +402,17 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .body-search [data-search-results] button { display: flex; flex-direction: column; width: 100%; text-align: left; white-space: normal; padding: 10px; gap: 4px; }
 .body-search [data-search-results] span { overflow-wrap: anywhere; }
 
-/* 图书手动分组工具栏与多选状态。 */
-.book-group-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
-.book-group-controls select { max-width: 100%; min-width: 100px; }
+/* 图书手动分组操作随筛选面板收起；只有多选时展示独立的移动工具栏。 */
+.book-group-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .book-group-controls button, .book-group-row button { min-height: 36px; padding: 6px 10px; }
-.book-group-controls select, .book-group-row input { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.book-group-controls button { font-size: 12px; }
+.book-group-controls > span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.book-group-selection { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+.group-selection-heading, .group-selection-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#group-selection-count { margin-right: auto; font-size: 12px; font-weight: 600; }
+.group-selection-heading button, .group-selection-actions button { min-height: 36px; padding: 6px 8px; font-size: 12px; }
+.group-selection-actions select { flex: 1; width: 100%; min-width: 100px; }
+.book-group-row input { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
 .book-group-list { max-height: 50vh; overflow-y: auto; }
 .book-group-row { display: flex; gap: 6px; margin: 10px 0; align-items: center; }
 .book-group-row input { flex: 1; min-width: 0; width: 100%; }

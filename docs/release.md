@@ -11,16 +11,16 @@
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共三包）：
   - `apps/shorts-1.4.6.tgapp`
-  - `apps/reader-1.0.2.tgapp`
+  - `apps/reader-1.0.3.tgapp`
   - `apps/cinema-1.4.5.tgapp`
 
-根目录分发资产为 reader 1.0.2。本版书库仅由用户手动创建，一库绑定一个目录，创建后扫描并持久保存索引；目录授权和旧来源不自动成为书库。漫画默认铺满宽度并允许纵向滚动，旧版默认组合迁移一次，阅读进度、书签及自定义偏好保留。构建、四张正式截图、真实旧包升级与本机完整集成验收见 [1.0.2 发布验收记录](reader-1.0.2-release.md)。首次替换旧 books/comics 的清理行为仍须单独确认。
+根目录分发资产为 reader 1.0.3。本版压紧手机书库顶栏、标题与目录路径，筛选和分组默认收起、按需展开；多选使用独立移动栏，桌面筛选直接显示。从 1.0.2 升级保留已有书库、分组、阅读进度、书签和自定义偏好。构建、四张正式截图、真实旧包升级与本机完整集成验收见 [1.0.3 发布验收记录](reader-1.0.3-release.md)。手动目录书库、漫画默认适宽和首次替换旧 books/comics 的确认边界不变。
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
 <sha256>  apps/cinema-1.4.5.tgapp
-<sha256>  apps/reader-1.0.2.tgapp
+<sha256>  apps/reader-1.0.3.tgapp
 <sha256>  apps/shorts-1.4.6.tgapp
 <sha256>  catalog.json
 ```
@@ -45,7 +45,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -66,7 +66,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "书库由用户手动命名并一库绑定一个目录，创建后仅扫描该目录并持久保存索引；不自动采用旧来源或授权目录。漫画默认铺满屏幕宽度并可纵向滚动，保留进度和书签。",
+          "changelog": "手机书库默认收起筛选与分组，已启用条件显示数量；压紧顶栏、书库标题和目录路径，保留 44px 点击区域。批量分组使用独立移动栏，桌面筛选直接显示；从 1.0.2 更新保留已有书库、分组、进度和书签。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -93,7 +93,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.2.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.3.tgapp"
     }
   ]
 }

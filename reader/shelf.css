@@ -51,9 +51,34 @@ body[data-theme="sepia"] #app[data-app="reader"] { --accent: #456d35; --soft: #e
   #app[data-app="reader"] .source-list-item { align-items:flex-start; flex-direction:column; }
 }
 
+/* 书库标题和路径共用一块紧凑区域，避免段落默认外边距叠加 flex 间距。 */
+#app[data-app="reader"] .library-view-container { gap: 12px; padding-top: 16px; }
+
 @media (max-width: 768px), (pointer: coarse) {
-  #app[data-app="reader"] .home-container,
-  #app[data-app="reader"] .library-view-container { padding: 18px 16px; }
+  #app[data-app="reader"] .mobile-header { padding: 2px 12px; }
+  #app[data-app="reader"] .mobile-title { font-size: 16px; }
+  #app[data-app="reader"] .mobile-action-btn { width: 44px; min-width: 44px; padding: 0; }
+  #app[data-app="reader"] .mobile-action-icon { display: inline; font-size: 22px; }
+  #app[data-app="reader"] .mobile-action-label { display: none; }
+  #app[data-app="reader"] .home-container { padding: 18px 16px; }
+  #app[data-app="reader"] .library-view-container { padding: 10px 12px 16px; gap: 10px; }
+  #app[data-app="reader"] .library-heading { gap: 8px; }
+  #app[data-app="reader"] .library-heading h2 { font-size: 18px; }
+  #app[data-app="reader"] .library-heading > button { padding: 6px 8px; font-size: 12px; }
+  #app[data-app="reader"] .library-toolbar-main { flex-direction: column; align-items: stretch; gap: 6px; }
+  #app[data-app="reader"] .toolbar-search-row { gap: 8px; }
+  #app[data-app="reader"] .library-filters-toggle { min-height: 44px; padding: 6px 8px; font-size: 12px; }
+  #app[data-app="reader"] .toggle-btn { min-width: 56px; min-height: 44px; padding: 6px 10px; font-size: 12px; }
+  #app[data-app="reader"] .library-filter-panel { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  #app[data-app="reader"] .library-filter-actions > button,
+  #app[data-app="reader"] .book-group-controls button,
+  #app[data-app="reader"] .group-selection-heading button,
+  #app[data-app="reader"] .group-selection-actions button { min-height: 44px; }
+  #app[data-app="reader"] .group-selection-heading,
+  #app[data-app="reader"] .group-selection-actions { flex-wrap: nowrap; gap: 6px; }
+  #app[data-app="reader"] .group-selection-actions select { min-width: 0; }
+  #app[data-app="reader"] .group-selection-heading button,
+  #app[data-app="reader"] .group-selection-actions button { flex-shrink: 0; }
   #app[data-app="reader"] .library-grid,
   #app[data-app="reader"] .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
   #app[data-app="reader"] .toolbar-filters-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

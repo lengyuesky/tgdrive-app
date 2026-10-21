@@ -29,6 +29,12 @@ export async function enterReaderShelf(page: Page, path?: string) {
   await expect(frame.locator('#items .library-card').first()).toBeVisible()
 }
 
+/** 手机端先通过折叠入口打开筛选；桌面筛选常驻，无需额外操作。 */
+export async function expandReaderFilters(page: Page) {
+  const toggle = page.frameLocator('iframe').locator('#btn-library-filters')
+  if (await toggle.isVisible() && (await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
+}
+
 /** 在真实宿主沙箱内通过用户表单手动创建一个书库。 */
 export async function createReaderShelf(page: Page, name: string, path: string) {
   const frame = page.frameLocator('iframe')

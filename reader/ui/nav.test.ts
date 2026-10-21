@@ -135,6 +135,19 @@ describe('阅读馆书库侧边栏', () => {
     expect(x.media.removeEventListener).toHaveBeenCalled()
   })
 
+  it('手机顶栏图标保留目录设置和返回网盘的无障碍名称与真实操作', async () => {
+    const x = await setup('all', true)
+    const settings = x.container.querySelector<HTMLButtonElement>('#btn-mobile-settings')!
+    const close = x.container.querySelector<HTMLButtonElement>('#btn-mobile-close')!
+    expect(settings.getAttribute('aria-label')).toBe('目录设置')
+    expect(close.getAttribute('aria-label')).toBe('返回网盘')
+    expect(settings.querySelector('.mobile-action-icon')?.getAttribute('aria-hidden')).toBe('true')
+    settings.click(); close.click()
+    expect(x.drive.settings.open).toHaveBeenCalledOnce()
+    expect(x.context.closeApp).toHaveBeenCalledOnce()
+    expect(x.context.reportError).not.toHaveBeenCalled()
+  })
+
   it('切换失败通过统一错误入口报告，不产生未处理拒绝', async () => {
     const x = await setup()
     const error = new Error('来源暂时不可用')

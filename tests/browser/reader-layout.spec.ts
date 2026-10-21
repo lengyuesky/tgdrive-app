@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createReaderShelf, enterReaderShelf, revealReader } from './reader-helpers'
+import { createReaderShelf, enterReaderShelf, expandReaderFilters, revealReader } from './reader-helpers'
 
 const host = 'http://127.0.0.1:4187'
 const frame = (page: Page) => page.frameLocator('iframe')
@@ -11,7 +11,7 @@ async function install(page: Page) {
   const index = await (await page.request.get('/api/apps')).json()
   for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
   const reader = index.available.find((app: { manifest: { id: string } }) => app.manifest.id === 'reader')
-  expect(reader.manifest.version).toBe('1.0.2')
+  expect(reader.manifest.version).toBe('1.0.3')
   expect((await page.request.post('/api/apps/catalog/reader/install', { data: { digest: reader.digest } })).ok()).toBe(true)
   expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'selected', paths: ['/混合书库'] } })).ok()).toBe(true)
   await page.goto('/apps/reader')
@@ -20,6 +20,71 @@ async function install(page: Page) {
 }
 
 for (const width of [390, 1280]) {
+  test(`书库紧凑筛选在真实宿主内保留条件与多选操作 ${width}`, async ({ page }, info) => {
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.setViewportSize({ width, height: 844 })
+    await install(page)
+    await createReaderShelf(page, '我的紧凑书库', '/混合书库')
+    const app = frame(page), toggle = app.locator('#btn-library-filters'), panel = app.locator('#library-filter-panel')
+    if (width <= 768) {
+      await expect(panel).toBeHidden()
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect((await app.locator('.mobile-header').boundingBox())!.height).toBeLessThanOrEqual(50)
+      const top = await page.locator('iframe').boundingBox(), card = await app.locator('#items .library-card').first().boundingBox()
+      expect(card!.y - top!.y).toBeLessThanOrEqual(225)
+    } else {
+      await expect(toggle).toBeHidden()
+      await expect(panel).toBeVisible()
+    }
+    await expandReaderFilters(page)
+    await app.getByRole('combobox', { name: '筛选格式', exact: true }).selectOption('txt')
+    await expect(app.locator('#items .library-card')).toHaveCount(1)
+    await expect(app.locator('#library-filter-count')).toHaveText('1')
+    if (width <= 768) {
+      await app.locator('#btn-library-filters-done').click()
+      await expect(panel).toBeHidden()
+      await expect(toggle).toBeFocused()
+      await expandReaderFilters(page)
+    }
+    await expect(app.locator('#filter-format')).toHaveValue('txt')
+    await app.locator('#btn-library-clear-filters').click()
+    await expect(app.locator('#items .library-card')).toHaveCount(6)
+    await expect(app.locator('#library-filter-count')).toBeHidden()
+    await app.getByRole('button', { name: '管理分组', exact: true }).click()
+    await app.getByRole('textbox', { name: '新分组名称', exact: true }).fill('精选')
+    await app.getByRole('button', { name: '新建', exact: true }).click()
+    await expect(app.getByRole('textbox', { name: '分组名称：精选', exact: true })).toBeVisible()
+    await app.getByRole('button', { name: '完成', exact: true }).click()
+    await app.getByRole('button', { name: '批量分组', exact: true }).click()
+    if (width <= 768) await expect(panel).toBeHidden()
+    await expect(app.locator('#book-group-selection')).toBeVisible()
+    await app.locator('#items .library-card').filter({ hasText: '文字.txt' }).click()
+    await expect(app.locator('#group-selection-count')).toHaveText('已选 1 本')
+    await expandReaderFilters(page)
+    if (width <= 768) await app.locator('#btn-library-filters-done').click()
+    await expect(app.locator('#group-selection-count')).toHaveText('已选 1 本')
+    await app.getByRole('combobox', { name: '移动到分组', exact: true }).selectOption({ label: '精选' })
+    await app.getByRole('button', { name: '移动', exact: true }).click()
+    await expect(app.locator('#items .library-card').filter({ hasText: '文字.txt' }).locator('.book-group-badge')).toHaveText('精选')
+    await app.getByRole('button', { name: '退出多选', exact: true }).click()
+    await expandReaderFilters(page)
+    await app.getByRole('combobox', { name: '筛选分组', exact: true }).selectOption({ label: '精选' })
+    await expect(app.locator('#items .library-card')).toHaveCount(1)
+    await expect(app.locator('#library-filter-count')).toHaveText('1')
+    if (width <= 768) await app.locator('#btn-library-filters-done').click()
+    await app.locator('#items .library-card').click()
+    await expect(app.locator('#position')).not.toHaveText('')
+    await revealReader(page)
+    await app.locator('#back').click()
+    await expect(app.locator('#items .library-card')).toHaveCount(1)
+    await expect(app.locator('#filter-book-group')).toHaveValue(await app.locator('#filter-book-group option', { hasText: '精选' }).getAttribute('value') as string)
+    if (width <= 768) await expect(panel).toBeHidden()
+    expect(await app.locator('.ui-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await page.screenshot({ path: info.outputPath(`reader-compact-${width}.png`) })
+    expect(errors).toEqual([])
+  })
+
   test(`手动创建单目录书库持久索引与漫画铺满宽度 ${width}`, async ({ page }, info) => {
     const errors: string[] = [], outside: string[] = [], calls: { method: string; params: Record<string, unknown> }[] = []
     page.on('pageerror', error => errors.push(error.message))

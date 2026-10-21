@@ -1,0 +1,103 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { expect, test } from '@playwright/test'
+import { createReaderShelf, enterReaderShelf, expandReaderFilters, revealReader } from './reader-helpers'
+
+/** 必须安装真实旧包，再从宿主更新界面升级，不用合成清单冒充旧版。 */
+test('阅读馆真实 1.0.2 升级到 1.0.3 保留已有书库、分组、进度和书签', async ({ page }) => {
+  const previous = process.env.TGDRIVE_READER_PREVIOUS_STABLE_PACKAGE
+  test.skip(!previous, '需显式提供 TGDRIVE_READER_PREVIOUS_STABLE_PACKAGE 指向隔离的 1.0.2 包')
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
+  expect((await page.request.post('/api/auth/login', { data: { username: 'apps-test', password: 'apps-test-only' } })).ok()).toBe(true)
+  expect((await page.request.post('/__apps_fixture/media', { data: { enabled: false } })).ok()).toBe(true)
+  const apps = await (await page.request.get('/api/apps')).json()
+  for (const app of apps.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
+  const bytes = await readFile(previous!)
+  const inspected = await page.request.post('/api/apps/inspect', { data: bytes, headers: { 'Content-Type': 'application/octet-stream' } })
+  expect(inspected.ok()).toBe(true)
+  const preview = await inspected.json()
+  expect(preview.manifest).toMatchObject({ id: 'reader', version: '1.0.2' })
+  expect((await page.request.post('/api/apps/install', {
+    params: { digest: preview.digest }, data: bytes, headers: { 'Content-Type': 'application/octet-stream' },
+  })).ok()).toBe(true)
+  expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'selected', paths: ['/混合书库'] } })).ok()).toBe(true)
+  await page.goto('/apps/reader')
+  await createReaderShelf(page, '升级前的书库', '/混合书库')
+  const frame = page.frameLocator('iframe')
+  await expect(frame.locator('#items .library-card')).toHaveCount(6)
+  await frame.getByRole('button', { name: '管理分组', exact: true }).click()
+  await frame.getByRole('textbox', { name: '新分组名称', exact: true }).fill('我收藏的书')
+  await frame.getByRole('button', { name: '新建', exact: true }).click()
+  await expect(frame.getByRole('textbox', { name: '分组名称：我收藏的书', exact: true })).toBeVisible()
+  await frame.getByRole('button', { name: '完成', exact: true }).click()
+  await frame.getByRole('button', { name: '批量分组', exact: true }).click()
+  await frame.locator('#items .library-card').filter({ hasText: '文字.txt' }).click()
+  await frame.getByRole('combobox', { name: '移动到分组', exact: true }).selectOption({ label: '我收藏的书' })
+  await frame.getByRole('button', { name: '移动', exact: true }).click()
+  await expect(frame.locator('#items .library-card').filter({ hasText: '文字.txt' }).locator('.book-group-badge')).toHaveText('我收藏的书')
+  await frame.getByRole('button', { name: '退出多选', exact: true }).click()
+  await frame.locator('#items .library-card').filter({ hasText: '文字.txt' }).click()
+  await expect(frame.locator('#position')).not.toHaveText('')
+  await revealReader(page)
+  await frame.locator('#bookmarks-toggle').click()
+  await frame.locator('#bookmark-name').fill('升级前书签')
+  await frame.locator('#add-bookmark').click()
+  await expect(frame.getByRole('textbox', { name: '修改书签名称', exact: true })).toHaveValue('升级前书签')
+  await frame.locator('#bookmarks [data-close-panel]').click()
+  await frame.locator('#preferences-toggle').click()
+  await frame.locator('#font-size-increase').click()
+  await frame.locator('#preferences [data-close-panel]').click()
+  await frame.locator('#back').click()
+  await expect(frame.locator('#items .library-card')).toHaveCount(6)
+
+  let session = (await (await page.request.post('/api/apps/reader/launch')).json()).session as string
+  const rpc = async <T = unknown>(method: string, params: object): Promise<T> => {
+    const response = await page.request.post('/api/apps/reader/rpc', { data: { session, method, params } })
+    expect(response.ok()).toBe(true)
+    return response.json() as Promise<T>
+  }
+  const file = await rpc<{ id: number }>('files.stat', { path: '/混合书库/文字.txt' })
+  const before = await rpc<{ records: { key: string; value: unknown; revision: string }[] }>('storage.list', { prefix: '', limit: 200 })
+  expect(before.records.some(record => record.key === 'library:shelves:v1')).toBe(true)
+  expect(before.records.some(record => record.key.startsWith('library:cache:shelves:v1:index:source:'))).toBe(true)
+  expect(before.records.some(record => record.key === 'library:book-groups')).toBe(true)
+  expect(before.records.some(record => record.key === `progress:${file.id}`)).toBe(true)
+  expect(before.records.some(record => record.key.startsWith(`bookmark:${file.id}:`))).toBe(true)
+  expect(before.records.some(record => record.key === 'preferences')).toBe(true)
+  const grant = await (await page.request.get('/api/apps/reader')).json()
+  const packagePath = process.env.TGDRIVE_APP_CATALOG_DIR
+    ? join(process.env.TGDRIVE_APP_CATALOG_DIR, 'reader-1.0.3.tgapp')
+    : new URL('../../apps/reader-1.0.3.tgapp', import.meta.url)
+  await page.goto('/apps')
+  await page.locator('input[type="file"][accept=".tgapp,.zip"]').setInputFiles({
+    name: 'reader-1.0.3.tgapp', mimeType: 'application/octet-stream', buffer: await readFile(packagePath),
+  })
+  const dialog = page.getByRole('dialog', { name: '更新应用', exact: true })
+  await expect(dialog).toContainText('1.0.3')
+  await dialog.getByRole('button', { name: '同意并更新', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  const upgraded = await (await page.request.get('/api/apps/reader')).json()
+  expect(upgraded.manifest.version).toBe('1.0.3')
+  expect(upgraded.digest).not.toBe(preview.digest)
+  expect(upgraded.scope_mode).toBe(grant.scope_mode)
+  expect(upgraded.scope).toEqual(grant.scope)
+  session = (await (await page.request.post('/api/apps/reader/launch')).json()).session as string
+  for (const record of before.records) expect(await rpc('storage.get', { key: record.key })).toMatchObject(record)
+  await page.goto('/apps/reader')
+  await expect(frame.locator('#view-home .shelf-card')).toHaveCount(1)
+  await expect(frame.locator('#view-home .shelf-card')).toContainText('升级前的书库')
+  await enterReaderShelf(page)
+  await expect(frame.locator('#items .library-card')).toHaveCount(6)
+  await expect(frame.locator('#library-filter-panel')).toBeHidden()
+  await expandReaderFilters(page)
+  await frame.getByRole('combobox', { name: '筛选分组', exact: true }).selectOption({ label: '我收藏的书' })
+  await expect(frame.locator('#items .library-card')).toHaveCount(1)
+  await expect(frame.locator('#items .library-card')).toHaveAttribute('data-file-id', String(file.id))
+  await frame.locator('#btn-library-filters-done').click()
+  await frame.locator('#items .library-card').click()
+  await expect(frame.locator('#position')).not.toHaveText('')
+  await revealReader(page)
+  await frame.locator('#bookmarks-toggle').click()
+  await expect(frame.getByRole('textbox', { name: '修改书签名称', exact: true })).toHaveValue('升级前书签')
+})

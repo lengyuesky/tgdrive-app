@@ -91,9 +91,10 @@ async function setupApp(
     /** 延迟随请求字节数增长：头部探测远快于整图/整块读取，模拟真实网络。 */
     proportionalRead?: boolean
     sourcePaths?: string[]
+    shelfNames?: string[]
   }
 ) {
-  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [], readDelay = 0, proportionalRead = false, sourcePaths = ['/书库'] } = options
+  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [], readDelay = 0, proportionalRead = false, sourcePaths = ['/书库'], shelfNames = [] } = options
   await page.setViewportSize(viewport)
 
   const outsideRequests: string[] = []
@@ -277,11 +278,11 @@ async function setupApp(
   }))
 
   await page.addInitScript(
-    ({ kind, entries, serializedList, readDelay, proportionalRead, sourcePaths }) => {
+    ({ kind, entries, serializedList, readDelay, proportionalRead, sourcePaths, shelfNames }) => {
       const storageStore = new Map<string, { key: string; value: any; revision: string; updated_at: number }>()
-      const sources = sourcePaths.map(path => {
+      const sources = sourcePaths.map((path, index) => {
         const source = entries.find(file => file.path === path && file.is_dir)!
-        return { nodeId: source.id, name: source.path.split('/').pop() || '我的网盘', path: source.path, contentVersion: source.content_version, addedAt: 1, rootConfirmed: false }
+        return { nodeId: source.id, name: shelfNames[index] ?? (source.path.split('/').pop() || '我的网盘'), path: source.path, contentVersion: source.content_version, addedAt: 1, rootConfirmed: false }
       })
       storageStore.set('library:shelves:v1', { key: 'library:shelves:v1', value: { schemaVersion: 1, sources }, revision: 'sources-1', updated_at: 1 })
       window.standaloneImmersion = { active: false, calls: [] }
@@ -396,6 +397,7 @@ async function setupApp(
       readDelay,
       proportionalRead,
       sourcePaths,
+      shelfNames,
     }
   )
 
@@ -403,6 +405,11 @@ async function setupApp(
   await expect(page.locator('#app')).toBeVisible()
 
   return { outsideRequests }
+}
+
+async function expandLibraryFilters(page: Page) {
+  const toggle = page.locator('#btn-library-filters')
+  if (await toggle.isVisible() && (await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
 }
 
 async function enterShelf(page: Page) {
@@ -413,6 +420,92 @@ async function enterShelf(page: Page) {
 }
 
 test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
+  test('手机书库紧凑首屏、折叠筛选与独立多选工具栏', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+    const page = await context.newPage()
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    try {
+      const { outsideRequests } = await setupApp(page, { kind: 'mixed', viewport: { width: 390, height: 844 } })
+      await page.locator('#tab-library').click()
+      await enterShelf(page)
+      const toggle = page.locator('#btn-library-filters'), panel = page.locator('#library-filter-panel')
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      await expect(panel).toBeHidden()
+      const firstCard = page.locator('#items .library-card').first()
+      const cardBox = (await firstCard.boundingBox())!
+      const headerBox = (await page.locator('.mobile-header').boundingBox())!
+      const headingBox = (await page.locator('.library-heading').boundingBox())!
+      expect(headerBox.height, '插件顶栏不超过 50px').toBeLessThanOrEqual(50)
+      expect(headingBox.height, '标题和路径合为紧凑区域').toBeLessThanOrEqual(46)
+      expect(cardBox.y, '390px 手机书籍首行应在 225px 内出现').toBeLessThanOrEqual(225)
+      expect(await page.locator('#library-filter-count').isVisible()).toBe(false)
+      await page.screenshot({ path: test.info().outputPath('mobile-library-compact.png') })
+      await toggle.click()
+      await expect(panel).toBeVisible()
+      await page.locator('#filter-format').selectOption('cbz')
+      await expect(page.locator('#items .library-card')).toHaveCount(2)
+      await expect(page.locator('#library-filter-count')).toHaveText('1')
+      await page.screenshot({ path: test.info().outputPath('mobile-library-expanded.png') })
+      await page.locator('#btn-library-filters-done').click()
+      await expect(panel).toBeHidden()
+      await expect(toggle).toBeFocused()
+      await page.screenshot({ path: test.info().outputPath('mobile-library-filtered.png') })
+      await expandLibraryFilters(page)
+      await expect(page.locator('#filter-format')).toHaveValue('cbz')
+      await page.locator('#filter-kind').selectOption('comics')
+      await expect(page.locator('#filter-kind')).toHaveValue('comics')
+      await expect(page.locator('#filter-format')).toHaveValue('')
+      await expect(panel).toBeVisible()
+      await page.locator('#btn-library-clear-filters').click()
+      await expect(page.locator('#library-filter-count')).toBeHidden()
+      await expect(page.locator('#items .library-card')).toHaveCount(7)
+      await page.getByRole('button', { name: '管理分组', exact: true }).click()
+      await page.getByRole('textbox', { name: '新分组名称', exact: true }).fill('精选')
+      await page.getByRole('button', { name: '新建', exact: true }).click()
+      await expect(page.getByRole('textbox', { name: '分组名称：精选', exact: true })).toBeVisible()
+      await page.getByRole('button', { name: '完成', exact: true }).click()
+      await page.getByRole('button', { name: '批量分组', exact: true }).click()
+      await expect(panel).toBeHidden()
+      await expect(page.locator('#book-group-selection')).toBeVisible()
+      await page.locator('#items [data-file-id="101"]').click()
+      await expect(page.locator('#group-selection-count')).toHaveText('已选 1 本')
+      await page.getByRole('combobox', { name: '移动到分组', exact: true }).selectOption({ label: '精选' })
+      await page.getByRole('button', { name: '移动', exact: true }).click()
+      await expect(page.locator('#items [data-file-id="101"] .book-group-badge')).toHaveText('精选')
+      await page.screenshot({ path: test.info().outputPath('mobile-library-selection.png') })
+      await page.getByRole('button', { name: '退出多选', exact: true }).click()
+      await expect(page.locator('#book-group-selection')).toHaveCount(0)
+      await expect(panel).toBeHidden()
+      const controls = await page.locator('.mobile-header button, .library-toolbar button:visible, .library-heading button').evaluateAll(elements => elements.map(element => {
+        const box = element.getBoundingClientRect()
+        return { width: box.width, height: box.height }
+      }))
+      expect(controls.every(box => box.width >= 44 && box.height >= 44), '折叠后所有触控按钮保持 44px 点击区').toBe(true)
+      expect(await page.locator('.ui-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+      expect(outsideRequests).toEqual([])
+      expect(errors).toEqual([])
+    } finally { await context.close() }
+  })
+
+  test('桌面书库常驻筛选与长书库名称不溢出', async ({ page }) => {
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    const name = 'A_Long_Unbreakable_Library_Name_'.repeat(2)
+    const { outsideRequests } = await setupApp(page, { kind: 'mixed', viewport: { width: 1280, height: 900 }, shelfNames: [name] })
+    await page.locator('#nav-library').click()
+    await enterShelf(page)
+    await expect(page.locator('#btn-library-filters')).toBeHidden()
+    await expect(page.locator('#library-filter-panel')).toBeVisible()
+    await expect(page.locator('.library-heading h2')).toHaveText(name)
+    const heading = (await page.locator('.library-heading').boundingBox())!
+    expect(heading.height).toBeLessThanOrEqual(47)
+    expect(await page.locator('.ui-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await page.screenshot({ path: test.info().outputPath('desktop-library-compact.png') })
+    expect(outsideRequests).toEqual([])
+    expect(errors).toEqual([])
+  })
+
   for (const width of [390, 1280]) {
     test(`漫画全屏适页、适宽与悬浮菜单 ${width}`, async ({ page }) => {
       const errors: string[] = []
@@ -470,6 +563,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
 
   for (const width of [320, 1440]) {
     test(`主页手动目录书库切换与库内分组 ${width}`, async ({ page }) => {
+      const errors: string[] = []
+      page.on('pageerror', error => errors.push(error.message))
       const { outsideRequests } = await setupApp(page, {
         kind: 'mixed', viewport: { width, height: 900 }, sourcePaths: ['/书库', '/书库/参差条漫'],
       })
@@ -477,6 +572,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       const choose = async (id: string) => {
         if (await trigger.isVisible()) await trigger.click()
         await sidebar.locator(`[data-library-id="${id}"]`).click()
+        await expect(page.locator('#items .library-card').first()).toBeVisible()
+        await expandLibraryFilters(page)
       }
       await expect(page.locator('#view-home')).toBeVisible()
       if (width < 769) {
@@ -532,6 +629,7 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await expect(sidebar.locator('[data-library-id="source:1"]')).toContainText('书库')
       await page.screenshot({ path: test.info().outputPath('sidebar-home.png') })
       await sidebar.locator('[data-library-id="source:1"]').click()
+      await expandLibraryFilters(page)
       await page.locator('#filter-book-group').selectOption(groupId!)
       await expect(page.locator('#items .library-card')).toHaveCount(1)
       await expect(page.locator('#items .library-card')).toHaveAttribute('data-file-id', '101')
@@ -550,6 +648,7 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await expect(sidebar.locator('[data-library-id="source:1"]')).toContainText('书库')
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       expect(outsideRequests).toEqual([])
+      expect(errors).toEqual([])
     })
   }
 
@@ -571,6 +670,7 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
         ['pdf', '标准', 'canvas'],
         ['images', '参差条漫', '.comic-page img'],
       ]) {
+        await expandLibraryFilters(page)
         await page.getByRole('combobox', { name: '筛选格式', exact: true }).selectOption(format!)
         await expect(cards.filter({ hasText: title! })).toHaveCount(1)
         await cards.filter({ hasText: title! }).click()
@@ -618,6 +718,11 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await libBtn.click()
       await enterShelf(page)
       await expect(page.locator('#items .library-card').first()).toBeVisible()
+      if (vp.width <= 768) {
+        await expect(page.locator('#library-filter-panel')).toBeHidden()
+        expect((await page.locator('#items .library-card').first().boundingBox())!.y, `${vp.label} 首行封面及时出现`).toBeLessThanOrEqual(225)
+      }
+      expect(await page.locator('.ui-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 
       // 验证页面无水平溢出
       const isOverflow = await page.evaluate(() => {
@@ -1018,6 +1123,7 @@ for (const width of [320, 1440]) {
     await page.locator('#nav-library, #tab-library').filter({ visible: true }).first().click()
     await enterShelf(page)
     await expect(page.locator('#items .library-card')).toHaveCount(3)
+    await expandLibraryFilters(page)
     await page.getByRole('button', { name: '管理分组', exact: true }).click()
     await page.getByRole('textbox', { name: '新分组名称', exact: true }).fill('小说')
     await page.getByRole('button', { name: '新建', exact: true }).click()
@@ -1029,12 +1135,14 @@ for (const width of [320, 1440]) {
     await page.getByRole('combobox', { name: '移动到分组', exact: true }).selectOption({ label: '小说' })
     await page.getByRole('button', { name: '移动', exact: true }).click()
     await expect(page.locator('.library-card[data-file-id="101"] .book-group-badge')).toHaveText('小说')
+    await expandLibraryFilters(page)
     await page.getByRole('combobox', { name: '筛选分组', exact: true }).selectOption({ label: '小说' })
     await expect(page.locator('#items .library-card')).toHaveCount(1)
     await expect(page.locator('#group-selection-count')).toHaveText('已选 0 本')
     await page.getByRole('button', { name: '全选当前页', exact: true }).click()
     await expect(page.locator('#group-selection-count')).toHaveText('已选 1 本')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    expect(await page.locator('.ui-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
     await page.screenshot({ path: test.info().outputPath('groups.png') })
     await page.getByRole('button', { name: '管理分组', exact: true }).click()
     await page.screenshot({ path: test.info().outputPath('group-manager.png') })

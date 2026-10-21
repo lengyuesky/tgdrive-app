@@ -47,6 +47,8 @@ export class LibraryView {
   private displayed: CatalogItem[] = []
   private savingGroups = false
   private targetGroup = ''
+  private filtersExpanded = false
+  private media = window.matchMedia?.('(max-width: 768px), (pointer: coarse)')
 
   constructor(
     private container: HTMLElement,
@@ -70,6 +72,7 @@ export class LibraryView {
 
   async selectLibrary(selection: LibrarySelection) {
     this.hostMode = false
+    this.filtersExpanded = false
     this.selecting = false
     this.selected.clear()
     this.sdkPageCursors.clear()
@@ -135,41 +138,54 @@ export class LibraryView {
       <div class="library-view-container">
         <!-- 搜索与筛选工具栏 -->
         <div class="library-toolbar">
-          <div class="toolbar-search-row">
-            <input
-              id="library-search"
-              type="search"
-              placeholder="搜索书名或作者…"
-              aria-label="搜索书名或作者"
-            />
-            <button id="btn-library-refresh" class="btn-refresh" title="刷新书库">刷新</button>
-            <div class="view-toggle">
-              ${this.context.drive.can?.('library.page') && this.context.drive.library ? `<button id="btn-view-host" class="toggle-btn" type="button">${this.context.library.manualShelves ? '目录全部文件' : '全库'}</button>` : ''}
-              <button id="btn-view-works" class="toggle-btn ${this.state.view === 'works' ? 'active' : ''}" type="button">作品</button>
-              <button id="btn-view-files" class="toggle-btn ${this.state.view === 'files' ? 'active' : ''}" type="button">文件</button>
+          <div class="library-toolbar-main">
+            <div class="toolbar-search-row">
+              <input
+                id="library-search"
+                type="search"
+                placeholder="搜索书名或作者…"
+                aria-label="搜索书名或作者"
+              />
+              <button id="btn-library-refresh" class="btn-refresh" type="button" aria-label="刷新书库" title="刷新书库">↻</button>
+            </div>
+            <div class="toolbar-options-row">
+              <div class="view-toggle" role="group" aria-label="浏览方式">
+                <button id="btn-view-works" class="toggle-btn ${this.state.view === 'works' ? 'active' : ''}" type="button">作品</button>
+                <button id="btn-view-files" class="toggle-btn ${this.state.view === 'files' ? 'active' : ''}" type="button">文件</button>
+              </div>
+              <button id="btn-library-filters" class="library-filters-toggle" type="button" aria-controls="library-filter-panel" aria-expanded="false" hidden>
+                <span>${hasGroups ? '筛选与分组' : '筛选与排序'}</span><span id="library-filter-count" class="filter-count" hidden></span><span class="filter-chevron" aria-hidden="true">⌄</span>
+              </button>
             </div>
           </div>
-          <div class="toolbar-filters-row">
-            ${this.context.kind === 'all' ? '<select id="filter-kind" aria-label="筛选内容类型"><option value="">全部书漫</option><option value="books">图书</option><option value="comics">漫画</option></select>' : ''}
-            <select id="filter-format" aria-label="筛选格式">
-              <option value="">全部格式</option>
-              ${scopeFormats(this.state.kind ?? this.context.kind).map(format => `<option value="${format}">${format === 'images' ? '图片目录' : format.toUpperCase()}</option>`).join('')}
-            </select>
-            <select id="filter-source" aria-label="筛选来源">
-              <option value="">全部来源</option>
-            </select>
-            <select id="filter-status" aria-label="筛选阅读状态">
-              <option value="">全部状态</option>
-              <option value="unread">未读</option>
-              <option value="reading">在读</option>
-              <option value="read">已读</option>
-              <option value="unknown">进度未知</option>
-            </select>
-            <select id="sort-select" aria-label="排序方式">
-              <option value="title">按名称排序</option>
-              <option value="added">按加入时间</option>
-              <option value="recent">按最近阅读</option>
-            </select>
+          <div id="library-filter-panel" class="library-filter-panel" hidden>
+            <div class="toolbar-filters-row">
+              ${this.context.kind === 'all' ? '<select id="filter-kind" aria-label="筛选内容类型"><option value="">全部书漫</option><option value="books">图书</option><option value="comics">漫画</option></select>' : ''}
+              <select id="filter-format" aria-label="筛选格式">
+                <option value="">全部格式</option>
+                ${scopeFormats(this.state.kind ?? this.context.kind).map(format => `<option value="${format}">${format === 'images' ? '图片目录' : format.toUpperCase()}</option>`).join('')}
+              </select>
+              <select id="filter-source" aria-label="筛选来源">
+                <option value="">全部来源</option>
+              </select>
+              <select id="filter-status" aria-label="筛选阅读状态">
+                <option value="">全部状态</option>
+                <option value="unread">未读</option>
+                <option value="reading">在读</option>
+                <option value="read">已读</option>
+                <option value="unknown">进度未知</option>
+              </select>
+              <select id="sort-select" aria-label="排序方式">
+                <option value="title">按名称排序</option>
+                <option value="added">按加入时间</option>
+                <option value="recent">按最近阅读</option>
+              </select>
+            </div>
+            <div class="library-filter-actions">
+              <button id="btn-library-clear-filters" class="btn-link" type="button">重置筛选</button>
+              ${this.context.drive.can?.('library.page') && this.context.drive.library ? `<button id="btn-view-host" class="btn-link" type="button">${this.context.library.manualShelves ? '目录全部文件' : '全库'}</button>` : ''}
+              <button id="btn-library-filters-done" class="btn-link" type="button" hidden>收起</button>
+            </div>
           </div>
         </div>
 
@@ -202,6 +218,7 @@ export class LibraryView {
       </div>
     `
 
+    this.updateFilterControls()
     if (hasGroups) {
       try { await this.context.library.bookGroups.load(signal) }
       catch (error) { if (!signal.aborted) this.context.reportError(error) }
@@ -211,12 +228,12 @@ export class LibraryView {
     this.bindEvents()
     if (this.context.library.manualShelves) {
       const source = snapshot.sources.config.sources.find(item => item.nodeId === this.state.sourceId)!
-      const header = document.createElement('div'), title = document.createElement('h2'), back = document.createElement('button')
-      header.className = 'shelves-header'; title.textContent = sourceLabel(source)
-      back.type = 'button'; back.className = 'btn-link'; back.textContent = '返回书库列表'
+      const header = document.createElement('div'), meta = document.createElement('div'), title = document.createElement('h2'), back = document.createElement('button')
+      header.className = 'library-heading'; meta.className = 'library-heading-meta'; title.textContent = sourceLabel(source)
+      back.type = 'button'; back.className = 'btn-link'; back.textContent = '← 书库'; back.setAttribute('aria-label', '返回书库列表')
       back.onclick = () => { void this.selectLibrary({}) }
-      const path = document.createElement('p'); path.className = 'card-subtitle'; path.textContent = source.path
-      header.append(title, back); this.container.querySelector('.library-view-container')!.prepend(header, path)
+      const path = document.createElement('p'); path.className = 'library-heading-path'; path.textContent = source.path; path.title = source.path
+      meta.append(title, path); header.append(meta, back); this.container.querySelector('.library-view-container')!.prepend(header)
       const sourceFilter = this.container.querySelector<HTMLSelectElement>('#filter-source')!
       sourceFilter.hidden = true
     }
@@ -231,8 +248,27 @@ export class LibraryView {
     }
   }
 
+  private updateFilterControls() {
+    const panel = this.container.querySelector<HTMLElement>('#library-filter-panel')
+    const toggle = this.container.querySelector<HTMLButtonElement>('#btn-library-filters')
+    if (!panel || !toggle) return
+    const mobile = this.media?.matches ?? false
+    panel.hidden = mobile && !this.filtersExpanded
+    toggle.hidden = !mobile
+    toggle.setAttribute('aria-expanded', String(!panel.hidden))
+    const count = Number(!!this.state.kind) + Number(!!this.state.format) + Number(!!this.state.status)
+      + Number(this.state.groupId !== undefined) + Number(this.state.sort !== 'title')
+      + Number(!this.context.library.manualShelves && this.state.sourceId !== undefined)
+    const badge = this.container.querySelector<HTMLElement>('#library-filter-count')!
+    badge.textContent = String(count); badge.hidden = count === 0
+    this.container.querySelector<HTMLButtonElement>('#btn-library-clear-filters')!.disabled = count === 0
+    this.container.querySelector<HTMLElement>('#btn-library-filters-done')!.hidden = !mobile
+  }
+
   private renderGroupControls() {
     this.container.querySelector('#book-group-controls')?.remove()
+    this.container.querySelector('#book-group-selection')?.remove()
+    this.container.querySelector('#filter-book-group')?.remove()
     const store = this.context.library.bookGroups
     if (this.state.groupId && !store.groups.some(group => group.id === this.state.groupId)) this.state.groupId = undefined
     this.notifySelection()
@@ -247,6 +283,7 @@ export class LibraryView {
       this.notifySelection()
       this.state.offset = 0; this.sdkPageCursors.clear(); void this.loadItems()
     }
+    this.container.querySelector('.toolbar-filters-row')!.append(filter)
     const manage = document.createElement('button')
     manage.textContent = '管理分组'; manage.type = 'button'
     manage.onclick = () => {
@@ -260,14 +297,22 @@ export class LibraryView {
     toggle.disabled = !store.ready
     toggle.onclick = () => {
       this.selecting = !this.selecting; this.selected.clear()
+      // 多选操作独立于筛选面板，进入后收起面板，把空间还给待选择的书籍。
+      if (this.selecting) this.filtersExpanded = false
       this.renderGroupControls(); void this.loadItems()
     }
-    controls.append(filter, manage, toggle)
+    controls.append(manage)
+    if (!this.selecting) controls.append(toggle)
     if (!store.ready) {
       const notice = document.createElement('span'); notice.textContent = '分组读取失败，可在管理分组中重新加载'
       controls.append(notice)
     }
+    this.container.querySelector('.library-filter-actions')!.prepend(controls)
     if (this.selecting) {
+      const selection = document.createElement('div')
+      selection.id = 'book-group-selection'; selection.className = 'book-group-selection'
+      const heading = document.createElement('div'), actions = document.createElement('div')
+      heading.className = 'group-selection-heading'; actions.className = 'group-selection-actions'
       const all = document.createElement('button')
       all.type = 'button'; all.textContent = '全选当前页'
       all.onclick = () => {
@@ -285,7 +330,7 @@ export class LibraryView {
         this.savingGroups = true
         const frozen = [...this.container.querySelectorAll<HTMLElement>('.library-toolbar,.library-pagination')]
         frozen.forEach(el => { el.inert = true })
-        controls.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(el => { el.disabled = true })
+        selection.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(el => { el.disabled = true })
         void store.assign([...this.selected], target.value || undefined, this.lifecycle.signal).then(() => {
           this.state.offset = 0; this.sdkPageCursors.clear(); return this.loadItems(true)
         }).catch(error => {
@@ -306,9 +351,11 @@ export class LibraryView {
         }).catch(error => { if (!this.lifecycle.signal.aborted) this.context.reportError(error) })
           .finally(() => { reload.disabled = false })
       }
-      controls.append(all, target, move, reload, count)
+      heading.append(count, all, toggle); actions.append(target, move, reload)
+      selection.append(heading, actions)
+      this.container.querySelector('.library-toolbar')!.append(selection)
     }
-    this.container.querySelector('.library-toolbar')?.append(controls)
+    this.updateFilterControls()
     this.updateSelection()
   }
 
@@ -326,6 +373,18 @@ export class LibraryView {
   }
 
   private bindEvents() {
+    const toggleFilters = this.container.querySelector<HTMLButtonElement>('#btn-library-filters')!
+    toggleFilters.onclick = () => { this.filtersExpanded = !this.filtersExpanded; this.updateFilterControls() }
+    this.container.querySelector<HTMLButtonElement>('#btn-library-filters-done')!.onclick = () => {
+      this.filtersExpanded = false; this.updateFilterControls(); toggleFilters.focus({ preventScroll: true })
+    }
+    this.container.querySelector<HTMLButtonElement>('#btn-library-clear-filters')!.onclick = () => {
+      Object.assign(this.state, { kind: undefined, format: undefined, status: undefined, groupId: undefined, sort: 'title', offset: 0 })
+      if (!this.context.library.manualShelves) this.state.sourceId = undefined
+      this.sdkPageCursors.clear(); void this.render()
+    }
+    this.media?.addEventListener('change', () => this.updateFilterControls(), { signal: this.lifecycle.signal })
+    this.updateFilterControls()
     const kindSelect = this.container.querySelector<HTMLSelectElement>('#filter-kind')
     if (kindSelect) {
       kindSelect.value = this.state.kind ?? ''
@@ -539,6 +598,7 @@ export class LibraryView {
 
   private async loadItems(afterSave = false) {
     if (this.savingGroups && !afterSave) return
+    this.updateFilterControls()
     this.selected.clear(); this.displayed = []; this.updateSelection()
     const activeGen = ++this.loadGeneration
     this.coverLoader?.clear()

@@ -114,8 +114,8 @@ export class NavManager {
           <h1 class="mobile-title">${title}</h1>
         </div>
         <div class="mobile-actions">
-          <button id="btn-mobile-settings" class="mobile-action-btn" type="button">目录设置</button>
-          <button id="btn-mobile-close" class="mobile-action-btn" type="button">返回网盘</button>
+          <button id="btn-mobile-settings" class="mobile-action-btn" type="button" aria-label="目录设置" title="目录设置"><span class="mobile-action-icon" aria-hidden="true">⚙</span><span class="mobile-action-label">目录设置</span></button>
+          <button id="btn-mobile-close" class="mobile-action-btn" type="button" aria-label="返回网盘" title="返回网盘"><span class="mobile-action-icon" aria-hidden="true">↩</span><span class="mobile-action-label">返回网盘</span></button>
         </div>
       </header>
       <nav class="mobile-bottom-nav" aria-label="移动端底部导航">
