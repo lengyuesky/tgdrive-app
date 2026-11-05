@@ -20,6 +20,7 @@
   "include": [
     "books/**/*.ts",
     "cinema/**/*.ts",
+    "fntv/**/*.ts",
     "comics/**/*.ts",
     "reader/**/*.ts",
     "sdk/**/*.ts",

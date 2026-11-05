@@ -17,7 +17,22 @@ export interface CoverRecord<M = unknown> { key: string; data: string; meta: M |
 export interface CoverStats { entries: number; bytes: number; limit_bytes: number; limit_entries: number }
 export interface HostLibraryQuery { roots: number[]; kind: 'books' | 'comics' | 'all'; q?: string; format?: string; sort?: 'title' | 'added'; limit?: number; cursor?: string | null }
 export interface HostLibraryPage extends Page { revision: string; entries: { file: FileEntry; format: string; source_ids: number[] }[] }
+/** 影视连接账号和媒体库由宿主独立保存；接口从不返回密码或校验值。 */
+export interface FntvLibrary { id: string; name: string; kind: 'movie' | 'tv'; root_id: number; path?: string | null; authorized?: boolean }
+export interface FntvConfig { username: string; account_configured: boolean; libraries: FntvLibrary[]; running: boolean }
+export interface FntvStatus { running: boolean; probe_available: boolean; index: { state: 'idle' | 'scanning' | 'ready' | 'failed'; error: string; entries: number } }
+export interface FntvService {
+  config(options?: CallOptions): Promise<FntvConfig>
+  account(username: string, password: string): Promise<{ ok: true }>
+  libraries(libraries: FntvLibrary[]): Promise<{ ok: true; libraries: FntvLibrary[] }>
+  status(options?: CallOptions): Promise<FntvStatus>
+  start(): Promise<{ ok: true; running: true }>
+  stop(): Promise<{ ok: true; running: false }>
+  refresh(): Promise<FntvStatus['index']>
+}
 export interface Drive {
+  /** 固定影视服务能力；只有获授权的 fntv 插件可以使用。 */
+  fntv?: FntvService
   /** 宿主维护的阅读文件索引；使用前探测 library.page。 */
   library?: { page(query: HostLibraryQuery, options?: CallOptions): Promise<HostLibraryPage> }
   ready: Promise<ReadyContext>

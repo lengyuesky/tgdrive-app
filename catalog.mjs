@@ -19,7 +19,7 @@ export const VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]
 const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
 const MAX_SEMVER_COMPONENT = (1n << 64n) - 1n
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u
-const PERMISSIONS = ['files.read', 'media.read', 'favorites.write']
+const PERMISSIONS = ['files.read', 'media.read', 'favorites.write', 'fntv.service']
 const MANIFEST_FIELDS = ['id', 'name', 'version', 'api_version', 'min_host_version', 'description', 'author', 'entry', 'icon', 'permissions', 'settings', 'integration']
 
 function matches(pattern, value) {
@@ -102,6 +102,11 @@ export function validateManifest(manifest) {
   }
   if (!Array.isArray(manifest.permissions) || manifest.permissions.length > PERMISSIONS.length || new Set(manifest.permissions).size !== manifest.permissions.length || manifest.permissions.some(permission => !PERMISSIONS.includes(permission))) {
     throw new Error('permissions 包含重复或不受支持的权限')
+  }
+  if (manifest.permissions.includes('fntv.service') && (manifest.id !== 'fntv' || manifest.api_version < 2
+    || compareStableVersions(manifest.min_host_version, '0.3.5') < 0
+    || !manifest.permissions.includes('files.read') || !manifest.permissions.includes('media.read'))) {
+    throw new Error('飞牛服务能力仅供 fntv 应用使用，需要 API v2、主程序 0.3.5 以及文件和媒体读取权限')
   }
   if (!Array.isArray(manifest.settings) || manifest.settings.length > 24) throw new Error('settings 必须为最多 24 项的数组')
   const keys = new Set()

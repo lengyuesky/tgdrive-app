@@ -50,7 +50,7 @@
       drainReads()
     })
   }
-  const readMethods = new Set(['library.page', 'files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats'])
+  const readMethods = new Set(['library.page', 'files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats', 'fntv.config.get', 'fntv.service.status'])
   let resolveReady
   let rejectReady
   let cancelPaint
@@ -189,6 +189,15 @@
     /** 能力探测：旧宿主不声明新能力，插件据此降级到消息通道读取。 */
     can: (capability) => capabilities.has(capability),
     library: Object.freeze({ page: (params, options) => request('library.page', params, options) }),
+    fntv: Object.freeze({
+      config: (options) => request('fntv.config.get', {}, options),
+      account: (username, password) => request('fntv.account.set', { username, password }),
+      libraries: (libraries) => request('fntv.libraries.set', { libraries }),
+      status: (options) => request('fntv.service.status', {}, options),
+      start: () => request('fntv.service.start'),
+      stop: () => request('fntv.service.stop'),
+      refresh: () => request('fntv.index.refresh'),
+    }),
     files: Object.freeze({
       search: (params = {}, options) => request('files.search', params, options),
       list: (params, options) => request('files.list', params, options),

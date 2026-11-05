@@ -1,0 +1,24 @@
+{
+  "id": "fntv",
+  "name": "飞牛影视服务",
+  "version": "0.1.0",
+  "api_version": 2,
+  "min_host_version": "0.3.5",
+  "description": "通过独立影视账号，让飞牛影视客户端浏览和播放已授权的网盘媒体库。安装后需配置账号、创建媒体库并主动启动。",
+  "author": "tgdrive",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "permissions": ["files.read", "media.read", "fntv.service"],
+  "settings": [],
+  "integration": {
+    "file_types": [],
+    "directories": false,
+    "changelog": "首版独立影视服务管理：影视账号、电影和电视剧媒体库、目录授权、服务启停和索引刷新。",
+    "formats": ["网盘视频", "同目录 NFO 和海报", "文本字幕"],
+    "limitations": ["需要宿主媒体探测组件；不提供转码或联网刮削。", "首期单用户，与原影视页面应用的媒体库、收藏和观看进度独立。", "未安装、未授权或未启动时不提供客户端访问。"],
+    "homepage": "https://github.com/lengyuesky/tgdrive-app",
+    "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+    "screenshots": [],
+    "data_schema": 1
+  }
+}

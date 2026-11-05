@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "node ./build.mjs",
+    "build:fntv": "node ./tools/build-fntv.mjs",
     "package": "node ./package.mjs",
     "catalog": "node ./catalog.mjs",
     "typecheck": "tsc --noEmit",
