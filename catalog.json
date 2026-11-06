@@ -6,7 +6,7 @@
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.4.5",
+        "version": "1.4.6",
         "api_version": 2,
         "min_host_version": "0.3.0",
         "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",
@@ -35,7 +35,7 @@
             "ogv"
           ],
           "directories": false,
-          "changelog": "同步公共 SDK 的可选宿主阅读索引接口，保持现有影院播放与有界请求调度行为。",
+          "changelog": "更新宿主接口兼容性，保留现有媒体库、播放、字幕、收藏和观看进度。",
           "formats": [
             "浏览器支持的视频",
             "MKV 客户端解封装",
@@ -53,15 +53,56 @@
           "data_schema": 1
         }
       },
-      "sha256": "feadd039edf48620de79a064d658d3bb73bb00fa5740e1c9bd507508a12d0f21",
-      "size": 222975,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.4.5.tgapp"
+      "sha256": "77e694b67268aadaffa40089ce5a17eb8634b9b9ee0ad5d0cb6a5e1ceed4d9a3",
+      "size": 223086,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.4.6.tgapp"
+    },
+    {
+      "manifest": {
+        "id": "fntv",
+        "name": "飞牛影视服务",
+        "version": "0.1.1",
+        "api_version": 2,
+        "min_host_version": "0.3.6",
+        "description": "通过独立影视账号，让飞牛影视客户端浏览和播放已授权的网盘媒体库。安装后需配置账号、创建媒体库并主动启动。",
+        "author": "tgdrive",
+        "entry": "index.html",
+        "icon": "icon.svg",
+        "permissions": [
+          "files.read",
+          "media.read",
+          "fntv.service"
+        ],
+        "settings": [],
+        "integration": {
+          "file_types": [],
+          "directories": false,
+          "changelog": "加入应用中心公开目录，要求宿主 0.3.6 的官方客户端媒体库、续播和剧集播放兼容修复。从本地候选 0.1.0 升级保留影视账号、媒体库、观看记录及运行状态，已有客户端需重新登录。",
+          "formats": [
+            "网盘视频",
+            "同目录 NFO 和海报",
+            "文本字幕"
+          ],
+          "limitations": [
+            "需要宿主媒体探测组件；不提供转码或联网刮削。",
+            "首期单用户，与原影视页面应用的媒体库、收藏和观看进度独立。",
+            "未安装、未授权或未启动时不提供客户端访问。"
+          ],
+          "homepage": "https://github.com/lengyuesky/tgdrive-app",
+          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+          "screenshots": [],
+          "data_schema": 1
+        }
+      },
+      "sha256": "7ae73554f98c07f65598859fc825bc781392de4d1eb4cb6d5eccf44890902030",
+      "size": 11921,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/fntv-0.1.1.tgapp"
     },
     {
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.0.4",
+        "version": "1.0.5",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -82,7 +123,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "修复 iOS 漫画滚动瞬跳：尺寸变化已被占位补偿吸收时不再回写旧坐标，换窗与图片尺寸修改前先保护滚动范围；保留原生惯性、五页挂载和有界预读。从 1.0.3 更新保留书库、分组、进度、书签与自定义偏好。",
+          "changelog": "更新宿主接口兼容性，保留 1.0.4 的 iOS 漫画滚动修复、原生惯性和有界预读。升级保留书库、分组、阅读进度、书签及自定义偏好。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -107,15 +148,15 @@
           "data_schema": 1
         }
       },
-      "sha256": "30fc57fb7e85de912063d31f30df5421c175fe1ec2e172e8ea74cd0d247fe760",
-      "size": 2419307,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.4.tgapp"
+      "sha256": "400a65ae452e113902303e61683c6b8ff1e114f4a9d2e66777b2daf56bfca6c8",
+      "size": 2419364,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.5.tgapp"
     },
     {
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "1.4.6",
+        "version": "1.4.7",
         "api_version": 2,
         "min_host_version": "0.3.1",
         "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
@@ -160,7 +201,7 @@
             "ogv"
           ],
           "directories": false,
-          "changelog": "同步公共 SDK 的可选宿主阅读索引接口，保持现有短视频播放与有界请求调度行为。",
+          "changelog": "更新宿主接口兼容性，保留现有播放、滑动切换、收藏和自定义设置。",
           "formats": [
             "网盘视频"
           ],
@@ -176,9 +217,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "41bbd45800f0caa93ff8038ef4dc77081f5e59edf8cf786703ef601add036f42",
-      "size": 341451,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.4.6.tgapp"
+      "sha256": "572fe9820749720835433466b4de5fa9a467a4441dea8869813e4581e784a697",
+      "size": 341559,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.4.7.tgapp"
     }
   ]
 }

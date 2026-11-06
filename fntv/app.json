@@ -1,9 +1,9 @@
 {
   "id": "fntv",
   "name": "飞牛影视服务",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "api_version": 2,
-  "min_host_version": "0.3.5",
+  "min_host_version": "0.3.6",
   "description": "通过独立影视账号，让飞牛影视客户端浏览和播放已授权的网盘媒体库。安装后需配置账号、创建媒体库并主动启动。",
   "author": "tgdrive",
   "entry": "index.html",
@@ -13,7 +13,7 @@
   "integration": {
     "file_types": [],
     "directories": false,
-    "changelog": "首版独立影视服务管理：影视账号、电影和电视剧媒体库、目录授权、服务启停和索引刷新。",
+    "changelog": "加入应用中心公开目录，要求宿主 0.3.6 的官方客户端媒体库、续播和剧集播放兼容修复。从本地候选 0.1.0 升级保留影视账号、媒体库、观看记录及运行状态，已有客户端需重新登录。",
     "formats": ["网盘视频", "同目录 NFO 和海报", "文本字幕"],
     "limitations": ["需要宿主媒体探测组件；不提供转码或联网刮削。", "首期单用户，与原影视页面应用的媒体库、收藏和观看进度独立。", "未安装、未授权或未启动时不提供客户端访问。"],
     "homepage": "https://github.com/lengyuesky/tgdrive-app",

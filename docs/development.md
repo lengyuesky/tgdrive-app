@@ -38,7 +38,7 @@ npm ci
 npm run check
 ```
 
-- `npm run typecheck`：运行 `tsc --noEmit`，校验 `books`、`cinema`、`comics`、`reader`、`sdk` 和 `tests` 的类型定义。
+- `npm run typecheck`：运行 `tsc --noEmit`，校验 `books`、`cinema`、`fntv`、`comics`、`reader`、`sdk` 和 `tests` 的类型定义。
 - `npm run build`：执行 `build.mjs`。
 
 ### 2. 运行独立单元测试 (`npm test`)
@@ -60,11 +60,11 @@ npm run build
 该脚本执行流程：
 1. 优先在隔离的临时 staging 目录中进行构建，避免构建中断损坏已有已发布资产。
 2. 直接将静态插件 `shorts/` 打包为 `apps/shorts-<version>.tgapp`。
-3. 使用 Vite 对 `reader/`、`cinema/` 进行独立生产编译，输出至 `.build/<name>/`。
+3. 使用 Vite 对 `reader/`、`cinema/`、`fntv/` 进行独立生产编译，输出至 `.build/<name>/`。
 4. 自动向产物中复制各第三方依赖的开源许可证及 PDF 所需字型文件。
 5. 调用 `package.mjs`，将编译结果压缩为标准规范的 `.tgapp` 归档。
 6. 扫描所有产物，生成严格符合分发协议的 `catalog.json`（schema_version: 2）和 `SHA256SUMS`（包含 `apps/` 相对路径）。
-7. 对现有已存在版本核验同版本不可篡改规则（摘要、大小与清单）；全部校验通过后，转入根目录 `apps/`、`catalog.json` 与 `SHA256SUMS`。`apps/` 目录仅保留最新三个插件包。
+7. 对现有已存在版本核验同版本不可篡改规则（摘要、大小与清单）；全部校验通过后，转入根目录 `apps/`、`catalog.json` 与 `SHA256SUMS`。`apps/` 目录仅保留四款应用的最新包。
 
 可通过环境变量重定向输出分发根目录（其下同样包含 `apps/` 与根目录清单）：
 ```bash
@@ -121,11 +121,12 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chromium npm run test:comics
 - **`books/`**：保留图书底层解析器，独立入口退役；依赖 `reader/` 共享模块，支持长文本分段分页、EPUB 解压净化与 PDF 适宽渲染。
 - **`comics/`**：保留漫画底层解析器及滚动回归，独立入口退役；依赖 `reader/` 共享模块，支持垂直连续滚动与横向单页翻阅。连续模式仅挂载相邻五页、保留至多四十一页的局部轨道；普通跨页只更新挂载节点，接近轨道边界时才换段。图片尺寸与 Blob 生命周期分离，显式预留高度；异步加载保留当前物理页及页内像素偏移，恢复进度和调整视口保留页内比例。
 - **`cinema/`**：深色模式影院，内建本地媒体库缓存索引与 MKV 容器流式解封装（MSE 喂流）。
+- **`fntv/`**：飞牛影视服务管理页，通过受限 `fntv.service` 能力设置独立账号、媒体库和启停；最低宿主为 0.3.6。
 - **`reader/`**：统一阅读馆入口与共用基础库，抽象了 Range 字节调度器、虚拟 DOM 视口渲染器、触摸手势判断与进度同步。
 
 ## 运行跨库 E2E 集成测试
 
-由于宿主 `tgdrive` 属于私有仓库，本公开仓库的 CI 不会执行跨库 E2E 测试。但在正式发布或重大改动前，开发者可在本地执行完整的真实浏览器回归测试：
+本仓库的 CI 保持独立验证边界，不执行跨库 E2E 测试。正式发布或重大改动前，开发者在本地执行完整的真实浏览器回归测试：
 
 ```bash
 # 1. 确保宿主前端已构建完成（在宿主工作目录中）
@@ -138,12 +139,12 @@ TGDRIVE_HOST_DIR=/path/to/tgdrive npm run test:e2e
 ```
 
 `tests/browser/fixture.mjs` 会：
-1. 在启动外部进程前检查宿主 `${TGDRIVE_HOST_DIR}/frontend/dist/index.html` 和三个当前插件包（默认读取本仓库 `apps/` 目录）；缺失、空文件或只有旧版包时直接提示先构建。
+1. 在启动外部进程前检查宿主 `${TGDRIVE_HOST_DIR}/frontend/dist/index.html` 和四个当前插件包（默认读取本仓库 `apps/` 目录）；缺失、空文件或只有旧版包时直接提示先构建。
 2. 使用 `ffmpeg` 自动合成测试视频和阅读/影视夹具文件。
 3. 启动宿主内置的 `apps::tests::browser_fixture` 测试夹具服务（监听 `127.0.0.1:4187`），显式传入绝对包目录；`CARGO_TARGET_DIR` 默认复用显式宿主工作区的 `target`，亦可覆盖。
 4. 加载本仓库打包出的真实插件包，启动 Playwright 进行真实浏览器场景回归。
 
-`TGDRIVE_APP_CATALOG_DIR` 默认指向本仓库的 `apps/` 目录，亦可指定自定义包目录，但仍需包含三个当前版本的包。检查只确认构建产物存在，不代替完整集成测试。正式更新前须由维护者记录实际验证宿主的完整 Git SHA 到 `compatibility.json`；拆分起点 SHA 不代表拆分后集成已经通过；dirty 工作区需记录真实 base SHA 和实际验证状态。
+`TGDRIVE_APP_CATALOG_DIR` 默认指向本仓库的 `apps/` 目录，亦可指定自定义包目录，但仍需包含四个当前版本的包。检查只确认构建产物存在，不代替完整集成测试。正式更新前须由维护者记录实际验证宿主的完整 Git SHA 到 `compatibility.json`；拆分起点 SHA 不代表拆分后集成已经通过；dirty 工作区需记录真实 base SHA 和实际验证状态。
 
 ### 隔离验证与临时目录
 

@@ -1,16 +1,19 @@
 # tgdrive-app 官方插件仓库
 
-tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）、阅读馆（Reader）与影视（Cinema）三款官方插件，以及插件 SDK、独立打包分发工具与目录协议实现。
+tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）、阅读馆（Reader）、影视（Cinema）和飞牛影视服务（FNTV）四款官方插件，以及插件 SDK、独立打包分发工具与目录协议实现。
 
 ## 官方插件一览
 
 | 插件 ID | 名称 | 版本 | API 版本 | 说明 |
 |---|---|---|---|---|
-| `shorts` | 短视频 | `1.4.6` | 2 | 分页加载视频队列，支持滑动切换、进度拖动、收藏与下载 |
-| `reader` | 阅读馆 | `1.0.4` | 2 | 修复 iOS 漫画滚动瞬跳；保留原生惯性、手动书库与紧凑筛选，最低宿主 0.3.3 |
-| `cinema` | 影视 | `1.4.5` | 2 | 媒体库、片头片尾设置、定时停止、字幕与客户端 MKV 流式解封装 |
+| `shorts` | 短视频 | `1.4.7` | 2 | 分页加载视频队列，支持滑动切换、进度拖动、收藏与下载 |
+| `reader` | 阅读馆 | `1.0.5` | 2 | 保留 iOS 漫画滚动修复、原生惯性、手动书库与紧凑筛选，最低宿主 0.3.3 |
+| `cinema` | 影视 | `1.4.6` | 2 | 媒体库、片头片尾设置、定时停止、字幕与客户端 MKV 流式解封装 |
+| `fntv` | 飞牛影视服务 | `0.1.1` | 2 | 独立影视账号、电影和电视剧媒体库、目录授权与服务启停，最低宿主 0.3.6 |
 
-阅读馆 1.0.4 的安装包、四张真实界面截图、`catalog.json` 与 `SHA256SUMS` 同步分发。构建、独立回归、旧包升级和本机集成验收见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)；旧版验收保留为历史记录。
+飞牛影视服务已纳入公开目录。在宿主 `0.3.6` 或更高版本的「应用中心」刷新后安装，选择允许读取的目录、设置独立影视账号并创建媒体库，最后主动启动服务。客户端使用管理页显示的服务根地址。说明与本机验收见 [插件说明](fntv/README.md)及 [0.1.1 发布记录](docs/fntv-0.1.1-release.md)。
+
+原三款插件各提升一个修订版本，以同步公共 SDK 的可选飞牛服务接口；各自最低宿主要求、页面和数据格式保留。阅读馆 1.0.5 继续携带 1.0.4 的四张真实截图。滚动修复的历史证据见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)，本次四包集成见 [公开目录发布记录](docs/fntv-0.1.1-release.md)。
 
 所有插件遵循统一沙箱规范，使用沙箱内 iframe 隔离运行，无服务器转码或外部 CDN 依赖。宿主声明 `media.bytes` 能力时，阅读器走票据直连的字节数据面（Range 读取不经宿主页面二次缓冲）；旧宿主自动降级到消息通道。
 
@@ -23,6 +26,7 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 ├── books/                 # 保留图书解析器（TXT/EPUB/PDF，独立入口退役）
 ├── comics/                # 保留漫画解析器（图片/CBZ/ZIP，独立入口退役）
 ├── cinema/                # 影视插件源码（流式转封装/媒体库）
+├── fntv/                  # 飞牛影视服务管理页（账号/媒体库/启停）
 ├── reader/                # 统一阅读馆入口、共用逻辑与样式
 ├── sdk/                   # 插件 SDK 运行时 (tgdrive-sdk.js) 与 TypeScript 类型
 ├── tests/
@@ -66,10 +70,10 @@ sha256sum -c SHA256SUMS
 
 ## 与宿主 (tgdrive) 的协作与集成
 
-1. **宿主私有性与公开 CI**：
-   - 宿主仓库 `lengyuesky/tgdrive` 为私有仓库（PRIVATE）。
-   - 本公开仓库的 GitHub Actions CI 仅运行独立插件检查、单测和构建打包，**公开 CI 不检出宿主仓库，不配置任何跨仓库密钥，不上传宿主源码或构建产物**。
-   - 外部贡献者无需拥有宿主仓库权限，即可在本机运行完整的语法、构建和单元测试。
+1. **仓库边界与公开 CI**：
+   - 宿主仓库 `lengyuesky/tgdrive` 与插件仓库独立维护；当前两者均为公开仓库。
+   - 当前插件仓库未配置 GitHub Actions 工作流。公开 CI 的范围限于独立插件检查、单测和构建打包，**不检出宿主仓库，不配置跨仓库密钥，不上传宿主源码或构建产物**；本机发布门禁仍须执行。
+   - 外部贡献者无需检出宿主，即可在本机运行完整的语法、构建和单元测试。
 
 2. **发布前本机跨库 E2E 集成测试**：
    - 在更新插件前，开发者应在本机指定宿主路径运行端到端跨库测试：
@@ -87,7 +91,7 @@ sha256sum -c SHA256SUMS
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件，例如 `shorts-1.4.6.tgapp`、`reader-1.0.4.tgapp`、`cinema-1.4.5.tgapp`）
+- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件：`shorts-1.4.7.tgapp`、`reader-1.0.5.tgapp`、`cinema-1.4.6.tgapp`、`fntv-0.1.1.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 
@@ -96,7 +100,7 @@ sha256sum -c SHA256SUMS
 - 插件安装包：`https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/<id>-<version>.tgapp`
 
 分发协议与工具保证：
-- **单版本最新**：每个插件 ID 仅保留一条最新版本记录，`apps/` 仅保留最新三个包。
+- **单版本最新**：每个插件 ID 仅保留一条最新版本记录，`apps/` 仅保留四款应用的最新包。
 - **不可更换内容**：同一应用同一版本若出现不同摘要、完整 manifest 或包长度，直接阻断，禁止静默覆盖；如需变更必须升级版本。
 - **禁止版本倒退**：同应用 ID 不允许倒退版本。
 - **允许升级与移除**：允许新版本替换旧版本，允许目录中移除插件。
@@ -108,16 +112,17 @@ sha256sum -c SHA256SUMS
 - [本地开发与构建指南](docs/development.md)
 - [从主仓库单体拆分迁移说明](docs/migration.md)
 - [影视应用设计与限制说明](docs/cinema.md)
+- [飞牛影视服务说明](fntv/README.md)
 - [代码贡献指南](docs/contributing.md)
 - [插件分发与目录协议说明](docs/release.md)
 
-本版实际验收见 [阅读馆 1.0.4 发布验收记录](docs/reader-1.0.4-release.md)；1.0.3 见 [上一版记录](docs/reader-1.0.3-release.md)，1.0.2 见 [1.0.2 记录](docs/reader-1.0.2-release.md)，1.0.1 见 [1.0.1 记录](docs/reader-1.0.1-release.md)，1.0.0 见 [历史验证记录](docs/reader-validation.md)，四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
+本次公开目录验收见 [飞牛影视服务 0.1.1 发布记录](docs/fntv-0.1.1-release.md)。阅读馆实际验收见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)；1.0.3 见 [上一版记录](docs/reader-1.0.3-release.md)，1.0.2 见 [1.0.2 记录](docs/reader-1.0.2-release.md)，1.0.1 见 [1.0.1 记录](docs/reader-1.0.1-release.md)，1.0.0 见 [历史验证记录](docs/reader-validation.md)，四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
 
 ### 阅读馆与旧应用迁移
 
 阅读馆承接图书与漫画，旧应用的替换及恢复边界见 [阅读馆迁移说明](docs/reader.md)。本版实际验证见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)。
 
-在宿主 0.3.3 或更高版本的「应用中心」刷新目录后安装或更新阅读馆。同 ID 升级保留阅读进度、书签、作品和自定义偏好；从 1.0.2/1.0.3 更新也保留已有手动书库和分组，无需重建书库。仅旧 1.0.0/1.0.1 的来源记录保留但不作为书库采用，需要用户手动创建书库。首次替换旧 `books`、`comics` 仍需单独确认清理其私有数据。可直接下载 [reader-1.0.4.tgapp](https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.4.tgapp) 导入，宿主已满足最低版本时无需重建镜像或重启。
+在宿主 0.3.3 或更高版本的「应用中心」刷新目录后安装或更新阅读馆。同 ID 升级保留阅读进度、书签、作品和自定义偏好；从 1.0.2/1.0.3 更新也保留已有手动书库和分组，无需重建书库。仅旧 1.0.0/1.0.1 的来源记录保留但不作为书库采用，需要用户手动创建书库。首次替换旧 `books`、`comics` 仍需单独确认清理其私有数据。可直接下载 [reader-1.0.5.tgapp](https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.5.tgapp) 导入，宿主已满足最低版本时无需重建镜像或重启。
 
 1.0.4 修复漫画滚动中的旧坐标回写及换窗瞬时滚动范围缩短，保留 iOS 原生惯性。尺寸探测、预读、五页挂载和四十一页局部轨道仍有界；书签与进度不迁移、不清空。WebKit 自动化不能替代 iPhone Safari/主屏幕窗口真机验收。
 

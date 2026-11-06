@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "host_repository": "lengyuesky/tgdrive",
-  "host_ref": "0100bee95726280268a329ac7c0956179acd9e07",
-  "host_version": "0.3.3",
-  "min_host_version": "0.3.3",
+  "host_ref": "c1cbc486837188cf4873d4da1be462c0a326ce16",
+  "host_version": "0.3.6",
+  "min_host_version": "0.3.6",
   "api_version": 2,
   "supported_api_versions": [
     1,
@@ -11,15 +11,15 @@
   ],
   "local_integration": {
     "required": true,
-    "description": "宿主仓库为私有仓库（PRIVATE），公开 CI 仅执行独立检查，不得检出宿主或配置访问凭证。发布前必须在本机通过 TGDRIVE_HOST_DIR 指向宿主工作区运行完整 E2E 验证（npm run test:e2e）。外部贡献者无需私有宿主凭据，可独立运行本地全部测试与构建检查。",
+    "description": "宿主与插件仓库独立维护。公开 CI 仅执行插件独立检查，不检出宿主、不配置跨仓库凭据、不上传宿主源码或集成 trace。正式发布前在本机使用显式 TGDRIVE_HOST_DIR 指向已提交宿主源码运行完整 E2E（npm run test:e2e）。贡献者可仅运行本仓库的独立测试与构建检查。",
     "fixture_command": "cargo test --locked apps::tests::browser_fixture -- --ignored --exact --nocapture",
     "fixture_url": "http://127.0.0.1:4187/__apps_fixture",
     "host_ref_kind": "verified_commit",
-    "host_tree": "f4f519b3e090e5c50b56a0feffc8465c72aba657",
+    "host_tree": "89318325e7003ece582678f21f5c42ef5c47b431",
     "worktree_dirty": false,
     "validation_status": "passed_commit",
-    "validation_date": "2026-10-21",
-    "validation_report": "docs/reader-1.0.4-release.md",
-    "validation_note": "host_ref 是阅读馆 1.0.4 实际通过本机集成验收的宿主 0.3.3 完整提交，源码工作区干净且 Git tree 匹配。最终候选包通过全部 69 项 E2E，包含三项新包滚动补偿回归、真实 1.0.3/1.0.2 升级及两种 1.0.1 升级、手机沉浸安全区、全部阅读格式与四张截图。独立漫画 Chromium 11 项及 WebKit 9 项通过（2 项 CDP 专属用例跳过）；正式根资产与候选逐字节一致。未执行实体 iPhone 或生产部署，剩余审计风险见报告。"
+    "validation_date": "2026-11-06",
+    "validation_report": "docs/fntv-0.1.1-release.md",
+    "validation_note": "host_ref 是实际通过验收的宿主 0.3.6 完整提交。git archive 导出的 333 个源码对象及执行位与该 tree 一致，导出无额外改动；主工作区既有修改未纳入。正式四包通过完整 70 项 E2E，2 项未改变资源的截图生成用例按需跳过；真实阅读馆 1.0.2/1.0.3/1.0.4 升级连续三轮共 9 项通过，包含完整数据行及修订号比较。飞牛正式目录安装、首次授权、账号和媒体库、主动启动、原文件 Range、关闭页面持续运行、停服撤销登录及真实 0.1.0 升级均通过。四包、目录和摘要清单重建后逐字节一致，原生证据与未执行范围见报告。日常服务未部署。"
   }
 }

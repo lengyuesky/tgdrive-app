@@ -1,7 +1,7 @@
 {
   "id": "reader",
   "name": "阅读馆",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "api_version": 2,
   "min_host_version": "0.3.3",
   "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -13,7 +13,7 @@
   "integration": {
     "file_types": ["txt", "epub", "pdf", "cbz", "zip"],
     "directories": true,
-    "changelog": "修复 iOS 漫画滚动瞬跳：尺寸变化已被占位补偿吸收时不再回写旧坐标，换窗与图片尺寸修改前先保护滚动范围；保留原生惯性、五页挂载和有界预读。从 1.0.3 更新保留书库、分组、进度、书签与自定义偏好。",
+    "changelog": "更新宿主接口兼容性，保留 1.0.4 的 iOS 漫画滚动修复、原生惯性和有界预读。升级保留书库、分组、阅读进度、书签及自定义偏好。",
     "formats": ["TXT", "EPUB 2/3", "PDF", "CBZ", "ZIP", "图片目录"],
     "limitations": [
       "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
