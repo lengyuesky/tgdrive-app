@@ -83,3 +83,18 @@
 所有本机集成仅使用身份已核验的回环夹具、临时 SQLite、内存 Telegram 和合成媒体，没有读取生产配置、连接生产数据库或 Telegram、操作真实媒体及账号。浏览器夹具在完成后停止，端口 4187 已关闭，原始日志、截图和 trace 仅在本机保留。
 
 其他设备、HTTPS、4K/HDR、内嵌字幕及未列出的原生播放组合没有在本次逐项复验。插件 `npm ci` 报告 6 项依赖审计告警，宿主前端报告 14 项；本次未修改依赖锁文件或自动升级依赖。发布不包含日常服务部署。
+
+## 正式分发结果
+
+公开目录与四包已随 [aba406e](https://github.com/lengyuesky/tgdrive-app/commit/aba406e37e2a2a090b74f44029002816ab1de6a2) 推送。实际从 main 直链读取 catalog、SHA256SUMS 和四个包，六个文件均返回 200，内容与已验收产物逐字节一致；目录包含 fntv 0.1.1。
+
+目录公开核验完成后推送宿主 [v0.3.6](https://github.com/lengyuesky/tgdrive/tree/v0.3.6)，标签指向上述验收提交。正式 [镜像发布运行](https://github.com/lengyuesky/tgdrive/actions/runs/42216137554) 已成功：四个原生构建及运行检查、两个多架构清单全部通过。
+
+GHCR 的两个镜像均发布 0.3.6 和 latest；两标签指向相同索引，均包含 linux/amd64 与 linux/arm64。逐平台读取镜像配置，确认源码修订为 c1cbc486837188cf4873d4da1be462c0a326ce16，版本标签为 v0.3.6。
+
+| 镜像 | 0.3.6 / latest 的索引摘要 |
+| --- | --- |
+| ghcr.io/lengyuesky/tgdrive | sha256:aaa5d414bb407c23e6e9680f3217f8a1ab2706c8a5427b15b2a08a1eb72a19a5 |
+| ghcr.io/lengyuesky/tgdrive-telegram-bot-api | sha256:cae960a247dfbed177e9f42e9b5ad45de068f9fc9f8477272a66261dee30e45e |
+
+镜像实际核验时间：2026-11-06T12:19:48.988Z。发布、源码标签与包分发均已核对；日常服务未部署。
