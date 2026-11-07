@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { seedReaders } from './readers-fixtures.mjs'
 import { seedCinema } from './cinema-fixtures.mjs'
+import { seedFntvCovers } from './fntv-covers-fixtures.mjs'
 import { fixtureCatalogDir, verifyFixtureBuilds } from './fixture-preflight.mjs'
 
 const hostDir = process.env.TGDRIVE_HOST_DIR
@@ -31,6 +32,7 @@ try {
 
 const readers = await seedReaders(`${temporary}/readers`)
 await seedCinema(readers)
+await seedFntvCovers(readers)
 
 const child = spawn('cargo', ['test', '--locked', 'apps::tests::browser_fixture', '--', '--ignored', '--exact', '--nocapture'], {
   cwd: hostDir,

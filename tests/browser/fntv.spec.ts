@@ -8,7 +8,7 @@ const username = 'fntv-public-test'
 const password = 'Fntv-Public-Synthetic-2026'
 const legacyDigest = 'e6d33121415fde364729b2ed820e712e85881f82722a3c6c0b9e6cc45e744779'
 interface AppEntry { manifest: { id: string; version: string; min_host_version: string }; digest: string; revision: string; scope_mode: string; scope: string[] }
-interface MediaItem { guid: string; media_guid: string; file_name: string }
+interface MediaItem { guid: string; media_guid: string; file_name: string; poster: string; poster_list: string[] }
 
 test.beforeEach(async ({ page }) => {
   // 先核验临时夹具身份，再操作合成账号和应用数据。
@@ -64,7 +64,7 @@ test('公开目录安装飞牛服务，授权配置后主动启动，关闭页�
   await page.getByRole('tab', { name: /可安装/ }).click()
   const tile = page.locator('[data-app-id="fntv"]')
   await expect(tile).toContainText('飞牛影视服务')
-  await expect(tile).toContainText('0.1.1')
+  await expect(tile).toContainText('0.1.2')
   await tile.getByRole('button', { name: '安装', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '安装应用', exact: true })
   await expect(dialog).toContainText('读取文件内容')
@@ -72,7 +72,7 @@ test('公开目录安装飞牛服务，授权配置后主动启动，关闭页�
   await dialog.getByRole('button', { name: '同意并安装', exact: true }).click()
   await expect(dialog).not.toBeVisible()
   const installed = await (await page.request.get('/api/apps/fntv')).json() as AppEntry
-  expect(installed.manifest).toMatchObject({ version: '0.1.1', min_host_version: '0.3.6' })
+  expect(installed.manifest).toMatchObject({ version: '0.1.2', min_host_version: '0.3.7' })
   expect(installed.scope_mode).toBe('none')
   expect((await rpc<FntvConfig>(page, 'fntv.config.get')).running).toBe(false)
 
@@ -156,7 +156,7 @@ test('真实 0.1.0 候选包通过公开目录升级，保留数据和运行状�
   const upgrade = await page.request.post('/api/apps/catalog/fntv/install', { data: { digest: current.digest, expected_revision: existing.revision } })
   expect(upgrade.ok()).toBe(true)
   const installed = await upgrade.json() as AppEntry
-  expect(installed.manifest.version).toBe('0.1.1')
+  expect(installed.manifest.version).toBe('0.1.2')
   expect(installed.digest).toBe(current.digest)
   expect(installed.digest).not.toBe(old.digest)
   const after = await rpc<FntvConfig>(page, 'fntv.config.get')
@@ -168,5 +168,62 @@ test('真实 0.1.0 候选包通过公开目录升级，保留数据和运行状�
   const fresh = await login(page)
   expect((await wire<{ ts: number }>(page, '/v/api/v1/play/info', fresh, reference)).ts).toBe(7)
   expect((await wire<{ total: number }>(page, '/v/api/v1/favorite/list', fresh, {})).total).toBe(1)
+  await rpc(page, 'fntv.service.stop')
+})
+
+test('纯视频后台补图，真实管理页显示失败原因并沿用刷新媒体库重试', async ({ page }, testInfo) => {
+  const catalog = await (await page.request.get('/api/apps')).json() as { available: AppEntry[] }
+  const candidate = catalog.available.find(app => app.manifest.id === 'fntv')!
+  expect((await page.request.post('/api/apps/catalog/fntv/install', { data: { digest: candidate.digest } })).ok()).toBe(true)
+  expect((await page.request.patch('/api/apps/fntv/scope', { data: { mode: 'selected', paths: ['/封面验证'] } })).ok()).toBe(true)
+  await rpc(page, 'fntv.account.set', { username, password })
+  const root = await rpc<FileEntry>(page, 'files.stat', { path: '/封面验证' })
+  await rpc(page, 'fntv.libraries.set', { libraries: [{ id: '', name: '封面验证', kind: 'movie', root_id: root.id }] })
+  await rpc(page, 'fntv.service.start')
+  await expect.poll(async () => {
+    const covers = (await rpc<FntvStatus>(page, 'fntv.service.status')).covers
+    return covers && { ready: covers.ready, pending: covers.pending, failed: covers.failed }
+  }, { timeout: 30_000 }).toEqual({ ready: 1, pending: 0, failed: 1 })
+  const status = await rpc<FntvStatus>(page, 'fntv.service.status')
+  const failure = status.covers!.errors[0]
+  expect(failure.reason).toBeTruthy()
+  expect(status.covers!.retrying).toBe(0)
+
+  await page.goto('/apps/fntv')
+  const frame = page.frameLocator('iframe')
+  await expect(frame.locator('#cover-state')).toHaveText('封面：已就绪 1 · 待补 0 · 失败 1')
+  await expect(frame.locator('#cover-errors')).toBeVisible()
+  await frame.locator('#cover-errors summary').click()
+  await expect(frame.locator('#cover-error-list li')).toHaveCount(1)
+  await expect(frame.locator('#cover-error-list')).toContainText(`${failure.title}：${failure.reason}`)
+  await expect(frame.locator('#cover-error-list')).toContainText('可刷新媒体库重试')
+  await expect(frame.getByRole('button', { name: '刷新媒体库', exact: true })).toHaveCount(1)
+  await expect(frame.getByRole('button', { name: /重试缺图|补封面/ })).toHaveCount(0)
+
+  const token = await login(page)
+  const config = await rpc<FntvConfig>(page, 'fntv.config.get')
+  const list = () => wire<{ list: MediaItem[] }>(page, '/v/api/v1/item/list', token, { ancestor_guid: config.libraries[0].id })
+  const before = (await list()).list
+  const ready = before.find(item => item.file_name === '纯视频截帧.mp4')!
+  const missing = before.find(item => item.file_name === '无法解码.mp4')!
+  expect(ready.poster).toBeTruthy()
+  expect(missing.poster).toBe('')
+  expect(missing.poster_list).toEqual([])
+  const image = await page.request.get(`/v/api/v1/sys/img${ready.poster}`, { headers: { Authorization: token } })
+  expect(image.status()).toBe(200)
+  expect(image.headers()['content-type']).toBe('image/jpeg')
+  const jpeg = await image.body()
+  expect(jpeg.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]))
+  expect(jpeg.length).toBeLessThanOrEqual(256 * 1024)
+  const original = await page.request.get(`/v/api/v1/media/range/${missing.media_guid}`, { headers: { Authorization: token, Range: 'bytes=0-7' } })
+  expect(original.status()).toBe(206)
+  expect((await original.body()).length).toBe(8)
+
+  await frame.locator('#refresh').click()
+  await expect(frame.locator('#message')).toContainText('服务运行时会在后台继续补齐缺图封面')
+  await expect.poll(async () => (await rpc<FntvStatus>(page, 'fntv.service.status')).covers!.failed).toBe(1)
+  expect((await list()).list.find(item => item.media_guid === ready.media_guid)!.poster).toBe(ready.poster)
+  await expect(frame.locator('#cover-state')).toHaveText('封面：已就绪 1 · 待补 0 · 失败 1')
+  await page.screenshot({ path: testInfo.outputPath('fntv-cover-management.png'), fullPage: true })
   await rpc(page, 'fntv.service.stop')
 })

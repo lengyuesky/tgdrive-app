@@ -9,9 +9,9 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 | `shorts` | 短视频 | `1.4.7` | 2 | 分页加载视频队列，支持滑动切换、进度拖动、收藏与下载 |
 | `reader` | 阅读馆 | `1.0.5` | 2 | 保留 iOS 漫画滚动修复、原生惯性、手动书库与紧凑筛选，最低宿主 0.3.3 |
 | `cinema` | 影视 | `1.4.6` | 2 | 媒体库、片头片尾设置、定时停止、字幕与客户端 MKV 流式解封装 |
-| `fntv` | 飞牛影视服务 | `0.1.1` | 2 | 独立影视账号、电影和电视剧媒体库、目录授权与服务启停，最低宿主 0.3.6 |
+| `fntv` | 飞牛影视服务 | `0.1.2` | 2 | 独立影视账号、媒体库、授权和服务启停，自动补图及缺图重试，最低宿主 0.3.7 |
 
-飞牛影视服务已纳入公开目录。在宿主 `0.3.6` 或更高版本的「应用中心」刷新后安装，选择允许读取的目录、设置独立影视账号并创建媒体库，最后主动启动服务。客户端使用管理页显示的服务根地址。说明与本机验收见 [插件说明](fntv/README.md)及 [0.1.1 发布记录](docs/fntv-0.1.1-release.md)。
+飞牛影视服务已纳入公开目录。在宿主 `0.3.7` 或更高版本的「应用中心」刷新后安装，选择允许读取的目录、设置独立影视账号并创建媒体库，最后主动启动服务。无海报视频依次使用 Telegram 小图或受限截帧；管理页显示封面状态，“刷新媒体库”可重试缺图，完成后刷新客户端列表或重新进入页面。客户端使用管理页显示的服务根地址。说明与本机验收见 [插件说明](fntv/README.md)及 [0.1.2 验收记录](docs/fntv-0.1.2-local-validation.md)。
 
 原三款插件各提升一个修订版本，以同步公共 SDK 的可选飞牛服务接口；各自最低宿主要求、页面和数据格式保留。阅读馆 1.0.5 继续携带 1.0.4 的四张真实截图。滚动修复的历史证据见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)，本次四包集成见 [公开目录发布记录](docs/fntv-0.1.1-release.md)。
 
@@ -91,7 +91,7 @@ sha256sum -c SHA256SUMS
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件：`shorts-1.4.7.tgapp`、`reader-1.0.5.tgapp`、`cinema-1.4.6.tgapp`、`fntv-0.1.1.tgapp`）
+- `apps/<id>-<version>.tgapp`（各官方插件最新打包文件：`shorts-1.4.7.tgapp`、`reader-1.0.5.tgapp`、`cinema-1.4.6.tgapp`、`fntv-0.1.2.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 
@@ -116,7 +116,7 @@ sha256sum -c SHA256SUMS
 - [代码贡献指南](docs/contributing.md)
 - [插件分发与目录协议说明](docs/release.md)
 
-本次公开目录验收见 [飞牛影视服务 0.1.1 发布记录](docs/fntv-0.1.1-release.md)。阅读馆实际验收见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)；1.0.3 见 [上一版记录](docs/reader-1.0.3-release.md)，1.0.2 见 [1.0.2 记录](docs/reader-1.0.2-release.md)，1.0.1 见 [1.0.1 记录](docs/reader-1.0.1-release.md)，1.0.0 见 [历史验证记录](docs/reader-validation.md)，四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
+本次封面补全及目录验收见 [飞牛影视服务 0.1.2 记录](docs/fntv-0.1.2-local-validation.md)，上一版首次公开目录见 [0.1.1 发布记录](docs/fntv-0.1.1-release.md)。阅读馆实际验收见 [1.0.4 发布验收记录](docs/reader-1.0.4-release.md)；1.0.3 见 [上一版记录](docs/reader-1.0.3-release.md)，1.0.2 见 [1.0.2 记录](docs/reader-1.0.2-release.md)，1.0.1 见 [1.0.1 记录](docs/reader-1.0.1-release.md)，1.0.0 见 [历史验证记录](docs/reader-validation.md)，四款旧应用的历史记录见[可用性优化](docs/app-usability-2026-10-03.md)及[加载和交互优化](docs/app-optimization-2026-10.md)。
 
 ### 阅读馆与旧应用迁移
 

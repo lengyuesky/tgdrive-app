@@ -20,7 +20,12 @@ export interface HostLibraryPage extends Page { revision: string; entries: { fil
 /** 影视连接账号和媒体库由宿主独立保存；接口从不返回密码或校验值。 */
 export interface FntvLibrary { id: string; name: string; kind: 'movie' | 'tv'; root_id: number; path?: string | null; authorized?: boolean }
 export interface FntvConfig { username: string; account_configured: boolean; libraries: FntvLibrary[]; running: boolean }
-export interface FntvStatus { running: boolean; probe_available: boolean; index: { state: 'idle' | 'scanning' | 'ready' | 'failed'; error: string; entries: number } }
+export interface FntvCoverStatus {
+  ready: number; pending: number; failed: number; retrying: number
+  bytes: number; limit_bytes: number; frame_available: boolean
+  errors: { title: string; reason: string; retry_at: number }[]
+}
+export interface FntvStatus { running: boolean; probe_available: boolean; index: { state: 'idle' | 'scanning' | 'ready' | 'failed'; error: string; entries: number }; covers?: FntvCoverStatus }
 export interface FntvService {
   config(options?: CallOptions): Promise<FntvConfig>
   account(username: string, password: string): Promise<{ ok: true }>

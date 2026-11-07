@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { Drive, FntvConfig, FntvLibrary, FntvService } from '../../sdk/types'
+import type { Drive, FntvConfig, FntvCoverStatus, FntvLibrary, FntvService } from '../../sdk/types'
 import page from '../../fntv/index.html?raw'
 
 function field<T extends HTMLElement>(id: string): T {
@@ -10,7 +10,8 @@ function field<T extends HTMLElement>(id: string): T {
 
 async function boot() {
   let config: FntvConfig = { username: '', account_configured: false, running: false, libraries: [] }
-  const status = () => ({ running: config.running, probe_available: true, index: { state: 'ready' as const, entries: 0, error: '' } })
+  let covers: FntvCoverStatus | undefined
+  const status = () => ({ running: config.running, probe_available: true, index: { state: 'ready' as const, entries: 0, error: '' }, covers })
   const account = vi.fn(async (username: string, _password: string) => {
     config = { ...config, username, account_configured: true }
     return { ok: true as const }
@@ -19,11 +20,12 @@ async function boot() {
     config = { ...config, libraries: rows.map(row => ({ ...row, id: row.id || 'synthetic-library', authorized: true, path: '/合成电影' })) }
     return { ok: true as const, libraries: structuredClone(config.libraries) }
   })
+  const refresh = vi.fn(async () => status().index)
   const service: FntvService = {
     config: async () => structuredClone(config), account, libraries, status: async () => status(),
     start: async () => { config.running = true; return { ok: true, running: true } },
     stop: async () => { config.running = false; return { ok: true, running: false } },
-    refresh: async () => status().index,
+    refresh,
   }
   vi.stubGlobal('tgdrive', {
     ready: Promise.resolve(), can: (capability: string) => capability === 'fntv.service', fntv: service,
@@ -33,7 +35,7 @@ async function boot() {
   document.body.innerHTML = new DOMParser().parseFromString(page, 'text/html').body.innerHTML
   await import('../../fntv/main')
   await vi.waitFor(() => expect(field('account-state').textContent).toBe('尚未设置账号'))
-  return { account, libraries }
+  return { account, libraries, refresh, setCovers: (value: FntvCoverStatus) => { covers = value } }
 }
 
 beforeEach(() => { vi.resetModules(); vi.useFakeTimers() })
@@ -84,4 +86,20 @@ it('无效字段不写入宿主，输入框回车保存且进行中不会重复�
   expect(enter.defaultPrevented).toBe(true)
   await vi.waitFor(() => expect(field('account-state').textContent).toBe('已设置独立影视账号'))
   expect(account).toHaveBeenCalledTimes(1)
+})
+
+it('轮询显示封面状态和安全的失败原因，沿用刷新媒体库重试且兼容旧宿主', async () => {
+  const { refresh, setCovers } = await boot()
+  expect(field('cover-state').textContent).toBe('自动补封面需要更新宿主。')
+  setCovers({ ready: 2, pending: 1, failed: 1, retrying: 1, bytes: 1024, limit_bytes: 256 * 1024 * 1024, frame_available: true,
+    errors: [{ title: '<img src=x onerror=alert(1)>', reason: '上游存储暂时不可用', retry_at: 1 }] })
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(field('cover-state').textContent).toContain('已就绪 2 · 待补 1 · 失败 1')
+  expect(field('cover-errors').hidden).toBe(false)
+  expect(field('cover-error-list').textContent).toContain('<img src=x onerror=alert(1)>：上游存储暂时不可用；稍后自动重试')
+  expect(field('cover-error-list').querySelector('img')).toBeNull()
+  expect([...document.querySelectorAll('button')].some(button => button.textContent?.includes('重试'))).toBe(false)
+  field('refresh').click()
+  await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+  await vi.waitFor(() => expect(field('message').textContent).toContain('后台继续补齐缺图封面'))
 })

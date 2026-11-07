@@ -21,6 +21,16 @@ async function update() {
   element<HTMLButtonElement>('start').disabled = !fresh.account_configured || !fresh.libraries.some(l => l.authorized) || !status.probe_available
   const states: Record<FntvStatus['index']['state'], string> = { idle: '等待创建媒体库', scanning: '正在整理媒体库', ready: `已整理 ${status.index.entries} 条视频`, failed: status.index.error || '媒体库整理失败，请刷新重试' }
   element('index-state').textContent = !status.probe_available ? '宿主媒体探测组件不可用，请检查宿主安装。' : states[status.index.state]
+  const covers = status.covers
+  element('cover-state').textContent = covers
+    ? `封面：已就绪 ${covers.ready} · 待补 ${covers.pending} · 失败 ${covers.failed}${covers.retrying ? `（${covers.retrying} 条将自动重试）` : ''}`
+    : '自动补封面需要更新宿主。'
+  const failures = element('cover-error-list'); failures.replaceChildren()
+  for (const error of covers?.errors ?? []) {
+    const row = document.createElement('li'); row.textContent = `${error.title}：${error.reason}${error.retry_at ? '；稍后自动重试' : '；可刷新媒体库重试'}`
+    failures.append(row)
+  }
+  element('cover-errors').hidden = !covers?.errors.length
   const container = element('libraries'); container.replaceChildren()
   if (!fresh.libraries.length) { const hint = document.createElement('p'); hint.textContent = '还没有媒体库。先选择目录，再添加媒体库。'; container.append(hint) }
   for (const library of fresh.libraries) {
@@ -81,7 +91,7 @@ async function initialize() {
   })
   element('start').addEventListener('click', () => void action(async () => { await service.start(); message('服务已启动，可以在客户端添加连接。') }))
   element('stop').addEventListener('click', () => void action(async () => { await service.stop(); message('服务已停止，旧登录和进行中的传输已中止。') }))
-  element('refresh').addEventListener('click', () => void action(async () => { await service.refresh(); message('媒体库已刷新。') }))
+  element('refresh').addEventListener('click', () => void action(async () => { await service.refresh(); message('媒体库已刷新。服务运行时会在后台继续补齐缺图封面。') }))
   await drive.lifecycle?.report('ready')
   const timer = setInterval(() => { if (!busy && document.visibilityState === 'visible') void update().catch(() => {}) }, 3000)
   window.addEventListener('pagehide', () => clearInterval(timer), { once: true })

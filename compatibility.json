@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "host_repository": "lengyuesky/tgdrive",
-  "host_ref": "c1cbc486837188cf4873d4da1be462c0a326ce16",
-  "host_version": "0.3.6",
-  "min_host_version": "0.3.6",
+  "host_ref": "6ab85fc57f31b568571ad271ccddfe60b37bded4",
+  "host_version": "0.3.7",
+  "min_host_version": "0.3.7",
   "api_version": 2,
   "supported_api_versions": [
     1,
@@ -15,11 +15,11 @@
     "fixture_command": "cargo test --locked apps::tests::browser_fixture -- --ignored --exact --nocapture",
     "fixture_url": "http://127.0.0.1:4187/__apps_fixture",
     "host_ref_kind": "verified_commit",
-    "host_tree": "89318325e7003ece582678f21f5c42ef5c47b431",
+    "host_tree": "45e1ad098f5ba1b318d75098816acea688686c4d",
     "worktree_dirty": false,
     "validation_status": "passed_commit",
-    "validation_date": "2026-11-06",
-    "validation_report": "docs/fntv-0.1.1-release.md",
-    "validation_note": "host_ref 是实际通过验收的宿主 0.3.6 完整提交。git archive 导出的 333 个源码对象及执行位与该 tree 一致，导出无额外改动；主工作区既有修改未纳入。正式四包通过完整 70 项 E2E，2 项未改变资源的截图生成用例按需跳过；真实阅读馆 1.0.2/1.0.3/1.0.4 升级连续三轮共 9 项通过，包含完整数据行及修订号比较。飞牛正式目录安装、首次授权、账号和媒体库、主动启动、原文件 Range、关闭页面持续运行、停服撤销登录及真实 0.1.0 升级均通过。四包、目录和摘要清单重建后逐字节一致，原生证据与未执行范围见报告。日常服务未部署。"
+    "validation_date": "2026-11-07",
+    "validation_report": "docs/fntv-0.1.2-local-validation.md",
+    "validation_note": "host_ref 是实际通过验收的宿主 0.3.7 完整提交。git archive 导出的 347 个文件内容及执行位逐项匹配该 tree；worktree_dirty=false 描述此独立导出，主工作区原有搜索、分享等修改没有纳入。独立宿主源码通过 388 项测试及 Clippy，6 个显式集成夹具忽略；插件通过 645 项测试和完整构建。完整 E2E 首次运行 66 项通过、7 项跳过，随后显式提供 Git 历史中的真实阅读馆 1.0.1/1.0.2/1.0.3/1.0.4 包补跑 5 项升级全部通过，合计覆盖 71 项行为；只剩 2 项未改变资源的截图生成用例按需跳过。FNTV 0.1.2 包与官方客户端合成验收的候选逐字节一致，其他三款正式包没有改变。官方 1.12.3 的新增封面画面、两架构媒体组件证据和未验收范围见报告；没有部署日常服务或发布新的宿主标签。"
   }
 }
