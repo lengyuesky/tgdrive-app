@@ -569,7 +569,7 @@ describe('build.mjs 与独立分发输出行为', () => {
     expect(packages).toHaveLength(4)
     expect(packages.map(pkg => pkg.manifest.id)).toEqual(['cinema', 'fntv', 'reader', 'shorts'])
     const fntv = packages.find(pkg => pkg.manifest.id === 'fntv')!
-    expect(fntv.manifest).toMatchObject({ version: '0.1.2', min_host_version: '0.3.7', permissions: ['files.read', 'media.read', 'fntv.service'] })
+    expect(fntv.manifest).toMatchObject({ version: '0.1.3', min_host_version: '0.3.7', permissions: ['files.read', 'media.read', 'fntv.service'] })
     const fntvPage = extractFileFromZip(fntv.buffer, 'index.html')!.toString('utf8')
     expect(fntvPage).toContain('飞牛影视服务')
     const fntvScript = fntvPage.match(/src="\.\/([^" ]+\.js)"[^>]*><\/script>/)?.[1]

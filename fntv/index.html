@@ -1,22 +1,74 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>飞牛影视服务</title></head>
-<body><main>
-  <header><div><p class="eyebrow">TGDrive · 客户端连接</p><h1>飞牛影视服务</h1><p class="intro">用独立影视账号，把选定的网盘目录变成客户端媒体库。</p></div><span id="service-state" class="badge">正在读取</span></header>
-  <div id="message" role="status" aria-live="polite" hidden></div>
-  <section class="connection"><div><h2>连接地址</h2><p>在飞牛影视客户端中手动添加此地址，使用下方影视账号登录。</p></div><input id="address" aria-label="服务根地址" readonly></section>
-  <div class="columns">
-    <section><h2>影视连接账号</h2><p>更换账号或密码后，已连接的客户端需要重新登录。</p>
-      <form id="account-form"><label for="username">账号</label><input id="username" autocomplete="off" maxlength="64" required>
-        <label for="password">设置新密码</label><input id="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required placeholder="至少 8 个字符">
-        <button id="save-account" type="button">保存账号</button><span id="account-state" class="hint"></span></form>
+<body>
+  <header class="tg-topbar">
+    <div class="tg-topbar-start"><button id="exit" class="tg-icon-btn" type="button" aria-label="返回网盘" data-icon="back"></button></div>
+    <h1 class="tg-topbar-title">飞牛影视服务</h1>
+    <div class="tg-topbar-end"></div>
+  </header>
+  <div id="message" class="tg-toast" role="status" aria-live="polite" hidden></div>
+  <main>
+    <section class="status" aria-label="服务状态">
+      <span id="service-state" class="badge">正在读取</span>
+      <p id="index-state" class="status-detail">尚未读取索引状态</p>
+      <div class="actions">
+        <button id="start" class="tg-primary" type="button">启动服务</button>
+        <button id="stop" class="secondary" type="button" hidden>停止服务</button>
+        <button id="refresh" class="secondary" type="button" data-icon="refresh">刷新媒体库</button>
+      </div>
+      <p id="start-hint" class="hint" hidden></p>
     </section>
-    <section><h2>媒体库</h2><p>只收录你创建的媒体库；所选目录包含其子目录。</p><div id="libraries" class="libraries"></div>
-      <form id="library-form"><label for="library-name">媒体库名称</label><input id="library-name" maxlength="160" required placeholder="例如：电影收藏">
-        <label for="library-kind">整理方式</label><select id="library-kind"><option value="movie">电影库</option><option value="tv">电视剧库</option></select>
-        <button id="pick-directory" type="button" class="secondary">选择并授权目录</button><span id="picked-directory" class="hint">尚未选择目录</span>
-        <button id="add-library" type="button" disabled>添加媒体库</button></form>
-    </section>
-  </div>
-  <section class="controls"><div><h2>服务与索引</h2><p id="index-state">尚未读取索引状态</p><p id="cover-state" aria-live="polite">尚未读取封面状态</p><details id="cover-errors" hidden><summary>缺图原因</summary><ul id="cover-error-list"></ul></details><p class="hint">缺图封面会在后台补齐，刷新媒体库可重试。完成后刷新客户端列表或重新进入页面。</p><p class="hint">关闭此页面后，已启动的服务继续运行。视频按原文件传输，播放格式取决于客户端。</p></div><div class="actions"><button id="start" type="button">启动服务</button><button id="stop" type="button" class="secondary" hidden>停止服务</button><button id="refresh" type="button" class="secondary">刷新媒体库</button></div></section>
-  <footer>收藏和观看进度由本服务独立保存。卸载默认保留数据及全部网盘原文件。</footer>
-</main><script src="./tgdrive-sdk.js"></script><script type="module" src="./main.ts"></script></body></html>
+
+    <div class="columns">
+      <div class="column">
+        <section aria-labelledby="connection-title">
+          <h2 id="connection-title">连接地址</h2>
+          <div class="tg-group copy-row">
+            <input id="address" aria-label="服务根地址" readonly>
+            <button id="copy-address" type="button">复制</button>
+          </div>
+          <p class="hint">在飞牛影视客户端中手动添加此地址，使用下方影视账号登录。</p>
+        </section>
+
+        <section aria-labelledby="account-title">
+          <h2 id="account-title">影视连接账号</h2>
+          <form id="account-form" class="tg-group">
+            <div class="field"><label for="username">账号</label><input id="username" class="tg-input" autocomplete="off" maxlength="64" required></div>
+            <div class="field"><label for="password">设置新密码</label><input id="password" class="tg-input" type="password" autocomplete="new-password" minlength="8" maxlength="128" required placeholder="至少 8 个字符"></div>
+            <div class="form-footer"><span id="account-state" class="hint"></span><button id="save-account" class="tg-primary" type="button">保存账号</button></div>
+          </form>
+          <p class="hint">更换账号或密码后，已连接的客户端需要重新登录。</p>
+        </section>
+      </div>
+
+      <div class="column">
+        <section aria-labelledby="libraries-title">
+          <h2 id="libraries-title">媒体库</h2>
+          <div id="libraries" class="tg-group libraries"></div>
+          <p class="hint">只收录你创建的媒体库；所选目录包含其子目录。</p>
+          <h3>添加媒体库</h3>
+          <form id="library-form" class="tg-group">
+            <div class="field"><label for="library-name">媒体库名称</label><input id="library-name" class="tg-input" maxlength="160" required placeholder="例如：电影收藏"></div>
+            <div class="field"><label for="library-kind">整理方式</label><select id="library-kind" class="tg-input"><option value="movie">电影库</option><option value="tv">电视剧库</option></select></div>
+            <div class="field directory"><span id="picked-directory" class="hint">尚未选择目录</span><button id="pick-directory" class="secondary" type="button" data-icon="folder">选择并授权目录</button></div>
+            <div class="form-footer"><button id="add-library" class="tg-primary" type="button" disabled>添加媒体库</button></div>
+          </form>
+        </section>
+
+        <section aria-labelledby="covers-title">
+          <h2 id="covers-title">封面</h2>
+          <div class="tg-group covers">
+            <p id="cover-state" aria-live="polite">尚未读取封面状态</p>
+            <details id="cover-errors" hidden><summary>缺图原因</summary><ul id="cover-error-list"></ul></details>
+          </div>
+          <p class="hint">缺图封面会在后台补齐，刷新媒体库可重试。完成后刷新客户端列表或重新进入页面。</p>
+        </section>
+      </div>
+    </div>
+
+    <footer>
+      <p>关闭此页面后，已启动的服务继续运行。视频按原文件传输，播放格式取决于客户端。</p>
+      <p>收藏和观看进度由本服务独立保存。卸载默认保留数据及全部网盘原文件。</p>
+    </footer>
+  </main>
+<script src="./tgdrive-sdk.js"></script><script type="module" src="./main.ts"></script></body></html>

@@ -64,7 +64,7 @@ test('公开目录安装飞牛服务，授权配置后主动启动，关闭页�
   await page.getByRole('tab', { name: /可安装/ }).click()
   const tile = page.locator('[data-app-id="fntv"]')
   await expect(tile).toContainText('飞牛影视服务')
-  await expect(tile).toContainText('0.1.2')
+  await expect(tile).toContainText('0.1.3')
   await tile.getByRole('button', { name: '安装', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '安装应用', exact: true })
   await expect(dialog).toContainText('读取文件内容')
@@ -72,7 +72,7 @@ test('公开目录安装飞牛服务，授权配置后主动启动，关闭页�
   await dialog.getByRole('button', { name: '同意并安装', exact: true }).click()
   await expect(dialog).not.toBeVisible()
   const installed = await (await page.request.get('/api/apps/fntv')).json() as AppEntry
-  expect(installed.manifest).toMatchObject({ version: '0.1.2', min_host_version: '0.3.7' })
+  expect(installed.manifest).toMatchObject({ version: '0.1.3', min_host_version: '0.3.7' })
   expect(installed.scope_mode).toBe('none')
   expect((await rpc<FntvConfig>(page, 'fntv.config.get')).running).toBe(false)
 
@@ -156,7 +156,7 @@ test('真实 0.1.0 候选包通过公开目录升级，保留数据和运行状�
   const upgrade = await page.request.post('/api/apps/catalog/fntv/install', { data: { digest: current.digest, expected_revision: existing.revision } })
   expect(upgrade.ok()).toBe(true)
   const installed = await upgrade.json() as AppEntry
-  expect(installed.manifest.version).toBe('0.1.2')
+  expect(installed.manifest.version).toBe('0.1.3')
   expect(installed.digest).toBe(current.digest)
   expect(installed.digest).not.toBe(old.digest)
   const after = await rpc<FntvConfig>(page, 'fntv.config.get')

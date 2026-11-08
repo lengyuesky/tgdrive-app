@@ -61,7 +61,7 @@
       "manifest": {
         "id": "fntv",
         "name": "飞牛影视服务",
-        "version": "0.1.2",
+        "version": "0.1.3",
         "api_version": 2,
         "min_host_version": "0.3.7",
         "description": "通过独立影视账号，让飞牛影视客户端浏览和播放已授权的网盘媒体库。安装后需配置账号、创建媒体库并主动启动。",
@@ -77,7 +77,7 @@
         "integration": {
           "file_types": [],
           "directories": false,
-          "changelog": "为缺少同目录海报的视频自动复用 Telegram 缩略图或限量截帧，后台生成并缓存封面。管理页显示封面状态和失败原因，现有刷新媒体库操作可重试缺图。要求宿主 0.3.7，更新保留账号、媒体库、观看记录和运行状态。",
+          "changelog": "管理页界面改版：配色跟随主站深浅色，手机沉浸并自带返回网盘；服务状态与启停置顶，并提示启动前还缺哪些步骤；连接地址可一键复制；账号、媒体库和封面改为分组列表。服务能力不变，更新保留账号、媒体库、观看记录和运行状态。",
           "formats": [
             "网盘视频",
             "同目录 NFO 和海报",
@@ -97,9 +97,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "8ef1d3087b684d31890337799961db07d2211b3c45040f6e86ca02449fd9dffa",
-      "size": 12471,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/fntv-0.1.2.tgapp"
+      "sha256": "b796788a6b55e50ac506d67152d3d022bddbdef49d5d7bb540cf62669ac69380",
+      "size": 16159,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/fntv-0.1.3.tgapp"
     },
     {
       "manifest": {

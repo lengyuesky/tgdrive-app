@@ -1,4 +1,7 @@
+import '../ui/base.css'
 import './style.css'
+import { icon, type IconName } from '../ui/icons'
+import { applyTheme, ImmersiveSync, MOBILE_QUERY } from '../cinema/shell'
 import type { FntvConfig, FntvLibrary, FntvService, FntvStatus } from '../sdk/types'
 
 const drive = window.tgdrive
@@ -8,8 +11,15 @@ let config: FntvConfig
 let picked: { id: number; path: string } | undefined
 let busy = false
 let accountEdited = false
+let renderedLibraries: string | undefined
+let messageTimer: ReturnType<typeof setTimeout> | undefined
 
-function message(text: string, error = false) { const view = element('message'); view.textContent = text; view.classList.toggle('error', error); view.hidden = !text }
+// 页面较长，操作结果用浮动提示；成功提示自动消失，错误保留到下一条消息。
+function message(text: string, error = false) {
+  const view = element('message'); view.textContent = text; view.classList.toggle('error', error); view.hidden = !text
+  clearTimeout(messageTimer)
+  if (text && !error) messageTimer = setTimeout(() => { view.hidden = true }, 4000)
+}
 async function update() {
   const [fresh, status] = await Promise.all([service.config(), service.status()])
   config = fresh
@@ -31,12 +41,22 @@ async function update() {
     failures.append(row)
   }
   element('cover-errors').hidden = !covers?.errors.length
+  const startHint = element('start-hint')
+  const missing = [fresh.account_configured ? '' : '设置影视账号', fresh.libraries.some(l => l.authorized) ? '' : '添加媒体库'].filter(Boolean)
+  startHint.textContent = !status.running && missing.length ? `启动前还需：${missing.join('、')}` : ''
+  startHint.hidden = !startHint.textContent
+  // 轮询内容不变时不重建列表，否则手机上按下与抬起之间按钮被替换会丢点击。
+  const librariesKey = JSON.stringify(fresh.libraries)
+  if (librariesKey === renderedLibraries) return
+  renderedLibraries = librariesKey
   const container = element('libraries'); container.replaceChildren()
-  if (!fresh.libraries.length) { const hint = document.createElement('p'); hint.textContent = '还没有媒体库。先选择目录，再添加媒体库。'; container.append(hint) }
+  if (!fresh.libraries.length) { const hint = document.createElement('p'); hint.className = 'empty'; hint.textContent = '还没有媒体库。先选择目录，再添加媒体库。'; container.append(hint) }
   for (const library of fresh.libraries) {
     const row = document.createElement('div'); row.className = 'library'
-    const content = document.createElement('div'); const title = document.createElement('strong'); title.textContent = library.name
+    row.insertAdjacentHTML('afterbegin', icon('folder'))
+    const content = document.createElement('div'); content.className = 'library-text'; const title = document.createElement('strong'); title.textContent = library.name
     const detail = document.createElement('span'); detail.textContent = `${library.kind === 'movie' ? '电影' : '电视剧'} · ${library.authorized ? library.path : '目录授权已失效'}`
+    detail.classList.toggle('invalid', !library.authorized)
     content.append(title, detail)
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '移除'; remove.setAttribute('aria-label', `移除媒体库 ${library.name}`)
     remove.addEventListener('click', () => void action(async () => { await service.libraries(clean(fresh.libraries.filter(l => l.id !== library.id))); message('已移除媒体库。相关旧连接已失效，观看记录仍保留。') }))
@@ -62,12 +82,38 @@ function bindForm(formId: string, buttonId: string, work: () => Promise<void>) {
   })
 }
 
+function copyAddress() {
+  // 宿主 iframe 未授予 clipboard-write，只能选中文本后走 execCommand；失败时保留选中供手动复制。
+  const address = element<HTMLInputElement>('address')
+  address.focus(); address.setSelectionRange(0, address.value.length)
+  let copied = false
+  try { copied = document.execCommand('copy') } catch { /* 浏览器拒绝时按未复制提示。 */ }
+  if (copied) { address.setSelectionRange(0, 0); address.blur() }
+  message(copied ? '连接地址已复制。' : '无法自动复制，请长按地址手动复制。', !copied)
+}
+
+async function connectShell() {
+  const context = await drive.ready
+  const media = window.matchMedia(MOBILE_QUERY)
+  const shell = new ImmersiveSync(drive, context, () => {})
+  let dark = context.dark
+  // 手机打开即隐藏宿主顶栏，由本页顶栏提供返回入口。
+  const sync = () => { applyTheme(document.documentElement, dark); void shell.update({ mobile: media.matches, playing: false, dark }) }
+  sync()
+  drive.on('theme.changed', value => { dark = !!(value as { dark?: boolean } | undefined)?.dark; sync() })
+  media.addEventListener('change', sync)
+  element('exit').addEventListener('click', () => void shell.dispose().then(() => drive.ui.close()))
+  window.addEventListener('pagehide', () => void shell.dispose(), { once: true })
+}
+
 async function initialize() {
-  await drive.ready
+  for (const target of document.querySelectorAll<HTMLElement>('[data-icon]')) target.insertAdjacentHTML('afterbegin', icon(target.dataset.icon as IconName))
+  await connectShell()
   if (!drive.fntv || !drive.can('fntv.service')) throw new Error('当前宿主不支持影视服务能力，请升级至支持此插件的宿主。')
   service = drive.fntv
   await drive.lifecycle?.migrate(1, async () => {})
   element<HTMLInputElement>('address').value = new URL(window.location.href).origin
+  element('copy-address').addEventListener('click', copyAddress)
   await update()
   element('username').addEventListener('input', () => { accountEdited = true })
   bindForm('account-form', 'save-account', async () => {
