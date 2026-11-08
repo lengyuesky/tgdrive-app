@@ -1,7 +1,7 @@
 {
   "id": "reader",
   "name": "阅读馆",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "api_version": 2,
   "min_host_version": "0.3.3",
   "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -13,7 +13,7 @@
   "integration": {
     "file_types": ["txt", "epub", "pdf", "cbz", "zip"],
     "directories": true,
-    "changelog": "更新宿主接口兼容性，保留 1.0.4 的 iOS 漫画滚动修复、原生惯性和有界预读。升级保留书库、分组、阅读进度、书签及自定义偏好。",
+    "changelog": "iPhone 主屏幕界面改版：手机打开即沉浸并自带返回网盘；正文跟手翻页、左右边缘留给系统返回手势；工具栏改为图标与可拖动进度条，排版分两级、四种主题；长条漫自动连续滚动；书库去掉抽屉，改为顶部筛选标签。升级保留书库、分组、阅读进度、书签及自定义偏好。",
     "formats": ["TXT", "EPUB 2/3", "PDF", "CBZ", "ZIP", "图片目录"],
     "limitations": [
       "支持无 DRM 的 EPUB；不执行书内脚本或外部资源。",
@@ -22,7 +22,7 @@
     ],
     "homepage": "https://github.com/lengyuesky/tgdrive-app",
     "support": "https://github.com/lengyuesky/tgdrive-app/issues",
-    "screenshots": ["screenshots/home.png", "screenshots/mobile-library.png", "screenshots/mobile-reading.png", "screenshots/mobile-sidebar.png"],
+    "screenshots": ["screenshots/home.png", "screenshots/mobile-library.png", "screenshots/mobile-reading.png"],
     "data_schema": 1
   }
 }

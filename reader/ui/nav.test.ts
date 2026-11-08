@@ -79,73 +79,49 @@ describe('阅读馆书库侧边栏', () => {
     x.nav.refreshLibraries(snapshot)
     expect(x.button(`group:${x.groupId}`).textContent).toContain(malicious)
     expect(x.button('source:2').title).toBe('/' + malicious)
-    expect(x.container.querySelector('img, svg')).toBeNull()
+    expect(x.container.querySelector('img')).toBeNull()
+    expect(x.container.querySelector('[data-library-id] svg')).toBeNull()
     expect(document.activeElement).toBe(x.button(`group:${x.groupId}`))
     await x.library.bookGroups.remove(x.groupId)
     x.nav.refreshLibraries(snapshot)
     expect(x.button(`group:${x.groupId}`)).toBeUndefined()
   })
 
-  it('手机抽屉圈定焦点、阻止背景交互，ESC 和遮罩关闭后恢复焦点与原 inert 状态', async () => {
+  it('手机不再有抽屉：顶栏只留标题和搜索，书库页横滑筛选与侧栏同一份入口并同步高亮', async () => {
     const x = await setup('all', true)
-    const trigger = x.container.querySelector<HTMLButtonElement>('#btn-mobile-libraries')!
-    const content = document.querySelector<HTMLElement>('.ui-content')!
-    const bottom = x.container.querySelector<HTMLElement>('.mobile-bottom-nav')!
-    content.inert = false; bottom.inert = true
-    trigger.focus(); trigger.click()
-    expect(x.container.classList.contains('sidebar-open')).toBe(true)
-    expect(x.container.querySelector('#library-sidebar')?.getAttribute('aria-modal')).toBe('true')
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
-    expect(content.inert).toBe(true)
-    const elements = [...x.container.querySelectorAll<HTMLButtonElement>('#library-sidebar button')].filter(button => !button.disabled)
-    const first = elements[0]!, last = elements.at(-1)!
-    last.focus()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
-    expect(document.activeElement).toBe(first)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
-    expect(document.activeElement).toBe(last)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    expect(content.inert).toBe(false); expect(bottom.inert).toBe(true)
-    expect(document.activeElement).toBe(trigger)
-    expect(trigger.getAttribute('aria-expanded')).toBe('false')
-    trigger.click()
-    x.container.querySelector<HTMLButtonElement>('#sidebar-backdrop')!.click()
-    expect(x.container.classList.contains('sidebar-open')).toBe(false)
-    expect(document.activeElement).toBe(trigger)
-    trigger.click(); x.button('kind:comics').click()
-    expect(x.container.classList.contains('sidebar-open')).toBe(false)
-    expect(content.inert).toBe(false)
-    expect(x.context.openLibrary).toHaveBeenCalledWith({ kind: 'comics' })
-  })
-
-  it('抽屉转到桌面和销毁都解除背景锁定，销毁后不再处理导航点击', async () => {
-    const x = await setup('all', true)
-    const trigger = x.container.querySelector<HTMLButtonElement>('#btn-mobile-libraries')!
-    const content = document.querySelector<HTMLElement>('.ui-content')!
-    content.inert = false
-    trigger.click()
-    x.media.matches = false
-    x.media.addEventListener.mock.calls[0]![1]()
-    expect(content.inert).toBe(false)
-    expect(x.container.classList.contains('sidebar-open')).toBe(false)
-    x.media.matches = true; trigger.click(); x.nav.destroy()
-    expect(content.inert).toBe(false)
-    x.button('kind:books').click()
-    expect(x.context.openLibrary).not.toHaveBeenCalled()
-    expect(x.media.removeEventListener).toHaveBeenCalled()
-  })
-
-  it('手机顶栏图标保留目录设置和返回网盘的无障碍名称与真实操作', async () => {
-    const x = await setup('all', true)
-    const settings = x.container.querySelector<HTMLButtonElement>('#btn-mobile-settings')!
-    const close = x.container.querySelector<HTMLButtonElement>('#btn-mobile-close')!
-    expect(settings.getAttribute('aria-label')).toBe('目录设置')
-    expect(close.getAttribute('aria-label')).toBe('返回网盘')
-    expect(settings.querySelector('.mobile-action-icon')?.getAttribute('aria-hidden')).toBe('true')
-    settings.click(); close.click()
-    expect(x.drive.settings.open).toHaveBeenCalledOnce()
-    expect(x.context.closeApp).toHaveBeenCalledOnce()
+    expect(x.container.querySelector('#btn-mobile-libraries, #sidebar-backdrop, #btn-mobile-settings, #btn-mobile-close')).toBeNull()
+    expect([...x.container.querySelectorAll('.mobile-header button')].map(button => button.id)).toEqual(['btn-mobile-search'])
+    const chips = x.container.querySelector<HTMLElement>('#mobile-library-chips')!
+    expect(chips.hidden).toBe(true)
+    x.nav.setActive('library')
+    expect(chips.hidden).toBe(false)
+    const ids = [...chips.querySelectorAll<HTMLButtonElement>('[data-library-id]')].map(button => button.dataset.libraryId)
+    expect(ids).toEqual([...x.container.querySelectorAll<HTMLButtonElement>('#library-sidebar [data-library-id]')].map(button => button.dataset.libraryId))
+    const all = chips.querySelector<HTMLButtonElement>('#chip-library-all')!
+    expect(all.getAttribute('aria-current')).toBe('page')
+    chips.querySelector<HTMLButtonElement>('[data-library-id="kind:comics"]')!.click()
+    expect(x.context.openLibrary).toHaveBeenLastCalledWith({ kind: 'comics' })
+    x.nav.setLibrarySelection({ kind: 'comics' })
+    expect(chips.querySelector('[data-library-id="kind:comics"]')!.getAttribute('aria-current')).toBe('page')
+    expect(all.hasAttribute('aria-current')).toBe(false)
+    all.click()
+    expect(x.context.openLibrary).toHaveBeenLastCalledWith({})
+    x.nav.setActive('me')
+    expect(chips.hidden).toBe(true)
     expect(x.context.reportError).not.toHaveBeenCalled()
+  })
+
+  it('手机搜索进入书库并聚焦搜索框，销毁后不再处理导航点击', async () => {
+    const x = await setup('all', true)
+    const field = document.createElement('input'); field.id = 'library-search'
+    vi.mocked(x.context.openLibrary).mockImplementation(async () => { document.body.append(field) })
+    x.nav.setLibrarySelection({ sourceId: 2 })
+    x.container.querySelector<HTMLButtonElement>('#btn-mobile-search')!.click()
+    await vi.waitFor(() => expect(document.activeElement).toBe(field))
+    expect(x.context.openLibrary).toHaveBeenCalledWith({ sourceId: 2 })
+    x.nav.destroy()
+    x.button('kind:books').click()
+    expect(x.context.openLibrary).toHaveBeenCalledTimes(1)
   })
 
   it('切换失败通过统一错误入口报告，不产生未处理拒绝', async () => {

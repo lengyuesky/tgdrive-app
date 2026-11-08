@@ -1,4 +1,5 @@
-/** 书库导航：桌面常驻侧栏，手机复用可关闭、圈定焦点的书库抽屉。 */
+/** 书库导航：桌面常驻侧栏；手机为极简顶栏（标题 + 搜索）、书库页横滑筛选标签与底部三标签，不再使用抽屉。 */
+import { icon } from '../../ui/icons'
 import { contentKind, sourceLabel, scopeFormats, type LibrarySnapshot } from '../library'
 import type { LibrarySelection, UiContext, UiView } from './types'
 
@@ -16,10 +17,6 @@ export class NavManager {
   private selection: LibrarySelection = {}
   private shortcuts = new Map<string, LibraryShortcut>()
   private signature = ''
-  private media = window.matchMedia?.('(max-width: 768px), (pointer: coarse)')
-  private drawerOpen = false
-  private previousFocus?: HTMLElement
-  private inertElements: { element: HTMLElement; inert: boolean }[] = []
   private unsubs: (() => void)[] = []
 
   constructor(
@@ -38,38 +35,35 @@ export class NavManager {
       if (!target || !this.container.contains(target) || target.disabled) return
       const shortcut = target.dataset.libraryId && this.shortcuts.get(target.dataset.libraryId)
       if (shortcut) {
-        this.closeDrawer()
         this.run(() => this.context.openLibrary
           ? this.context.openLibrary(shortcut.selection)
           : this.context.switchView('library'))
       } else if (target.dataset.view) {
-        this.closeDrawer()
         this.run(() => target.dataset.view === 'library' && this.context.openLibrary
           ? this.context.openLibrary({})
           : this.context.switchView(target.dataset.view as UiView))
       } else if (target.id === 'btn-sidebar-create-shelf') {
-        this.closeDrawer()
         this.run(() => this.context.createShelf?.())
-      } else if (target.id === 'btn-mobile-libraries') {
-        this.openDrawer()
-      } else if (target.id === 'btn-sidebar-dismiss' || target.id === 'sidebar-backdrop') {
-        this.closeDrawer()
+      } else if (target.id === 'btn-mobile-search') {
+        this.run(() => this.search())
       } else if (target.id.endsWith('-settings')) {
-        this.closeDrawer()
         this.run(() => this.context.drive.settings.open())
       } else if (target.id.endsWith('-close')) {
-        this.closeDrawer()
         this.run(() => this.context.closeApp())
       }
     }
     this.container.addEventListener('click', click)
-    document.addEventListener('keydown', this.key)
-    this.media?.addEventListener('change', this.resize)
-    this.unsubs.push(
-      () => this.container.removeEventListener('click', click),
-      () => document.removeEventListener('keydown', this.key),
-      () => this.media?.removeEventListener('change', this.resize)
-    )
+    this.unsubs.push(() => this.container.removeEventListener('click', click))
+  }
+
+  /** 搜索：进入书库并聚焦搜索框；书库模式下停在书库列表时先进入当前或第一个书库。 */
+  private async search() {
+    const field = () => document.querySelector<HTMLInputElement>('#library-search')
+    const first = this.context.library.snapshot.sources.config.sources[0]
+    const selection = this.selection.sourceId === undefined && this.context.library.manualShelves && first
+      ? { sourceId: first.nodeId } : this.selection
+    if (this.activeView !== 'library' || !field()) await (this.context.openLibrary ? this.context.openLibrary(selection) : this.context.switchView('library'))
+    field()?.focus()
   }
 
   private render() {
@@ -77,7 +71,6 @@ export class NavManager {
     const title = this.context.kind === 'all' ? '阅读馆' : isBooks ? '图书' : '漫画'
     const subtitle = this.context.kind === 'all' ? '书与漫画，都在这里' : isBooks ? '把网盘变成随身书房' : '按自己的节奏，翻开下一页'
     this.container.innerHTML = `
-      <button id="sidebar-backdrop" class="sidebar-backdrop" aria-label="关闭书库侧边栏" tabindex="-1" hidden></button>
       <aside id="library-sidebar" class="desktop-sidebar" aria-label="书库侧边栏">
         <div class="sidebar-heading">
           <div class="sidebar-brand">
@@ -87,18 +80,17 @@ export class NavManager {
               <p class="sidebar-subtitle">${subtitle}</p>
             </div>
           </div>
-          <button id="btn-sidebar-dismiss" class="sidebar-mobile-close" type="button" aria-label="关闭书库侧边栏">×</button>
         </div>
         <div class="sidebar-scroll">
           <nav class="sidebar-nav" aria-label="应用导航">
             <button id="nav-home" class="nav-item active" data-view="home" type="button">
-              <span class="nav-icon" aria-hidden="true">⌂</span><span class="nav-label">首页</span>
+              <span class="nav-icon" aria-hidden="true">${icon('home')}</span><span class="nav-label">首页</span>
             </button>
             <button id="nav-library" class="nav-item" data-view="library" type="button">
-              <span class="nav-icon" aria-hidden="true">▤</span><span class="nav-label">全部书库</span>
+              <span class="nav-icon" aria-hidden="true">${icon('library')}</span><span class="nav-label">全部书库</span>
             </button>
             <button id="nav-me" class="nav-item" data-view="me" type="button">
-              <span class="nav-icon" aria-hidden="true">○</span><span class="nav-label">我的</span>
+              <span class="nav-icon" aria-hidden="true">${icon('user')}</span><span class="nav-label">我的</span>
             </button>
           </nav>
           <div id="sidebar-libraries"></div>
@@ -109,24 +101,19 @@ export class NavManager {
         </div>
       </aside>
       <header class="mobile-header">
-        <div class="mobile-brand">
-          <button id="btn-mobile-libraries" class="mobile-action-btn" type="button" aria-label="打开书库侧边栏" aria-controls="library-sidebar" aria-expanded="false">☰</button>
-          <h1 class="mobile-title">${title}</h1>
-        </div>
-        <div class="mobile-actions">
-          <button id="btn-mobile-settings" class="mobile-action-btn" type="button" aria-label="目录设置" title="目录设置"><span class="mobile-action-icon" aria-hidden="true">⚙</span><span class="mobile-action-label">目录设置</span></button>
-          <button id="btn-mobile-close" class="mobile-action-btn" type="button" aria-label="返回网盘" title="返回网盘"><span class="mobile-action-icon" aria-hidden="true">↩</span><span class="mobile-action-label">返回网盘</span></button>
-        </div>
+        <h1 class="mobile-title">${title}</h1>
+        <button id="btn-mobile-search" class="tg-icon-btn mobile-action-btn" type="button" aria-label="搜索" title="搜索">${icon('search')}</button>
       </header>
-      <nav class="mobile-bottom-nav" aria-label="移动端底部导航">
-        <button id="tab-home" class="bottom-tab active" data-view="home" type="button" aria-label="首页">
-          <span class="tab-icon" aria-hidden="true">⌂</span><span class="tab-label">首页</span>
+      <div id="mobile-library-chips" class="tg-chips mobile-library-chips" role="toolbar" aria-label="书库筛选" hidden></div>
+      <nav class="mobile-bottom-nav tg-tabbar" aria-label="移动端底部导航">
+        <button id="tab-home" class="bottom-tab tg-tab active" data-view="home" type="button" aria-label="首页">
+          <span class="tab-icon" aria-hidden="true">${icon('home')}</span><span class="tab-label">首页</span>
         </button>
-        <button id="tab-library" class="bottom-tab" data-view="library" type="button" aria-label="书库">
-          <span class="tab-icon" aria-hidden="true">▤</span><span class="tab-label">书库</span>
+        <button id="tab-library" class="bottom-tab tg-tab" data-view="library" type="button" aria-label="书库">
+          <span class="tab-icon" aria-hidden="true">${icon('library')}</span><span class="tab-label">书库</span>
         </button>
-        <button id="tab-me" class="bottom-tab" data-view="me" type="button" aria-label="我的">
-          <span class="tab-icon" aria-hidden="true">○</span><span class="tab-label">我的</span>
+        <button id="tab-me" class="bottom-tab tg-tab" data-view="me" type="button" aria-label="我的">
+          <span class="tab-icon" aria-hidden="true">${icon('user')}</span><span class="tab-label">我的</span>
         </button>
       </nav>
     `
@@ -194,9 +181,25 @@ export class NavManager {
       }
       libraries.append(nav)
     }
+    this.renderChips(sections.flatMap(section => section.entries))
     this.updateActive()
     if (focused) [...libraries.querySelectorAll<HTMLButtonElement>('button')]
       .find(button => button.dataset.libraryId === focused)?.focus({ preventScroll: true })
+  }
+
+  /** 手机书库页顶部横滑筛选：取代原抽屉里的书库与类型快捷入口。 */
+  private renderChips(entries: LibraryShortcut[]) {
+    const chips = this.container.querySelector<HTMLElement>('#mobile-library-chips')!
+    const all = document.createElement('button')
+    all.type = 'button'; all.id = 'chip-library-all'; all.className = 'tg-chip library-chip'; all.dataset.view = 'library'; all.textContent = '全部'
+    const buttons = entries.map(entry => {
+      const button = document.createElement('button')
+      button.type = 'button'; button.className = 'tg-chip library-chip'
+      button.dataset.libraryId = entry.id; button.disabled = !!entry.disabled
+      button.title = entry.title ?? entry.label; button.textContent = entry.label
+      return button
+    })
+    chips.replaceChildren(all, ...buttons)
   }
 
   setLibrarySelection(selection: LibrarySelection) {
@@ -215,10 +218,12 @@ export class NavManager {
       : selected.groupId !== undefined ? `group:${selected.groupId}`
       : selected.sourceId !== undefined ? `source:${selected.sourceId}`
       : selected.format ? `format:${selected.format}` : selected.kind ? `kind:${selected.kind}` : undefined
-    for (const button of this.container.querySelectorAll<HTMLButtonElement>('.nav-item, .bottom-tab')) {
+    const chips = this.container.querySelector<HTMLElement>('#mobile-library-chips')
+    if (chips) chips.hidden = this.activeView !== 'library'
+    for (const button of this.container.querySelectorAll<HTMLButtonElement>('.nav-item, .bottom-tab, .library-chip')) {
       const match = button.dataset.libraryId
         ? this.activeView === 'library' && button.dataset.libraryId === id
-        : button.dataset.view === this.activeView && (button.id !== 'nav-library' || !id || !this.shortcuts.has(id))
+        : button.dataset.view === this.activeView && (!['nav-library', 'chip-library-all'].includes(button.id) || !id || !this.shortcuts.has(id))
       button.classList.toggle('active', match)
       if (match) button.setAttribute('aria-current', 'page')
       else button.removeAttribute('aria-current')
@@ -230,59 +235,7 @@ export class NavManager {
     catch (error) { this.context.reportError(error) }
   }
 
-  private openDrawer() {
-    if (!this.media?.matches || this.drawerOpen) return
-    this.drawerOpen = true
-    this.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
-    this.container.classList.add('sidebar-open')
-    this.container.querySelector<HTMLElement>('#sidebar-backdrop')!.hidden = false
-    const sidebar = this.container.querySelector<HTMLElement>('#library-sidebar')!
-    sidebar.setAttribute('role', 'dialog'); sidebar.setAttribute('aria-modal', 'true')
-    this.container.querySelector('#btn-mobile-libraries')!.setAttribute('aria-expanded', 'true')
-    const content = this.container.parentElement?.querySelector<HTMLElement>('.ui-content')
-    this.inertElements = [...this.container.querySelectorAll<HTMLElement>('.mobile-header, .mobile-bottom-nav'),
-      ...(content ? [content] : [])].map(element => ({ element, inert: element.inert }))
-    this.inertElements.forEach(({ element }) => { element.inert = true })
-    this.focusable()[0]?.focus({ preventScroll: true })
-  }
-
-  private closeDrawer(focus = true) {
-    if (!this.drawerOpen) return
-    this.drawerOpen = false
-    this.container.classList.remove('sidebar-open')
-    this.container.querySelector<HTMLElement>('#sidebar-backdrop')!.hidden = true
-    const sidebar = this.container.querySelector('#library-sidebar')!
-    sidebar.removeAttribute('role'); sidebar.removeAttribute('aria-modal')
-    this.container.querySelector('#btn-mobile-libraries')!.setAttribute('aria-expanded', 'false')
-    this.inertElements.forEach(({ element, inert }) => { element.inert = inert })
-    this.inertElements = []
-    if (focus) this.previousFocus?.focus({ preventScroll: true })
-    this.previousFocus = undefined
-  }
-
-  private focusable() {
-    return [...this.container.querySelectorAll<HTMLButtonElement>('#library-sidebar button')]
-      .filter(button => !button.disabled && getComputedStyle(button).display !== 'none')
-  }
-
-  private resize = () => { if (!this.media?.matches) this.closeDrawer(false) }
-  private key = (event: KeyboardEvent) => {
-    if (!this.drawerOpen) return
-    if (event.key === 'Escape') {
-      event.preventDefault(); this.closeDrawer()
-    } else if (event.key === 'Tab') {
-      const elements = this.focusable(), first = elements[0], last = elements.at(-1)
-      if (!first) { event.preventDefault(); return }
-      if (event.shiftKey && (document.activeElement === first || !elements.includes(document.activeElement as HTMLButtonElement))) {
-        event.preventDefault(); last?.focus()
-      } else if (!event.shiftKey && (document.activeElement === last || !elements.includes(document.activeElement as HTMLButtonElement))) {
-        event.preventDefault(); first.focus()
-      }
-    }
-  }
-
   destroy() {
-    this.closeDrawer(false)
     this.unsubs.splice(0).forEach(unsub => unsub())
   }
 }

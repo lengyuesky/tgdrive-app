@@ -32,7 +32,10 @@
   async function syncImmersive() {
     const context = await drive.ready
     if (!disposed && context.capabilities?.includes('ui.setImmersive') && typeof drive.ui.setImmersive === 'function') {
-      await drive.ui.setImmersive(mobileQuery.matches)
+      const active = mobileQuery.matches
+      // 宿主支持沉浸背景时以纯黑填充安全区，与全屏视频背景一致。
+      const options = active && context.capabilities.includes('ui.immersiveBackground') ? { background: '#000000' } : undefined
+      await drive.ui.setImmersive(active, options)
     }
   }
   function shuffled(items) {
@@ -72,7 +75,7 @@
   function syncPlay() {
     const paused = !wantsPlay || video.paused
     get('play-toggle').setAttribute('aria-label', paused ? '播放视频' : '暂停视频')
-    get('play-toggle').firstElementChild.textContent = paused ? '▶' : 'Ⅱ'
+    get('play-toggle').dataset.state = paused ? 'paused' : 'playing'
   }
   function buffering(value) {
     clearTimeout(bufferingTimer)
@@ -97,7 +100,6 @@
     const favorite = Boolean(current()?.favorite)
     get('favorite').classList.toggle('selected', favorite)
     get('favorite').setAttribute('aria-pressed', String(favorite))
-    get('favorite').querySelector('.symbol').textContent = favorite ? '★' : '☆'
     get('favorite').querySelector('.label').textContent = favorite ? '已收藏' : '收藏'
   }
   function syncQueue() {
@@ -107,7 +109,6 @@
   }
   function syncMute() {
     video.muted = muted
-    get('mute').querySelector('.symbol').textContent = muted ? '静' : '声'
     get('mute').querySelector('.label').textContent = muted ? '静音中' : '有声'
     get('mute').setAttribute('aria-pressed', String(!muted))
   }
@@ -193,7 +194,7 @@
       }
       if (disposed || active !== listGeneration) return
       directory = launchPending && context.launch?.file ? context.launch.file.path.slice(0, context.launch.file.path.lastIndexOf('/')) || '/' : settings.source_dir || '/'; muted = settings.muted !== false
-      get('source-label').textContent = directory === '/' ? '整库 · 更换' : directory
+      get('source-label').querySelector('.source-text').textContent = directory === '/' ? '整库 · 更换' : directory
       get('source-label').title = `取材文件夹：${directory}，点击更换`
       index = 0
       await fillQueue()
@@ -321,10 +322,17 @@
     const path = await drive.ui.authorizeDirectory(directory)
     if (path != null) { await drive.settings.patch({ source_dir: path }); await load() }
   })()))
-  for (const [label, method] of [['在文件中显示', 'showFile'], ['文件信息', 'fileDetails']]) {
-    const button = document.createElement('button'); button.textContent = label
+  // 宿主能力按需出现的图标操作；图标为固定常量，名称沿用原无障碍文案。
+  const hostActions = [
+    ['在文件中显示', '位置', 'showFile', '<path d="M3.5 6.5a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/>'],
+    ['文件信息', '信息', 'fileDetails', '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.2"/>'],
+  ]
+  for (const [name, label, method, path] of hostActions) {
+    const button = document.createElement('button')
+    button.className = 'action tg-icon-btn'; button.title = name; button.setAttribute('aria-label', name); button.hidden = true
+    button.innerHTML = `<span class="symbol" aria-hidden="true"><svg class="tg-icon" viewBox="0 0 24 24" focusable="false">${path}</svg></span><span class="label" aria-hidden="true">${label}</span>`
     button.onclick = () => { if (current()) handle(drive.ui[method](current())) }
-    get('actions').append(button)
+    get('actions').insertBefore(button, get('actions').querySelector('.switchers'))
     drive.ready.then(() => { button.hidden = !drive.can?.('ui.' + method) })
   }
   listen(get('retry-list'), 'click', () => handle(load()))

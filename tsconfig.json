@@ -24,6 +24,7 @@
     "comics/**/*.ts",
     "reader/**/*.ts",
     "sdk/**/*.ts",
+    "ui/**/*.ts",
     "tests/**/*.ts"
   ]
 }

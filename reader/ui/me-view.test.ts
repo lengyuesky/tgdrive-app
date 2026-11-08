@@ -69,3 +69,19 @@ describe('沙箱内显式添加来源', () => {
     expect(requestSubmit).not.toHaveBeenCalled()
   })
 })
+
+describe('我的页固定入口', () => {
+  it('顶部目录设置与返回网盘一次点击可达，失败交给统一错误提示', async () => {
+    const x = await setup()
+    const settings = x.container.querySelector<HTMLButtonElement>('#btn-me-settings')!
+    const close = x.container.querySelector<HTMLButtonElement>('#btn-me-close')!
+    expect(settings.textContent).toContain('目录设置'); expect(close.textContent).toContain('返回网盘')
+    settings.click(); close.click()
+    await vi.waitFor(() => expect(x.context.closeApp).toHaveBeenCalledOnce())
+    expect(x.drive.settings.open).toHaveBeenCalledOnce()
+    const failure = new Error('关闭失败')
+    x.context.closeApp.mockRejectedValueOnce(failure)
+    close.click()
+    await vi.waitFor(() => expect(x.context.reportError).toHaveBeenCalledWith(failure))
+  })
+})

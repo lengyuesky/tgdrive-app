@@ -1,1 +1,15 @@
-:root{color-scheme:dark;--bg:#13121b;--text:#ece8f1;--muted:#8b8299;--line:#ffffff09;--accent:#ac83ed;--accent-light:#c5a0f9}
+/* 影视旧变量映射到共享设计规范 --tg-*，跟随主站深浅色；播放器另行固定黑底。 */
+:root {
+  color-scheme: light;
+  --bg: var(--tg-bg);
+  --surface: var(--tg-surface);
+  --surface-2: var(--tg-surface-2);
+  --text: var(--tg-text);
+  --muted: var(--tg-muted);
+  --line: var(--tg-line);
+  --accent: var(--tg-accent);
+  --accent-light: var(--tg-accent);
+  --accent-soft: color-mix(in srgb, var(--tg-accent) 12%, transparent);
+  --art-bg: #1c1f27;
+}
+:root.dark { color-scheme: dark; }

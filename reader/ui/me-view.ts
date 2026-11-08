@@ -1,5 +1,6 @@
 /** “我的”视图：想读、收藏、历史记录（时间序/分页）、多来源管理（根确认/旧迁移/扫描控制）、缓存配额与设置。 */
 import type { UiContext } from './types'
+import { icon } from '../../ui/icons'
 import {
   type CatalogItem,
   type HistoryEntry,
@@ -33,6 +34,11 @@ export class MeView {
         <!-- 头部子导航切换 -->
         <header class="me-header">
           <h2 class="me-title">个人中心与设置</h2>
+          <!-- 手机书库没有宿主外壳，固定入口放在「我的」顶部，一次点击可达 -->
+          <div class="me-quick-actions">
+            <button id="btn-me-settings" class="tg-chip" type="button">${icon('settings')}<span>目录设置</span></button>
+            <button id="btn-me-close" class="tg-chip" type="button">${icon('exit')}<span>返回网盘</span></button>
+          </div>
           <div class="me-tabs" role="tablist" aria-label="个人中心子标签">
             <button id="me-tab-sources" class="me-tab-btn ${this.activeSubTab === 'sources' ? 'active' : ''}" role="tab" data-tab="sources">来源管理</button>
             <button id="me-tab-history" class="me-tab-btn ${this.activeSubTab === 'history' ? 'active' : ''}" role="tab" data-tab="history">阅读历史</button>
@@ -57,6 +63,9 @@ export class MeView {
     `
 
     if (this.context.library.manualShelves) this.container.querySelector('#me-tab-sources')!.textContent = '书库管理'
+    const report = (action: () => unknown) => () => { Promise.resolve().then(action).catch(this.context.reportError) }
+    this.container.querySelector<HTMLButtonElement>('#btn-me-settings')!.onclick = report(() => this.context.drive.settings.open())
+    this.container.querySelector<HTMLButtonElement>('#btn-me-close')!.onclick = report(() => this.context.closeApp())
     this.bindSubTabEvents()
     await this.renderCurrentSubTab()
   }

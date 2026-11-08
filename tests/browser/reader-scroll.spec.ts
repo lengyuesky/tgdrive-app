@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { seedReaderSource, enterReaderShelf, closeReaderPanel } from './reader-helpers'
 
@@ -13,7 +14,7 @@ async function open(page: Page, pageNumber: number) {
   const index = await (await page.request.get('/api/apps')).json()
   for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
   const reader = index.available.find((app: { manifest: { id: string } }) => app.manifest.id === 'reader')
-  expect(reader.manifest.version).toBe('1.0.5')
+  expect(reader.manifest.version).toBe(JSON.parse(readFileSync(new URL('../../reader/app.json', import.meta.url), 'utf8')).version)
   expect((await page.request.post('/api/apps/catalog/reader/install', { data: { digest: reader.digest } })).ok()).toBe(true)
   await seedReaderSource(page, 'reader', '/测试漫画')
   await page.goto('/apps/reader')

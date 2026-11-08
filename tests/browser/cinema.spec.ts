@@ -224,6 +224,9 @@ test('手机影院搜索和详情断线后可原地重试并保留搜索条件',
       await route.fulfill({ status: 503, json: { error: '测试连接暂时中断' } })
     } else await route.continue()
   })
+  // 1.5.0 起手机搜索栏默认收起，由顶栏搜索图标展开。
+  await frame.locator('#search-toggle').click()
+  await expect(frame.locator('#search-toggle')).toHaveAttribute('aria-expanded', 'true')
   await frame.locator('#search').fill('S01E01')
   await frame.locator('#search-submit').click()
   await expect(frame.locator('#list-retry')).toBeVisible()

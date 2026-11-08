@@ -9,7 +9,7 @@ afterEach(() => {
   document.body.replaceChildren()
 })
 
-function setup(desktopControls = true, mobile = false, supported = true) {
+function setup(desktopControls = true, mobile = false, supported = true, shelf = false) {
   document.body.innerHTML = `<div id="app">
     <main id="viewport" tabindex="0"></main><button id="back"></button>
     <button id="reader-menu-toggle"></button><button id="toc-toggle"></button><button id="reader-more-toggle"></button>
@@ -17,6 +17,7 @@ function setup(desktopControls = true, mobile = false, supported = true) {
     <div id="reader-desktop-actions"><div id="reader-actions"></div></div><div id="reader-footer-actions"></div>
     <section id="preferences" hidden><button>关闭</button></section><section id="bookmarks" hidden><button>关闭</button></section>
     <section id="navigation" hidden><button>关闭</button></section><section id="reader-more" hidden><button>关闭</button></section>
+    <section id="appearance" hidden><button>关闭</button></section><section id="paging" hidden><button>关闭</button></section>
   </div>`
   const root = document.getElementById('app')!
   const media = { matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() }
@@ -26,7 +27,7 @@ function setup(desktopControls = true, mobile = false, supported = true) {
   const chrome = new ReaderChrome(root, {
     drive: { ui: { setImmersive } } as unknown as Drive,
     context: { capabilities: supported ? ['ui.setImmersive', 'ui.immersiveBackground'] : [] } as unknown as ReadyContext,
-    immersive: true, desktopControls, paged: () => false, turn: vi.fn(), error: vi.fn(),
+    immersive: true, desktopControls, shelf, paged: () => false, turn: vi.fn(), error: vi.fn(),
   })
   cleanups.push(() => chrome.destroy())
   return { chrome, root, media, setImmersive }
@@ -83,5 +84,18 @@ describe('阅读馆全屏阅读菜单', () => {
     await mobile.chrome.enter(); mobile.chrome.opened()
     expect(mobile.setImmersive).toHaveBeenCalledWith(true, { background: '#f5f6f2' })
     expect(mobile.root.dataset.controls).toBe('hidden')
+  })
+
+  it('手机书库也进入宿主沉浸，读完返回书库保持沉浸；桌面书库不请求', async () => {
+    const mobile = setup(false, true, true, true)
+    await Promise.resolve(); await Promise.resolve()
+    expect(mobile.setImmersive).toHaveBeenLastCalledWith(true, { background: '#f5f6f2' })
+    await mobile.chrome.enter(); mobile.chrome.opened(); await mobile.chrome.leave()
+    expect(mobile.setImmersive).not.toHaveBeenCalledWith(false, undefined)
+    expect(document.body.classList.contains('is-reading')).toBe(false)
+    mobile.chrome.destroy()
+    const desktop = setup(false, false, true, true)
+    await Promise.resolve()
+    expect(desktop.setImmersive).not.toHaveBeenCalled()
   })
 })

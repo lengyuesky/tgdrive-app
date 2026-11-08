@@ -2,10 +2,14 @@
 import type { Drive, ReadyContext } from '../sdk/types'
 import { ReadingGestures } from './gestures'
 export const MOBILE_READING_QUERY = '(max-width: 768px), (pointer: coarse)'
-type Panel = 'preferences' | 'bookmarks' | 'navigation' | 'reader-more'
+type Panel = 'preferences' | 'bookmarks' | 'navigation' | 'reader-more' | 'appearance' | 'paging'
+const PANELS: Panel[] = ['preferences', 'bookmarks', 'navigation', 'reader-more', 'appearance', 'paging']
 interface ChromeOptions {
   books?: boolean; immersive?: boolean; desktopControls?: boolean; drive: Drive; context: ReadyContext
+  /** 手机上书库界面也进入沉浸，由插件自己提供返回网盘入口。 */
+  shelf?: boolean
   turn: (delta: -1 | 1) => void; paged: () => boolean; error: (error: unknown) => void
+  drag?: (dx: number) => boolean; settle?: (delta: -1 | 0 | 1) => void
   onPanelChange?: (panel?: Panel) => void
 }
 export class ReaderChrome {
@@ -27,7 +31,7 @@ export class ReaderChrome {
     this.gestures = new ReadingGestures(this.get('viewport'), {
       enabled: () => (this.active || !!this.options.desktopControls) && this.ready && !this.panel,
       paged: options.paged, controls: () => this.controls,
-      toggle: () => this.toggle(), turn: options.turn,
+      toggle: () => this.toggle(), turn: options.turn, drag: options.drag, settle: options.settle,
     })
     const bind = (id: string, action: () => void) => {
       const element = this.get(id), listener = () => action()
@@ -48,6 +52,7 @@ export class ReaderChrome {
     this.media?.addEventListener('change', this.resize)
     window.visualViewport?.addEventListener('resize', this.visualResize)
     document.addEventListener('keydown', this.key)
+    if (options.shelf) void this.apply()
   }
   private supportsHost() { return this.options.context.capabilities?.includes('ui.setImmersive') && typeof this.options.drive.ui?.setImmersive === 'function' }
   private setHost(active: boolean) {
@@ -62,20 +67,19 @@ export class ReaderChrome {
     }).catch((error) => { if (!this.disposed) { this.hostState = false; this.options.error(error) } })
     return this.hostQueue
   }
-  private hostActive() { return this.reading && (this.active || !!this.options.desktopControls) }
+  private hostActive() { return this.reading ? this.active || !!this.options.desktopControls : !!this.options.shelf && !!this.media?.matches }
   themeChanged() { return this.setHost(this.hostActive()) }
   private apply() {
     const active = (this.options.immersive ?? this.options.books ?? true) && this.reading && !!this.media?.matches
     this.root.classList.toggle('reader-desktop', this.reading && !active && !!this.options.desktopControls)
+    // 阅读页底色与书库不同；先切换再读取 --bg，宿主安全区填色才能与正文一致。
+    document.body.classList.toggle('is-reading', this.reading)
     if (active !== this.active) {
       this.closePanel(false)
       this.active = active
       this.root.classList.toggle('immersive', active)
       this.get(active ? 'reader-footer-actions' : 'reader-desktop-actions').append(this.get('reader-actions'))
-      this.get('navigation').hidden = true
-      this.get('reader-more').hidden = true
-      this.get('preferences').hidden = true
-      this.get('bookmarks').hidden = true
+      for (const panel of PANELS) this.get(panel).hidden = true
       this.controls = !active || !this.ready
     }
     this.render()
@@ -85,7 +89,7 @@ export class ReaderChrome {
     this.root.dataset.controls = this.controls ? 'visible' : 'hidden'
     this.get('reader-backdrop').hidden = !this.active || !this.panel
     this.get('viewport').inert = this.active && !!this.panel
-    for (const id of ['preferences', 'bookmarks', 'navigation', 'reader-more'] as Panel[]) {
+    for (const id of PANELS) {
       const element = this.get(id), modal = this.active && this.panel === id
       element.classList.toggle('reader-panel', this.active)
       if (modal) { element.setAttribute('role', 'dialog'); element.setAttribute('aria-modal', 'true') }
@@ -101,8 +105,7 @@ export class ReaderChrome {
   }
   async enter() {
     this.closePanel(false)
-    this.get('preferences').hidden = true; this.get('bookmarks').hidden = true
-    this.get('navigation').hidden = true; this.get('reader-more').hidden = true
+    for (const panel of PANELS) this.get(panel).hidden = true
     this.reading = true; this.ready = false; this.controls = true
     await this.apply()
   }
@@ -114,8 +117,7 @@ export class ReaderChrome {
   async leave() {
     this.reading = false; this.ready = false; this.closePanel(false)
     await this.apply()
-    this.get('preferences').hidden = true; this.get('bookmarks').hidden = true
-    this.get('navigation').hidden = true; this.get('reader-more').hidden = true
+    for (const panel of PANELS) this.get(panel).hidden = true
   }
   reveal() { if (this.panel) this.closePanel(false); this.controls = true; this.render() }
   toggle() {
@@ -176,7 +178,7 @@ export class ReaderChrome {
     window.visualViewport?.removeEventListener('resize', this.visualResize)
     document.removeEventListener('keydown', this.key)
     this.gestures.destroy(); this.removers.forEach((remove) => remove())
-    this.closePanel(false); this.root.classList.remove('immersive', 'reader-desktop')
+    this.closePanel(false); this.root.classList.remove('immersive', 'reader-desktop'); document.body.classList.remove('is-reading')
     void this.setHost(false)
   }
 }

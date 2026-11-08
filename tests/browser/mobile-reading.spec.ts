@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
-import { seedReaderSource, enterReaderShelf, revealReader, closeReaderPanel } from './reader-helpers'
+import { seedReaderSource, enterReaderShelf, revealReader, closeReaderPanel, openReaderSettings, openReaderBookmarks, flushReaderSave } from './reader-helpers'
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 const frame = (page: Page) => page.frameLocator('iframe')
@@ -20,7 +20,7 @@ async function tapContent(page: Page, x = .5) {
 }
 async function setMode(page: Page, mode: 'page' | 'scroll') {
   await revealReader(page)
-  await frame(page).locator('#preferences-toggle').click()
+  await openReaderSettings(frame(page))
   await frame(page).locator('#mode').selectOption(mode)
   await expect(frame(page).locator('#viewport')).toHaveAttribute('data-mode', mode)
   if (mode === 'page') await expect.poll(async () => Number(await frame(page).locator('#position').getAttribute('data-pages'))).toBeGreaterThan(1)
@@ -86,8 +86,8 @@ test('手机只显示正文，菜单不挤压页面，真实轻点与横向滑�
   await expect(frame(page).locator('.reader-toolbar')).toBeVisible()
   expect(await viewport.boundingBox()).toEqual(before)
   await page.screenshot({ path: info.outputPath('图书-手机菜单.png') })
-  await frame(page).locator('#preferences-toggle').click()
-  const panel = frame(page).getByRole('dialog', { name: '阅读设置', exact: true })
+  await openReaderSettings(frame(page))
+  const panel = frame(page).getByRole('dialog', { name: '排版设置', exact: true })
   await expect(panel).toBeVisible(); expect((await panel.boundingBox())!.height).toBeLessThanOrEqual(844 * .75)
   expect(await viewport.boundingBox()).toEqual(before)
   await page.screenshot({ path: info.outputPath('图书-手机设置.png') })
@@ -106,7 +106,9 @@ test('手机只显示正文，菜单不挤压页面，真实轻点与横向滑�
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect(await frame(page).locator('body').evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await tapContent(page); await frame(page).locator('#back').click()
-  await expect(page.locator('.host-toolbar')).toBeVisible()
+  // 1.1.0：手机返回书库仍保持沉浸，由插件自带返回网盘入口。
+  await expect(frame(page).locator('#app-ui')).toBeVisible()
+  await expect(page.locator('.host-toolbar')).not.toBeVisible()
   expect(await page.locator('meta[name="viewport"]').getAttribute('content')).toContain('viewport-fit=cover')
   expect(errors).toEqual([])
 })
@@ -170,8 +172,9 @@ test('iOS 主屏幕安全区由宿主统一预留，历史滚动和错误高度�
     expect(await frame(page).locator('body').evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true)
   }
   await checkBounds(0, 59, 393, 759)
-  await revealReader(page); await frame(page).locator('#preferences-toggle').click()
-  for (const [theme, color] of [['sepia', 'rgb(244, 235, 214)'], ['dark', 'rgb(20, 29, 28)'], ['light', 'rgb(245, 246, 242)'], ['sepia', 'rgb(244, 235, 214)']]) {
+  await revealReader(page); await openReaderSettings(frame(page))
+  // 1.1.0：明亮阅读为纯白纸面，深色为纯黑；护眼保留原暖色。
+  for (const [theme, color] of [['sepia', 'rgb(244, 235, 214)'], ['dark', 'rgb(0, 0, 0)'], ['light', 'rgb(255, 255, 255)'], ['sepia', 'rgb(244, 235, 214)']]) {
     await frame(page).locator('#theme').selectOption(theme!)
     await expect(page.locator('.app-host')).toHaveCSS('background-color', color!)
     await expect(frame(page).locator('body')).toHaveCSS('background-color', color!)
@@ -189,9 +192,11 @@ test('iOS 主屏幕安全区由宿主统一预留，历史滚动和错误高度�
   await page.screenshot({ path: info.outputPath('图书-iOS主屏幕-横屏安全区.png') })
   await page.evaluate(() => { document.body.style.minHeight = ''; window.scrollTo(0, 0) })
   await frame(page).locator('#back').click()
-  await expect(page.locator('.host-toolbar')).toBeVisible()
-  await expect(page.locator('.app-host')).not.toHaveClass(/is-immersive/)
-  expect(await page.locator('.app-host').evaluate((node) => (node as HTMLElement).style.backgroundColor)).toBe('')
+  // 1.1.0：手机书库同样沉浸，宿主改用书库底色填充安全区。
+  await expect(frame(page).locator('#app-ui')).toBeVisible()
+  await expect(page.locator('.host-toolbar')).not.toBeVisible()
+  await expect(page.locator('.app-host')).toHaveClass(/is-immersive/)
+  await expect.poll(() => page.locator('.app-host').evaluate((node) => (node as HTMLElement).style.backgroundColor)).not.toBe('')
 })
 
 for (const name of ['分页.epub', '中文.pdf']) {
@@ -206,8 +211,9 @@ for (const name of ['分页.epub', '中文.pdf']) {
     if (name.endsWith('.pdf')) await expect(frame(page).locator('canvas')).toHaveCSS('width', '366px')
     else {
       await setMode(page, 'page')
-      await expect(frame(page).locator('.flow-pages')).toHaveCSS('height', '727px')
-      await frame(page).locator('#next').click()
+      // 1.1.0 正文上下各留 16px 给常驻章节与进度。
+      await expect(frame(page).locator('.flow-pages')).toHaveCSS('height', '695px')
+      await frame(page).locator('#next').dispatchEvent('click')
       await expect(frame(page).locator('#position')).toHaveAttribute('data-page', '1')
     }
   })
@@ -216,12 +222,12 @@ for (const name of ['分页.epub', '中文.pdf']) {
 test('TXT 字符锚点跨模式字号横竖屏与重开保持可见，跨分段前后翻不丢字', async ({ page }, info) => {
   await install(page); await open(page, '长篇.txt')
   await frame(page).locator('#viewport').evaluate((node) => { node.scrollTop = 1400 })
-  await revealReader(page); await frame(page).locator('#retry-save').click()
+  await revealReader(page); await flushReaderSave(frame(page))
   await expect(frame(page).locator('#sync')).toHaveText('已同步')
   const original = (await savedLocation(page)).offset!; expect(original).toBeGreaterThan(300)
   await setMode(page, 'page')
   await expect.poll(() => anchorVisible(page, original)).toBe(true)
-  await frame(page).locator('#preferences-toggle').click()
+  await openReaderSettings(frame(page))
   await frame(page).locator('#font-size').evaluate((node) => { const input = node as HTMLInputElement; input.value = '26'; input.dispatchEvent(new Event('change')); input.value = '30'; input.dispatchEvent(new Event('change')) })
   await expect(frame(page).locator('.flow-content')).toHaveCSS('font-size', '30px')
   await closeReaderPanel(page)
@@ -238,20 +244,20 @@ test('TXT 字符锚点跨模式字号横竖屏与重开保持可见，跨分段�
   await setMode(page, 'page')
   await frame(page).locator('.flow-pages').evaluate((node) => { node.scrollLeft = node.scrollWidth })
   await expect.poll(async () => { const node = frame(page).locator('#position'); return Number(await node.getAttribute('data-page')) === Number(await node.getAttribute('data-pages')) - 1 }).toBe(true)
-  await frame(page).locator('#next').click()
+  await frame(page).locator('#next').dispatchEvent('click')
   await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '1')
   await expect(frame(page).locator('#position')).toHaveAttribute('data-page', '0')
-  await frame(page).locator('#previous').click()
+  await frame(page).locator('#previous').dispatchEvent('click')
   await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '0')
   await expect.poll(async () => { const node = frame(page).locator('#position'); return Number(await node.getAttribute('data-page')) === Number(await node.getAttribute('data-pages')) - 1 }).toBe(true)
 })
 
 test('桌面悬浮导航不占正文空间，跨设备以字符恢复分页和书签，冲突能唤出操作', async ({ page, browser }, info) => {
   await install(page); await open(page, '长篇.txt'); await setMode(page, 'page')
-  await frame(page).locator('#next').click(); await frame(page).locator('#next').click()
+  await frame(page).locator('#next').dispatchEvent('click'); await frame(page).locator('#next').dispatchEvent('click')
   await expect(frame(page).locator('#sync')).toHaveText('已同步')
   const original = (await savedLocation(page)).offset!
-  await frame(page).locator('#bookmarks-toggle').click()
+  await openReaderBookmarks(frame(page))
   await frame(page).locator('#bookmark-name').fill('跨排版书签'); await frame(page).locator('#add-bookmark').click()
   await expect(frame(page).getByRole('textbox', { name: '修改书签名称' })).toHaveValue('跨排版书签')
   await closeReaderPanel(page); await tapContent(page)
@@ -264,7 +270,7 @@ test('桌面悬浮导航不占正文空间，跨设备以字符恢复分页和�
     await expect(frame(desktop).locator('#viewport')).toHaveAttribute('data-mode', 'page')
     await expect(frame(desktop).locator('.flow-pages')).toHaveCSS('width', '760px')
     await expect.poll(() => anchorVisible(desktop, original)).toBe(true)
-    await frame(desktop).locator('#bookmarks-toggle').click()
+    await openReaderBookmarks(frame(desktop))
     await expect(frame(desktop).getByRole('textbox', { name: '修改书签名称' })).toHaveValue('跨排版书签')
     await page.screenshot({ path: info.outputPath('图书-手机跨设备进度.png') })
     await desktop.screenshot({ path: info.outputPath('图书-桌面分页.png') })
@@ -296,10 +302,10 @@ test('EPUB 同文档多目录锚点不重复章节，内部链接图片和旧进
   await frame(page).locator('#toc').selectOption({ label: '终点' })
   await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '1')
   await expect(frame(page).locator('#next')).toBeDisabled()
-  await frame(page).locator('#previous').click()
+  await frame(page).locator('#previous').dispatchEvent('click')
   await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '0')
   await expect.poll(async () => { const node = frame(page).locator('#position'); return Number(await node.getAttribute('data-page')) === Number(await node.getAttribute('data-pages')) - 1 }).toBe(true)
-  await frame(page).locator('#next').click(); await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '1')
+  await frame(page).locator('#next').dispatchEvent('click'); await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '1')
   await frame(page).locator('#back').click()
   // 退出的最后一次保存可能仍在途；夹具注入旧版记录遇到 CAS 冲突时重新读取版本。
   await expect.poll(() => frame(page).locator('body').evaluate(async () => {
@@ -324,13 +330,13 @@ test('小屏 PDF 适宽，加载失败和取消都恢复宿主导航', async ({ 
   await expect(frame(page).locator('canvas')).toHaveCSS('width', '336px')
   await expect(page.locator('.host-toolbar')).not.toBeVisible()
   await tapContent(page, .9); await expect(frame(page).locator('#position')).toHaveText('2 / 3')
-  await revealReader(page); await frame(page).locator('#preferences-toggle').click()
+  await revealReader(page); await openReaderSettings(frame(page))
   await frame(page).locator('#zoom').selectOption('1.5')
   await expect(frame(page).locator('#viewport')).toHaveAttribute('data-swipe', 'false')
   await closeReaderPanel(page); await tapContent(page); await swipe(page, .8, .2)
   await expect(frame(page).locator('#position')).toHaveText('2 / 3')
   await expect.poll(() => frame(page).locator('#viewport').evaluate((node) => node.scrollLeft)).toBeGreaterThan(0)
-  await revealReader(page); await frame(page).locator('#preferences-toggle').click(); await frame(page).locator('#zoom').selectOption('1')
+  await revealReader(page); await openReaderSettings(frame(page)); await frame(page).locator('#zoom').selectOption('1')
   await expect(frame(page).locator('canvas')).toHaveCSS('width', '336px')
   await closeReaderPanel(page); await tapContent(page)
   await page.setViewportSize({ width: 844, height: 390 })
@@ -340,13 +346,16 @@ test('小屏 PDF 适宽，加载失败和取消都恢复宿主导航', async ({ 
   await revealReader(page); await frame(page).locator('#back').click()
   await frame(page).getByRole('button', { name: /损坏.epub/ }).click()
   await expect(frame(page).locator('#retry-reader')).toBeVisible()
-  await expect(page.locator('.host-toolbar')).toBeVisible()
+  // 打开失败仍在插件内沉浸显示，返回按钮可用。
+  await expect(page.locator('.host-toolbar')).not.toBeVisible()
+  await expect(frame(page).locator('#back')).toBeVisible()
   await frame(page).locator('#back').click()
   await page.request.post('/__apps_fixture/media', { data: { enabled: true } })
   await frame(page).getByRole('button', { name: /长篇.txt/ }).click()
   await expect.poll(async () => (await (await page.request.get('/__apps_fixture/media')).json()).active).toBeGreaterThan(0)
   await frame(page).locator('#back').click()
-  await expect(page.locator('.host-toolbar')).toBeVisible()
+  await expect(frame(page).locator('#app-ui')).toBeVisible()
+  await expect(page.locator('.host-toolbar')).not.toBeVisible()
   await expect.poll(async () => (await (await page.request.get('/__apps_fixture/media')).json()).active).toBe(0)
 })
 
@@ -355,12 +364,12 @@ test('纯图片章节不会在加载期间把末页进度覆盖成首页，停�
   await expect(frame(page).locator('#position')).toHaveAttribute('data-pages', '4')
   // 通过实际导航翻完四张图片，不能直接改隐藏分页容器绕开导航与重排队列。
   for (let index = 1; index < 4; index++) {
-    await frame(page).locator('#next').click()
+    await frame(page).locator('#next').dispatchEvent('click')
     await expect(frame(page).locator('#position')).toHaveAttribute('data-page', String(index))
     await expect(frame(page).locator('#position')).toHaveAttribute('data-section', '0')
   }
   await expect(frame(page).locator('#sync')).toHaveText('已同步')
-  await frame(page).locator('#retry-save').click()
+  await flushReaderSave(frame(page))
   await expect.poll(async () => (await savedLocation(page) as any).ratio).toBe(1)
   await frame(page).locator('#back').click(); await open(page, '纯图.epub')
   await expect.poll(async () => Number(await frame(page).locator('#position').getAttribute('data-pages'))).toBeGreaterThan(1)
@@ -383,12 +392,13 @@ test('仅支持基础沉浸的旧宿主不接收背景扩展，仍能正常阅�
   })
   await install(page); await open(page, '长篇.txt')
   await expect(page.locator('.host-toolbar')).not.toBeVisible()
-  await revealReader(page); await frame(page).locator('#preferences-toggle').click()
+  await revealReader(page); await openReaderSettings(frame(page))
   await frame(page).locator('#theme').selectOption('sepia')
   await expect(frame(page).locator('body')).toHaveAttribute('data-theme', 'sepia')
   expect(await page.locator('.app-host').evaluate((node) => (node as HTMLElement).style.backgroundColor)).toBe('')
   await closeReaderPanel(page); await frame(page).locator('#back').click()
-  await expect(page.locator('.host-toolbar')).toBeVisible()
+  await expect(frame(page).locator('#app-ui')).toBeVisible()
+  await expect(page.locator('.host-toolbar')).not.toBeVisible()
 })
 
 test('未声明沉浸能力的旧宿主保留工具栏，图书分页仍可正常使用', async ({ page }) => {
@@ -428,8 +438,8 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   await tapContent(page)
   await expect(frame(page).locator('.reader-toolbar')).toBeVisible()
   await expect(frame(page).locator('.reader-footer')).toBeVisible()
-  await frame(page).locator('#preferences-toggle').click()
-  const panel = frame(page).getByRole('dialog', { name: '阅读设置', exact: true })
+  await openReaderSettings(frame(page))
+  const panel = frame(page).getByRole('dialog', { name: '排版设置', exact: true })
   await expect(panel).toBeVisible()
   await frame(page).locator('#comic-mode').selectOption('single')
   await closeReaderPanel(page)
@@ -442,7 +452,7 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   await swipe(page, .8, .2)
   await expect(frame(page).locator('#position')).toHaveText('3 / 3')
   await tapContent(page)
-  await frame(page).locator('#preferences-toggle').click()
+  await openReaderSettings(frame(page))
   await frame(page).locator('#direction').selectOption('rtl')
   await closeReaderPanel(page)
   await tapContent(page)
@@ -451,13 +461,14 @@ test('漫画在手机上全屏沉浸显示，贴边无留白，支持轻点两�
   await tapContent(page, .1)
   await expect(frame(page).locator('#position')).toHaveText('3 / 3')
   await tapContent(page)
-  await frame(page).locator('#preferences-toggle').click()
+  await openReaderSettings(frame(page))
   await frame(page).locator('#fit').selectOption('page')
   await closeReaderPanel(page)
   await tapContent(page)
   await expect(viewport).toHaveCSS('overflow', 'hidden')
   await tapContent(page)
   await frame(page).locator('#back').click()
-  await expect(page.locator('.host-toolbar')).toBeVisible()
+  await expect(frame(page).locator('#app-ui')).toBeVisible()
+  await expect(page.locator('.host-toolbar')).not.toBeVisible()
   expect(errors).toEqual([])
 })

@@ -20,6 +20,7 @@ export default defineConfig({
       'books/**/*.test.ts',
       'comics/**/*.test.ts',
       'cinema/**/*.test.ts',
+      'ui/**/*.test.ts',
       'tests/unit/**/*.test.ts',
     ],
     restoreMocks: true,

@@ -1,7 +1,7 @@
 // 独立插件构建工具：打包静态与编译插件，生成 .build、apps 与根目录分发清单。
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
-import { copyFile, mkdir, readdir, writeFile, rm, readFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, readdir, writeFile, rm, readFile } from 'node:fs/promises'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isDeepStrictEqual } from 'node:util'
@@ -23,6 +23,15 @@ async function pack(source, destination) {
     child.on('error', rejectPromise)
     child.on('exit', (code) => code === 0 ? resolvePromise() : rejectPromise(new Error(`插件打包失败：${code}`)))
   })
+}
+
+// 短视频为原生静态页面，不经编译：复制到临时 staging 后注入共享样式 tg-base.css 再打包，
+// 源码目录不保留副本，ui/base.css 是唯一真源。
+async function buildShorts(stagingDir, destination) {
+  const output = resolve(stagingDir, 'shorts-source')
+  await cp(`${root}/shorts`, output, { recursive: true })
+  await copyFile(`${root}/ui/base.css`, `${output}/tg-base.css`)
+  await pack(output, destination)
 }
 
 async function buildReader(name, destination) {
@@ -103,7 +112,7 @@ async function buildAll() {
   await mkdir(stagingAppsDir, { recursive: true })
 
   try {
-    await pack(`${root}/shorts`, stagingAppsDir)
+    await buildShorts(stagingDir, stagingAppsDir)
     for (const name of ['reader', 'cinema']) {
       await buildReader(name, stagingAppsDir)
     }

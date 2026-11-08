@@ -10,24 +10,24 @@
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
 - `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
-  - `apps/shorts-1.4.7.tgapp`
-  - `apps/reader-1.0.5.tgapp`
-  - `apps/cinema-1.4.6.tgapp`
+  - `apps/shorts-1.5.0.tgapp`
+  - `apps/reader-1.1.0.tgapp`
+  - `apps/cinema-1.5.0.tgapp`
   - `apps/fntv-0.1.2.tgapp`
 
 飞牛影视服务 `0.1.1` 加入公开目录，最低宿主为 `0.3.6`，提供独立影视账号、电影和电视剧媒体库、目录授权及服务启停。升级本地候选 `0.1.0` 时保留业务数据和运行状态，已有客户端需重新登录。此前公共 SDK 已加入可选飞牛服务接口；原三款插件因此各提升一个修订版本，避免覆盖同版本摘要，最低宿主、页面及数据格式保留。包、目录及摘要在同一提交中发布；构建与实际宿主集成见 [0.1.1 发布记录](fntv-0.1.1-release.md)。
 
 飞牛 `0.1.2` 要求宿主 `0.3.7`，加入无海报视频后台补图、管理页封面状态及现有刷新入口的缺图重试。此次其他三款插件包字节保持一致；FNTV 包、目录及摘要在同一提交中更新。指定官方客户端画面与已提交宿主的完整集成证据见 [0.1.2 验收记录](fntv-0.1.2-local-validation.md)。
 
-根目录分发阅读馆为 reader 1.0.5，页面延续 1.0.4 的 iOS 漫画滚动修复：高度变化完全被占位补偿吸收后不回写旧滚动坐标，换窗及图片尺寸修改前先保护滚动范围，保留原生惯性与有界预读。升级保留书库、分组、阅读进度、书签和自定义偏好。四张正式截图和滚动修复的历史验收见 [1.0.4 发布验收记录](reader-1.0.4-release.md)。手动目录书库、紧凑筛选、漫画默认适宽和首次替换旧 books/comics 的确认边界保留。
+根目录分发阅读馆为 reader 1.1.0、影视 1.5.0、短视频 1.5.0，完成 iPhone 主屏幕界面改版（见各应用说明），数据格式与最低宿主不变；阅读馆随包携带三张新版截图（home、mobile-library、mobile-reading），旧抽屉截图 mobile-sidebar 已移除。阅读馆继续保留 1.0.4 的 iOS 漫画滚动修复：高度变化完全被占位补偿吸收后不回写旧滚动坐标，换窗及图片尺寸修改前先保护滚动范围，保留原生惯性与有界预读。升级保留书库、分组、阅读进度、书签和自定义偏好。滚动修复的历史验收见 [1.0.4 发布验收记录](reader-1.0.4-release.md)。手动目录书库、紧凑筛选、漫画默认适宽和首次替换旧 books/comics 的确认边界保留。
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/cinema-1.4.6.tgapp
+<sha256>  apps/cinema-1.5.0.tgapp
 <sha256>  apps/fntv-0.1.2.tgapp
-<sha256>  apps/reader-1.0.5.tgapp
-<sha256>  apps/shorts-1.4.7.tgapp
+<sha256>  apps/reader-1.1.0.tgapp
+<sha256>  apps/shorts-1.5.0.tgapp
 <sha256>  catalog.json
 ```
 
@@ -51,7 +51,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.0.5",
+        "version": "1.1.0",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -72,7 +72,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "更新宿主接口兼容性，保留 1.0.4 的 iOS 漫画滚动修复、原生惯性和有界预读。升级保留书库、分组、阅读进度、书签及自定义偏好。",
+          "changelog": "iPhone 主屏幕界面改版：手机打开即沉浸并自带返回网盘；正文跟手翻页、左右边缘留给系统返回手势；工具栏改为图标与可拖动进度条，排版分两级、四种主题；长条漫自动连续滚动；书库去掉抽屉，改为顶部筛选标签。升级保留书库、分组、阅读进度、书签及自定义偏好。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -91,15 +91,14 @@
           "screenshots": [
             "screenshots/home.png",
             "screenshots/mobile-library.png",
-            "screenshots/mobile-reading.png",
-            "screenshots/mobile-sidebar.png"
+            "screenshots/mobile-reading.png"
           ],
           "data_schema": 1
         }
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.5.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.1.0.tgapp"
     }
   ]
 }

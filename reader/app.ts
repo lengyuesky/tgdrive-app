@@ -45,8 +45,11 @@ import { DetailView } from './ui/detail-view'
 import { MeView } from './ui/me-view'
 import { showConfirmModal } from './ui/modals'
 import { showShelfModal } from './ui/shelves'
+import { icon } from '../ui/icons'
+import '../ui/base.css'
 import './style.css'
 import './reading.css'
+import './mobile.css'
 
 export interface CoverLoader {
   observe(container: HTMLElement, file: FileEntry): void
@@ -96,19 +99,24 @@ export async function startApp(options: AppOptions) {
     <section id="reader" class="reader" hidden>
       <button id="reader-menu-toggle" class="focus-menu">显示阅读菜单</button>
       <button id="reader-backdrop" class="reader-backdrop" aria-label="关闭阅读面板" tabindex="-1" hidden></button>
+      <!-- 工具栏隐藏时常驻的极简信息：章节名与进度，可在排版面板关闭 -->
+      <div id="reading-meta" class="reading-meta" aria-hidden="true"><span id="meta-chapter"></span><span id="meta-progress"></span></div>
       <div class="reader-toolbar">
-        <button id="back">返回内容库</button>
+        <button id="back" class="tool-btn" type="button" aria-label="返回内容库" title="返回内容库">${icon('back')}<span class="tool-label">返回内容库</span></button>
         <h2 id="book-title"></h2>
         <div id="reader-desktop-actions">
           <div id="reader-actions">
-            <button id="toc-toggle">目录</button>
-            <button id="preferences-toggle">阅读设置</button>
-            <button id="bookmarks-toggle">书签</button>
+            <button id="toc-toggle" class="tool-btn" type="button" aria-label="目录" title="目录">${icon('toc')}<span class="tool-label">目录</span></button>
+            <button id="appearance-toggle" class="tool-btn" type="button" aria-label="主题" title="主题">${icon('theme')}<span class="tool-label">主题</span></button>
+            <button id="preferences-toggle" class="tool-btn" type="button" aria-label="排版设置" title="排版设置">${icon('type')}<span class="tool-label">排版</span></button>
+            <button id="paging-toggle" class="tool-btn" type="button" aria-label="翻页方式" title="翻页方式">${icon('page')}<span class="tool-label">翻页</span></button>
           </div>
         </div>
-        <button id="reader-more-toggle">更多</button>
+        <button id="bookmark-quick" class="tool-btn" type="button" aria-pressed="false" aria-label="添加书签" title="添加书签">${icon('bookmark')}<span class="tool-label">书签</span></button>
+        <button id="reader-more-toggle" class="tool-btn" type="button" aria-label="更多" title="更多">${icon('more')}<span class="tool-label">更多</span></button>
         <div id="reader-more" class="reader-more" aria-label="更多操作" hidden>
           <div class="panel-heading mobile-only"><strong>更多操作</strong><button data-close-panel>关闭</button></div>
+          <button id="bookmarks-toggle">书签列表</button>
           <button id="download">下载原文件</button>
           <button id="host-show-file">在文件中显示</button>
           <button id="host-file-details">文件信息</button>
@@ -137,9 +145,39 @@ export async function startApp(options: AppOptions) {
         </div>
       </div>
 
-      <!-- 阅读偏好设置面板 -->
-      <div id="preferences" class="preferences reader-panel" aria-label="阅读设置" hidden>
-        <div class="panel-heading mobile-only"><strong>阅读设置</strong><button data-close-panel>关闭</button></div>
+      <!-- 主题面板：四种阅读主题色块，实际值仍写入 #theme -->
+      <div id="appearance" class="appearance-panel" aria-label="阅读主题" hidden>
+        <div class="panel-heading mobile-only"><strong>主题</strong><button data-close-panel>关闭</button></div>
+        <div class="theme-swatches" data-proxy="theme" role="group" aria-label="阅读主题">
+          <button type="button" class="theme-swatch" data-value="system" aria-pressed="false"><span class="swatch swatch-system" aria-hidden="true">Aa</span><span>跟随主站</span></button>
+          <button type="button" class="theme-swatch" data-value="light" aria-pressed="false"><span class="swatch swatch-light" aria-hidden="true">Aa</span><span>明亮</span></button>
+          <button type="button" class="theme-swatch" data-value="sepia" aria-pressed="false"><span class="swatch swatch-sepia" aria-hidden="true">Aa</span><span>护眼</span></button>
+          <button type="button" class="theme-swatch" data-value="dark" aria-pressed="false"><span class="swatch swatch-dark" aria-hidden="true">Aa</span><span>深色</span></button>
+        </div>
+        <p class="panel-hint">屏幕亮度请使用系统控制中心调节。</p>
+      </div>
+
+      <!-- 翻页面板：常用的阅读方式，实际值仍写入原有选择框 -->
+      <div id="paging" class="paging-panel" aria-label="翻页方式" hidden>
+        <div class="panel-heading mobile-only"><strong>翻页方式</strong><button data-close-panel>关闭</button></div>
+        <div class="pref-row paging-text"><span>文字</span><div class="tg-segmented" data-proxy="mode"><button type="button" data-value="page" aria-pressed="false">左右翻页</button><button type="button" data-value="scroll" aria-pressed="false">上下滚动</button></div></div>
+        <div class="pref-row paging-comic"><span>漫画</span><div class="tg-segmented" data-proxy="comic-mode"><button type="button" data-value="single" aria-pressed="false">单页</button><button type="button" data-value="scroll" aria-pressed="false">连续滚动</button><button type="button" data-value="double" class="wide-only" aria-pressed="false">双页</button></div></div>
+        <div class="pref-row paging-comic"><span>方向</span><div class="tg-segmented" data-proxy="direction"><button type="button" data-value="ltr" aria-pressed="false">从左到右</button><button type="button" data-value="rtl" aria-pressed="false">从右到左</button></div></div>
+        <div class="pref-row paging-fit"><span>画面</span><div class="tg-segmented" data-proxy="fit"><button type="button" data-value="width" aria-pressed="false">适应宽度</button><button type="button" data-value="page" aria-pressed="false">适应整页</button></div></div>
+        <p class="panel-hint paging-text">点屏幕左右两侧或左右滑动翻页，点中间唤出菜单。</p>
+      </div>
+
+      <!-- 排版面板：一级为常用项，二级保留全部细项 -->
+      <div id="preferences" class="preferences reader-panel" aria-label="排版设置" hidden>
+        <div class="panel-heading mobile-only"><strong>排版</strong><button data-close-panel>关闭</button></div>
+        <div id="pref-quick" class="pref-quick">
+          <div class="pref-row flow-quick"><span>字号</span><div class="font-stepper"><button type="button" data-font-step="-1" aria-label="减小字号">A−</button><output id="font-size-value" aria-live="polite"></output><button type="button" data-font-step="1" aria-label="增大字号">A+</button></div></div>
+          <div class="pref-row flow-quick"><span>字体</span><div class="tg-segmented" data-proxy="font"><button type="button" data-value="serif" aria-pressed="false">宋体</button><button type="button" data-value="sans" aria-pressed="false">黑体</button><button type="button" data-value="system" aria-pressed="false">系统</button></div></div>
+          <div class="pref-row flow-quick"><span>行距</span><div class="tg-segmented" data-line-preset><button type="button" data-value="1.5" aria-pressed="false">紧凑</button><button type="button" data-value="1.8" aria-pressed="false">标准</button><button type="button" data-value="2.2" aria-pressed="false">宽松</button></div></div>
+          <div class="pref-row"><span>常驻章节与进度</span><button id="status-line-toggle" class="tg-switch" type="button" role="switch" aria-checked="true" aria-label="常驻显示章节与进度"></button></div>
+        </div>
+        <button id="pref-advanced-toggle" class="pref-advanced-toggle" type="button" aria-expanded="false" aria-controls="pref-advanced">更多设置</button>
+        <div id="pref-advanced" class="pref-advanced">
 
         <!-- 偏好设置覆盖范围 -->
         <div id="pref-scope-control" class="pref-scope-control">
@@ -242,6 +280,7 @@ export async function startApp(options: AppOptions) {
             <option value="3">300%</option>
           </select>
         </label>
+        </div>
       </div>
 
       <!-- 书签面板 -->
@@ -261,9 +300,15 @@ export async function startApp(options: AppOptions) {
         <button id="use-current">从当前页继续并保存</button>
       </div>
       <div id="layout-notice" class="layout-notice" role="alert" hidden></div>
+      <div id="reader-toast" class="tg-toast reader-toast" role="status" hidden></div>
       <div id="reading-status" role="status"></div>
       <main id="viewport" class="reading-viewport" tabindex="0" aria-label="阅读内容"></main>
       <footer class="reader-footer">
+        <div class="reader-progress-row">
+          <button id="chapter-prev" class="tool-btn" type="button" aria-label="上一章" title="上一章">${icon('prev')}</button>
+          <div class="progress-slider"><input id="progress" type="range" min="1" max="1" step="1" value="1" aria-label="阅读进度" /><output id="progress-bubble" class="progress-bubble" hidden></output></div>
+          <button id="chapter-next" class="tool-btn" type="button" aria-label="下一章" title="下一章">${icon('next')}</button>
+        </div>
         <div class="reader-footer-line">
           <button id="previous">上一页 / 章</button>
           <span id="position"></span>
@@ -272,13 +317,16 @@ export async function startApp(options: AppOptions) {
           <button id="retry-save">重试同步</button>
           <button id="retry-reader" hidden>重试打开</button>
         </div>
-        <div id="reader-footer-actions">
-          <div id="reader-completion" class="reader-completion" hidden>
-            <button id="btn-mark-finished" class="btn-primary" type="button">✓ 读完</button>
-            <button id="btn-next-volume" class="btn-primary" type="button" hidden>读完并下一卷 →</button>
-          </div>
-        </div>
+        <div id="reader-footer-actions"></div>
       </footer>
+      <!-- 读到真实末端才出现的完成卡片，不随工具栏隐藏 -->
+      <div id="reader-completion" class="reader-completion" hidden>
+        <strong class="completion-title">已读到最后一页</strong>
+        <div class="completion-actions">
+          <button id="btn-mark-finished" class="btn-primary" type="button">✓ 读完</button>
+          <button id="btn-next-volume" class="btn-primary" type="button" hidden>读完并下一卷 →</button>
+        </div>
+      </div>
     </section>
   `
 
@@ -455,8 +503,16 @@ export async function startApp(options: AppOptions) {
       })().catch(report)
     }, 600)
   }
+  async function loadUiPrefs() {
+    // 界面偏好读取失败只回到默认显示，不阻断阅读馆启动。
+    const record = await drive.storage.get<{ statusLine?: boolean }>(UI_KEY, { signal: appLifecycle.signal }).catch(() => null)
+    uiPrefs = { statusLine: record?.value?.statusLine !== false }
+    uiRevision = record?.revision ?? null
+    syncProxies()
+  }
   const offStorageEvents = drive.on('storage.changed', (value) => {
     const key = typeof (value as { key?: string })?.key === 'string' ? (value as { key: string }).key : ''
+    if (key === UI_KEY) { if (!drive.storage.wroteRecently?.(key)) void loadUiPrefs(); return }
     const visible = key.startsWith('library:flags:') || key.startsWith('library:reading:') || key.startsWith('progress:')
     if (visible) library.invalidateReadingState(key)
     if (key === 'library:book-groups') { scheduleLibraryRefresh('groups'); return }
@@ -541,6 +597,53 @@ export async function startApp(options: AppOptions) {
   let activeWork: Work | undefined = undefined
   let workPrefsSnapshot: WorkPreferencesSnapshot | undefined = undefined
   let prefScope: 'format' | 'work' = 'format'
+  let comicAutoScroll = false
+  let comicShapeDeadline = 0
+  // 阅读界面偏好（常驻章节与进度）属于本应用私有设置，不进入分格式阅读偏好记录。
+  const UI_KEY = 'reader-ui'
+  let uiPrefs: { statusLine: boolean } = { statusLine: true }
+  let uiRevision: string | null = null
+  let bookmarkLocations: { key: string; revision: string; location: Location }[] = []
+  let progressDragging = false
+  let quickWorkScope = false
+  let toastTimer: ReturnType<typeof setTimeout> | undefined
+
+  function toast(message: string) {
+    const element = get('reader-toast')
+    element.textContent = message; element.hidden = false
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => { element.hidden = true }, 1600)
+  }
+
+  /** 同一章内字符偏移相近（文字）或同一页（漫画/PDF）视为当前位置已有书签。 */
+  function matchingBookmark(location: Location) {
+    return bookmarkLocations.find(({ location: saved }) => saved.index === location.index && (
+      saved.offset === undefined || location.offset === undefined ? true : Math.abs(saved.offset - location.offset) < 240))
+  }
+  function syncBookmarkQuick(location: Location) {
+    const button = get('bookmark-quick'), marked = !!matchingBookmark(location)
+    button.setAttribute('aria-pressed', String(marked))
+    button.setAttribute('aria-label', marked ? '移除书签' : '添加书签'); button.title = marked ? '移除书签' : '添加书签'
+    const svg = button.querySelector('svg')
+    if (svg && svg.dataset.marked !== String(marked)) { svg.outerHTML = icon(marked ? 'bookmarkFilled' : 'bookmark'); button.querySelector('svg')!.dataset.marked = String(marked) }
+  }
+  async function loadBookmarkLocations(file: FileEntry, generation: number) {
+    const found: typeof bookmarkLocations = []
+    let cursor: string | null = null
+    try {
+      for (let page = 0; page < 10; page++) {
+        const records: Awaited<ReturnType<typeof drive.storage.list<Bookmark>>> = await drive.storage.list<Bookmark>({ prefix: `bookmark:${file.id}:`, limit: 100, cursor }, { signal: bookController.signal })
+        for (const record of records.records) {
+          if (record.value && validLocation(record.value.location) && record.value.content_version === file.content_version) found.push({ key: record.key, revision: record.revision, location: record.value.location })
+        }
+        cursor = records.next_cursor
+        if (!cursor) break
+      }
+    } catch (error) { if (!isAbort(error)) report(error); return }
+    if (generation !== bookGeneration) return
+    bookmarkLocations = found
+    if (view) syncBookmarkQuick(view.current())
+  }
   let prefs: Preferences = resolvePreferences(globalPrefsSnapshot.value, activeFormat)
 
   const pageGestures = () => {
@@ -557,7 +660,10 @@ export async function startApp(options: AppOptions) {
     desktopControls: options.id === 'reader',
     drive,
     context,
+    shelf: options.id === 'reader',
     paged: pageGestures,
+    drag: (dx) => !!view && readerReady && !!view.dragPage?.(dx),
+    settle: (delta) => { if (view?.settlePage) void navigate(() => view!.settlePage!(delta)).catch(report) },
     turn: (delta) => {
       const actualDelta =
         view?.current().format === 'comic' && prefs.direction === 'rtl' ? ((-delta as unknown) as -1 | 1) : delta
@@ -592,6 +698,10 @@ export async function startApp(options: AppOptions) {
       activeFormat,
       workPrefsSnapshot?.value
     )
+    // 长条漫在本作未手动指定排版时临时按连续滚动显示；只影响显示，不写回偏好。
+    if (activeFormat === 'comic' && comicAutoScroll && workPrefsSnapshot?.value?.overrides?.comic?.mode === undefined) {
+      prefs = { ...prefs, mode: 'scroll' }
+    }
   }
 
   function syncPreferences() {
@@ -643,14 +753,35 @@ export async function startApp(options: AppOptions) {
     show('pref-clear-work', !!activeWork && hasWorkOverride)
 
     get('viewport').dataset.mode = prefs.mode
+    syncProxies()
     applyTheme()
+  }
+
+  /** 分段按钮与色块只是原选择框的快捷入口：选中态始终从选择框读取，单一真源。 */
+  function syncProxies() {
+    for (const group of root.querySelectorAll<HTMLElement>('[data-proxy]')) {
+      const select = get<HTMLSelectElement>(group.dataset.proxy!)
+      for (const button of group.querySelectorAll<HTMLButtonElement>('button[data-value]')) {
+        button.setAttribute('aria-pressed', String(!!select && select.value === button.dataset.value))
+      }
+    }
+    for (const button of root.querySelectorAll<HTMLButtonElement>('[data-line-preset] button')) {
+      button.setAttribute('aria-pressed', String(Math.abs(Number(button.dataset.value) - prefs.lineHeight) < .05))
+    }
+    text('font-size-value', String(prefs.fontSize))
+    for (const button of root.querySelectorAll<HTMLButtonElement>('[data-font-step]')) {
+      button.disabled = Number(button.dataset.fontStep) < 0 ? prefs.fontSize <= 12 : prefs.fontSize >= 36
+    }
+    get('status-line-toggle').setAttribute('aria-checked', String(uiPrefs.statusLine))
+    get('reader').dataset.statusLine = String(uiPrefs.statusLine)
   }
 
   function saveActivePreference(
     patch: Partial<TextPreferences & ComicPreferences & PdfPreferences>
   ) {
     const format = activeFormat
-    const targetScope = prefScope
+    const targetScope = quickWorkScope ? 'work' : prefScope
+    quickWorkScope = false
 
     prefQueue = prefQueue.catch(() => {}).then(async () => {
       try {
@@ -740,6 +871,22 @@ export async function startApp(options: AppOptions) {
     readerNav?.syncLocation(location)
     get<HTMLButtonElement>('previous').disabled = !state.canPrevious
     get<HTMLButtonElement>('next').disabled = !state.canNext
+    const count = view.sections.length, label = view.sections[location.index]?.label ?? ''
+    const unit = flow ? '章' : '页'
+    for (const [id, delta] of [['chapter-prev', -1], ['chapter-next', 1]] as const) {
+      const button = get<HTMLButtonElement>(id), name = `${delta < 0 ? '上' : '下'}一${unit}`
+      button.disabled = delta < 0 ? location.index <= 0 : location.index >= count - 1
+      button.setAttribute('aria-label', name); button.title = name
+    }
+    const progress = get<HTMLInputElement>('progress')
+    progress.max = String(Math.max(1, count))
+    if (!progressDragging) progress.value = String(location.index + 1)
+    progress.closest<HTMLElement>('.progress-slider')!.hidden = count <= 1
+    text('meta-chapter', flow ? label : view.title)
+    text('meta-progress', flow
+      ? [state.pageIndex !== undefined && state.pageCount !== undefined ? `${state.pageIndex + 1}/${state.pageCount}` : '', count > 1 ? `第 ${location.index + 1}/${count} 章` : ''].filter(Boolean).join(' · ')
+      : `${location.index + 1} / ${count}`)
+    syncBookmarkQuick(location)
 
     // 非阻断显示内存降级提示（如双页超预算暂按单页显示），恢复后清除
     const noticeEl = get('layout-notice')
@@ -867,6 +1014,20 @@ export async function startApp(options: AppOptions) {
     readerNav?.update(view)
   }
 
+  /** 打开后几秒内按已知页形状决定长条漫是否改为连续滚动；之后不再自动改变阅读方式。 */
+  function detectComicShape() {
+    if (!view || !readerReady || activeFormat !== 'comic' || !comicShapeDeadline) return
+    if (Date.now() > comicShapeDeadline) { comicShapeDeadline = 0; return }
+    if (workPrefsSnapshot?.value?.overrides?.comic?.mode !== undefined) { comicShapeDeadline = 0; return }
+    const shape = view.pageShape?.()
+    if (!shape) return
+    comicShapeDeadline = 0
+    if (shape !== 'tall' || prefs.mode === 'scroll') return
+    comicAutoScroll = true
+    resolveActivePreferences(); syncPreferences()
+    void navigate(() => view!.configure(prefs)).catch(report)
+  }
+
   /** 打开正文阅读器（从图书/漫画卡片、详情开始阅读按钮、按需目录或首页续读卡调用） */
   async function openReader(nodeId: number, targetLocation?: Location) {
     capture()
@@ -933,6 +1094,10 @@ export async function startApp(options: AppOptions) {
         unit.format === 'cbz' || unit.format === 'zip' || unit.format === 'images'
           ? 'comic'
           : preferenceFormat(unit.format)
+      comicAutoScroll = false
+      comicShapeDeadline = activeFormat === 'comic' ? Date.now() + 4000 : 0
+      bookmarkLocations = []
+      void loadBookmarkLocations(unit.file, active)
 
       // 加载当前作品的偏好覆盖
       workPrefsSnapshot = undefined
@@ -952,6 +1117,7 @@ export async function startApp(options: AppOptions) {
       const activeStore = new ProgressStore(drive, unit.file, (message: string, conflict: boolean) => {
         if (active === bookGeneration) {
           text('sync', message)
+          get('sync').dataset.state = conflict || message.includes('失败') ? 'error' : 'ok'
           if (drive.can?.('ui.setExitMessage')) void drive.ui.setExitMessage?.((conflict || message.includes('失败')) ? '阅读进度尚未同步，离开后可能需要重试保存。' : '').catch(() => {})
           show('conflict', conflict)
           if (conflict || message.includes('失败')) chrome?.reveal()
@@ -975,6 +1141,7 @@ export async function startApp(options: AppOptions) {
         changed: () => {
           if (active === bookGeneration) {
             if (readerReady && view && view.sections.length !== navigationSize) { navigationSize = view.sections.length; readerNav?.update(view) }
+            detectComicShape()
             capture()
           }
         },
@@ -1026,6 +1193,11 @@ export async function startApp(options: AppOptions) {
       show('spread-offset-option', isComic && (caps?.spreads ?? true))
       show('fit-option', (isComic || isPdf) && !!caps?.fits)
       show('zoom-option', isComic || isPdf)
+      get('reader').dataset.formatKind = isText ? 'text' : isComic ? 'comic' : 'pdf'
+      // 漫画和 PDF 没有文字快捷项，排版面板直接展开全部设置。
+      get('preferences').dataset.expanded = String(!isText)
+      get('pref-advanced-toggle').setAttribute('aria-expanded', String(!isText))
+      syncProxies()
       show('download', !unit.file.is_dir)
 
       bodySearch?.update()
@@ -1073,6 +1245,7 @@ export async function startApp(options: AppOptions) {
     if (reset) {
       bookmarkCursor = null
       get('bookmark-items').replaceChildren()
+      void loadBookmarkLocations(file, active)
     }
     const records = await drive.storage.list<Bookmark>({
       prefix: `bookmark:${file.id}:`,
@@ -1151,6 +1324,83 @@ export async function startApp(options: AppOptions) {
     await openDetail({ unit, work })
   })
   bind('preferences-toggle', () => chrome?.togglePanel('preferences'))
+  bind('appearance-toggle', () => chrome?.togglePanel('appearance', get('appearance-toggle')))
+  bind('paging-toggle', () => chrome?.togglePanel('paging', get('paging-toggle')))
+  bind('pref-advanced-toggle', () => {
+    const panel = get('preferences'), expanded = panel.dataset.expanded !== 'true'
+    panel.dataset.expanded = String(expanded)
+    get('pref-advanced-toggle').setAttribute('aria-expanded', String(expanded))
+  })
+  // 快捷控件写回原选择框并派发 change，沿用既有保存、冲突与应用流程。
+  root.addEventListener('click', (event) => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-proxy] button[data-value]') : null
+    if (!button || button.disabled) return
+    const id = button.closest<HTMLElement>('[data-proxy]')!.dataset.proxy!
+    const select = get<HTMLSelectElement>(id)
+    if (!select || select.value === button.dataset.value) return
+    // 翻页面板里改漫画排版视为对本作的选择，有作品时记在作品上。
+    if (id === 'comic-mode' && activeWork && workPrefsSnapshot) quickWorkScope = true
+    select.value = button.dataset.value!
+    select.dispatchEvent(new Event('change'))
+    syncProxies()
+  })
+  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-line-preset] button')) {
+    button.addEventListener('click', () => {
+      const value = Number(button.dataset.value)
+      if (Math.abs(value - prefs.lineHeight) >= .05) saveActivePreference({ lineHeight: value })
+    })
+  }
+  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-font-step]')) {
+    button.addEventListener('click', () => get(Number(button.dataset.fontStep) < 0 ? 'font-size-decrease' : 'font-size-increase').click())
+  }
+  bind('status-line-toggle', async () => {
+    const next = { ...uiPrefs, statusLine: !uiPrefs.statusLine }
+    uiPrefs = next; syncProxies()
+    try {
+      const saved = await drive.storage.set(UI_KEY, next, uiRevision)
+      uiRevision = saved.revision
+    } catch (error) {
+      // 其他设备同时修改时以远端为准，避免静默覆盖。
+      const remote = await drive.storage.get<{ statusLine?: boolean }>(UI_KEY).catch(() => null)
+      uiPrefs = { statusLine: remote?.value?.statusLine !== false }; uiRevision = remote?.revision ?? null
+      syncProxies(); report(error)
+    }
+  })
+  get('progress').addEventListener('input', () => {
+    progressDragging = true
+    const input = get<HTMLInputElement>('progress'), index = Number(input.value) - 1
+    const bubble = get('progress-bubble')
+    bubble.textContent = view?.sections[index]?.label || `${index + 1} / ${view?.sections.length ?? 0}`
+    bubble.hidden = false
+    bubble.style.setProperty('--progress', String(index / Math.max(1, Number(input.max) - 1)))
+  })
+  get('progress').addEventListener('change', () => {
+    progressDragging = false
+    get('progress-bubble').hidden = true
+    const index = Number(get<HTMLInputElement>('progress').value) - 1
+    if (view && index !== view.current().index) void navigate(() => view!.go(index)).catch(report)
+  })
+  bind('chapter-prev', () => view && navigate(() => view!.go(view!.current().index - 1)))
+  bind('chapter-next', () => view && navigate(() => view!.go(view!.current().index + 1)))
+  bind('bookmark-quick', async () => {
+    if (!view || !currentFile || !canSave) return
+    const file = currentFile, location = view.current(), active = bookGeneration
+    const existing = matchingBookmark(location)
+    if (existing) {
+      await drive.storage.delete(existing.key, existing.revision)
+      bookmarkLocations = bookmarkLocations.filter(item => item !== existing)
+      toast('已移除书签')
+    } else {
+      const id = [...crypto.getRandomValues(new Uint8Array(16))].map((value) => value.toString(16).padStart(2, '0')).join('')
+      const saved = await drive.storage.set(`bookmark:${file.id}:${id}`, {
+        title: view.sections[location.index]?.label || '书签', location, content_version: file.content_version,
+      } satisfies Bookmark)
+      if (active !== bookGeneration) return
+      bookmarkLocations.push({ key: saved.key, revision: saved.revision, location })
+      toast('已添加书签')
+    }
+    if (active === bookGeneration && view) syncBookmarkQuick(view.current())
+  })
   // toc-toggle 由 ReaderChrome 构造函数统一绑定到 navigation 面板，此处不重复监听避免快速重置
   bind('bookmarks-toggle', async () => {
     if (chrome?.togglePanel('bookmarks')) await bookmarks(true)
@@ -1491,6 +1741,7 @@ export async function startApp(options: AppOptions) {
     try {
       // 读取持久化偏好设置（使用 PreferenceStore V2 结构）
       globalPrefsSnapshot = await prefStore.load(appLifecycle.signal)
+      await loadUiPrefs()
       resolveActivePreferences()
       syncPreferences()
 

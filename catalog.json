@@ -6,7 +6,7 @@
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.4.6",
+        "version": "1.5.0",
         "api_version": 2,
         "min_host_version": "0.3.0",
         "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",
@@ -35,7 +35,7 @@
             "ogv"
           ],
           "directories": false,
-          "changelog": "更新宿主接口兼容性，保留现有媒体库、播放、字幕、收藏和观看进度。",
+          "changelog": "iPhone 主屏幕界面改版：手机打开即沉浸，配色跟随主站深浅色；全屏海报墙与底部四标签，详情页大背景图、播放主按钮与图标操作行；iOS 优先使用原生视频全屏。保留现有媒体库、播放、字幕、收藏和观看进度。",
           "formats": [
             "浏览器支持的视频",
             "MKV 客户端解封装",
@@ -53,9 +53,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "77e694b67268aadaffa40089ce5a17eb8634b9b9ee0ad5d0cb6a5e1ceed4d9a3",
-      "size": 223086,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.4.6.tgapp"
+      "sha256": "428d42e85dc552b58bb467a33406b6364fc23481fe253b2ef9d8649678d1a7bb",
+      "size": 173940,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.5.0.tgapp"
     },
     {
       "manifest": {
@@ -105,7 +105,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.0.5",
+        "version": "1.1.0",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -126,7 +126,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "更新宿主接口兼容性，保留 1.0.4 的 iOS 漫画滚动修复、原生惯性和有界预读。升级保留书库、分组、阅读进度、书签及自定义偏好。",
+          "changelog": "iPhone 主屏幕界面改版：手机打开即沉浸并自带返回网盘；正文跟手翻页、左右边缘留给系统返回手势；工具栏改为图标与可拖动进度条，排版分两级、四种主题；长条漫自动连续滚动；书库去掉抽屉，改为顶部筛选标签。升级保留书库、分组、阅读进度、书签及自定义偏好。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -145,21 +145,20 @@
           "screenshots": [
             "screenshots/home.png",
             "screenshots/mobile-library.png",
-            "screenshots/mobile-reading.png",
-            "screenshots/mobile-sidebar.png"
+            "screenshots/mobile-reading.png"
           ],
           "data_schema": 1
         }
       },
-      "sha256": "400a65ae452e113902303e61683c6b8ff1e114f4a9d2e66777b2daf56bfca6c8",
-      "size": 2419364,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.0.5.tgapp"
+      "sha256": "bd271f2a475a56b8d16a660f566486597b70e540684ca6103aa7ca8bae344de7",
+      "size": 2406503,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.1.0.tgapp"
     },
     {
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "1.4.7",
+        "version": "1.5.0",
         "api_version": 2,
         "min_host_version": "0.3.1",
         "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
@@ -204,7 +203,7 @@
             "ogv"
           ],
           "directories": false,
-          "changelog": "更新宿主接口兼容性，保留现有播放、滑动切换、收藏和自定义设置。",
+          "changelog": "界面统一为共享深色规范：右侧竖排线性图标、底部标题与进度条，手机隐藏上下切换按钮；保留全部播放、滑动切换、收藏和设置功能。",
           "formats": [
             "网盘视频"
           ],
@@ -220,9 +219,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "572fe9820749720835433466b4de5fa9a467a4441dea8869813e4581e784a697",
-      "size": 341559,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.4.7.tgapp"
+      "sha256": "8b9e7f09ca5e851aac10e8b58c4002bef2e212719ef0b991e61286e913f5ef19",
+      "size": 132783,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.5.0.tgapp"
     }
   ]
 }

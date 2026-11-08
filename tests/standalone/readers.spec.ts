@@ -92,9 +92,12 @@ async function setupApp(
     proportionalRead?: boolean
     sourcePaths?: string[]
     shelfNames?: string[]
+    /** 额外合成文件（如长篇小说），追加到当前书库。 */
+    extraFiles?: { entry: FileEntry; data: Buffer }[]
+    dark?: boolean
   }
 ) {
-  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [], readDelay = 0, proportionalRead = false, sourcePaths = ['/书库'], shelfNames = [] } = options
+  const { kind, viewport = { width: 1000, height: 700 }, unindexedFiles = [], readDelay = 0, proportionalRead = false, sourcePaths = ['/书库'], shelfNames = [], extraFiles = [], dark = false } = options
   await page.setViewportSize(viewport)
 
   const outsideRequests: string[] = []
@@ -236,7 +239,7 @@ async function setupApp(
     })),
   ]
 
-  const activeFiles = kind === 'mixed' ? [...bookFiles, ...comicFiles] : kind === 'books' ? bookFiles : comicFiles
+  const activeFiles = [...(kind === 'mixed' ? [...bookFiles, ...comicFiles] : kind === 'books' ? bookFiles : comicFiles), ...extraFiles]
   const allEntries: FileEntry[] = [rootDir, ...activeFiles.map((f) => f.entry), ...unindexedFiles]
   const dataMap = new Map<number, Buffer>()
   activeFiles.forEach((f) => dataMap.set(f.entry.id, f.data))
@@ -280,7 +283,7 @@ async function setupApp(
   }))
 
   await page.addInitScript(
-    ({ kind, entries, serializedList, readDelay, proportionalRead, sourcePaths, shelfNames }) => {
+    ({ kind, entries, serializedList, readDelay, proportionalRead, sourcePaths, shelfNames, dark }) => {
       const storageStore = new Map<string, { key: string; value: any; revision: string; updated_at: number }>()
       const sources = sourcePaths.map((path, index) => {
         const source = entries.find(file => file.path === path && file.is_dir)!
@@ -307,7 +310,7 @@ async function setupApp(
           name: '阅读馆',
           version: '1.0.0',
           api_version: 2,
-          dark: false,
+          dark,
           capabilities: ['ui.setImmersive', 'ui.immersiveBackground'],
         }),
         settings: {
@@ -400,6 +403,7 @@ async function setupApp(
       proportionalRead,
       sourcePaths,
       shelfNames,
+      dark,
     }
   )
 
@@ -437,9 +441,10 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       const firstCard = page.locator('#items .library-card').first()
       const cardBox = (await firstCard.boundingBox())!
       const headerBox = (await page.locator('.mobile-header').boundingBox())!
-      const headingBox = (await page.locator('.library-heading').boundingBox())!
       expect(headerBox.height, '插件顶栏不超过 50px').toBeLessThanOrEqual(50)
-      expect(headingBox.height, '标题和路径合为紧凑区域').toBeLessThanOrEqual(46)
+      // 手机由选中的筛选标签表达当前书库，重复的标题区隐藏，路径保留在标签提示里。
+      await expect(page.locator('.library-heading')).toBeHidden()
+      await expect(page.locator('#mobile-library-chips [aria-current="page"]')).toHaveAttribute('title', /\//)
       expect(cardBox.y, '390px 手机书籍首行应在 225px 内出现').toBeLessThanOrEqual(225)
       expect(await page.locator('#library-filter-count').isVisible()).toBe(false)
       await page.screenshot({ path: test.info().outputPath('mobile-library-compact.png') })
@@ -479,7 +484,7 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await page.getByRole('button', { name: '退出多选', exact: true }).click()
       await expect(page.locator('#book-group-selection')).toHaveCount(0)
       await expect(panel).toBeHidden()
-      const controls = await page.locator('.mobile-header button, .library-toolbar button:visible, .library-heading button').evaluateAll(elements => elements.map(element => {
+      const controls = await page.locator('.mobile-header button, .library-toolbar button:visible, .library-heading button:visible').evaluateAll(elements => elements.map(element => {
         const box = element.getBoundingClientRect()
         return { width: box.width, height: box.height }
       }))
@@ -558,7 +563,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await page.locator('#preferences [data-close-panel]').click()
       await page.locator('#back').click()
       await expect(page.locator('#app-ui')).toBeVisible()
-      expect(await page.evaluate(() => window.standaloneImmersion.active)).toBe(false)
+      // 手机书库同样保持沉浸（插件自带返回网盘）；桌面返回书库后恢复宿主外壳。
+      await expect.poll(() => page.evaluate(() => window.standaloneImmersion.active)).toBe(width < 768)
       expect(errors).toEqual([]); expect(outsideRequests).toEqual([])
     })
   }
@@ -570,32 +576,32 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       const { outsideRequests } = await setupApp(page, {
         kind: 'mixed', viewport: { width, height: 900 }, sourcePaths: ['/书库', '/书库/参差条漫'],
       })
-      const sidebar = page.locator('#library-sidebar'), trigger = page.locator('#btn-mobile-libraries')
+      const sidebar = page.locator('#library-sidebar'), chips = page.locator('#mobile-library-chips')
+      const mobile = width < 769
+      // 手机没有抽屉：书库入口在书库页顶部横滑筛选；桌面仍用常驻侧栏。
+      const shortcuts = mobile ? chips : sidebar
       const choose = async (id: string) => {
-        if (await trigger.isVisible()) await trigger.click()
-        await sidebar.locator(`[data-library-id="${id}"]`).click()
+        if (mobile && !(await chips.isVisible())) await page.locator('#tab-library').click()
+        await shortcuts.locator(`[data-library-id="${id}"]`).click()
         await expect(page.locator('#items .library-card').first()).toBeVisible()
         await expandLibraryFilters(page)
       }
       await expect(page.locator('#view-home')).toBeVisible()
-      if (width < 769) {
-        await trigger.click()
-        await expect(sidebar).toHaveAttribute('aria-modal', 'true')
-        expect(await page.locator('.ui-content').evaluate(element => (element as HTMLElement).inert)).toBe(true)
-        await sidebar.locator('#btn-sidebar-close').focus(); await page.keyboard.press('Tab')
-        await expect(sidebar.locator('#btn-sidebar-dismiss')).toBeFocused()
-        await page.keyboard.press('Escape')
-        await expect(sidebar).toBeHidden(); await expect(trigger).toBeFocused()
-        expect(await page.locator('.ui-content').evaluate(element => (element as HTMLElement).inert)).toBe(false)
-        await trigger.click()
-        await page.locator('#sidebar-backdrop').click({ position: { x: width - 3, y: 450 } })
+      if (mobile) {
         await expect(sidebar).toBeHidden()
+        await expect(page.locator('#btn-mobile-libraries')).toHaveCount(0)
+        await expect(chips).toBeHidden()
+        await page.locator('#tab-library').click()
+        await expect(chips).toBeVisible()
+        await expect(chips.locator('#chip-library-all')).toHaveAttribute('aria-current', 'page')
+        const scroll = await chips.evaluate(element => ({ overflow: getComputedStyle(element).overflowX, page: document.documentElement.scrollWidth <= innerWidth }))
+        expect(scroll).toEqual({ overflow: 'auto', page: true })
       } else {
         await expect(sidebar).toBeVisible()
         const box = (await sidebar.boundingBox())!
         expect(box.y).toBe(0); expect(box.height).toBe(900)
       }
-      await expect(sidebar.locator('[data-library-id^="kind:"], [data-library-id^="format:"], [data-library-id^="group:"]')).toHaveCount(0)
+      await expect(shortcuts.locator('[data-library-id^="kind:"], [data-library-id^="format:"], [data-library-id^="group:"]')).toHaveCount(0)
       await choose('source:1')
       await page.locator('#filter-format').selectOption('pdf')
       await expect(page.locator('#filter-format')).toHaveValue('pdf')
@@ -627,10 +633,10 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await page.getByRole('button', { name: '退出多选', exact: true }).click()
       await page.locator('#nav-home, #tab-home').filter({ visible: true }).first().click()
       await expect(page.locator('#view-home')).toBeVisible()
-      if (await trigger.isVisible()) await trigger.click()
-      await expect(sidebar.locator('[data-library-id="source:1"]')).toContainText('书库')
+      if (mobile) await page.locator('#tab-library').click()
+      await expect(shortcuts.locator('[data-library-id="source:1"]')).toContainText('书库')
       await page.screenshot({ path: test.info().outputPath('sidebar-home.png') })
-      await sidebar.locator('[data-library-id="source:1"]').click()
+      await shortcuts.locator('[data-library-id="source:1"]').click()
       await expandLibraryFilters(page)
       await page.locator('#filter-book-group').selectOption(groupId!)
       await expect(page.locator('#items .library-card')).toHaveCount(1)
@@ -646,8 +652,7 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
       await page.getByRole('button', { name: '改名', exact: true }).click()
       await expect(page.getByRole('textbox', { name: '分组名称：文学', exact: true })).toBeVisible()
       await page.getByRole('button', { name: '完成', exact: true }).click()
-      if (await trigger.isVisible()) await trigger.click()
-      await expect(sidebar.locator('[data-library-id="source:1"]')).toContainText('书库')
+      await expect(shortcuts.locator('[data-library-id="source:1"]')).toContainText('书库')
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       expect(outsideRequests).toEqual([])
       expect(errors).toEqual([])
@@ -678,11 +683,12 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
         await cards.filter({ hasText: title! }).click()
         await expect(page.locator('#reader')).toBeVisible()
         await expect(page.locator('#reading-status')).toHaveText('')
-        await expect(page.locator(`#viewport ${marker}`)).toBeVisible()
+        // 参差条漫按图片比例自动进入连续滚动，会同时渲染多页。
+        await expect(page.locator(`#viewport ${marker}`).first()).toBeVisible()
         if (format === 'txt' || format === 'epub') await expect(page.locator('#mode')).toHaveValue('page')
         else {
           await expect(page.locator('#fit')).toHaveValue(format === 'pdf' ? 'page' : 'width')
-          if (format !== 'pdf') await expect(page.locator('#comic-mode')).toHaveValue('single')
+          if (format !== 'pdf') await expect(page.locator('#comic-mode')).toHaveValue(format === 'images' ? 'scroll' : 'single')
         }
         if (await page.locator('#app.immersive').count()) {
           await page.locator('#viewport').focus()
@@ -800,7 +806,8 @@ test.describe('standalone 真实无头浏览器全套阅读器验收', () => {
     await page.locator('#navigation .toc-item-btn', { hasText: '第2章' }).click()
     await expect(page.locator('#viewport')).toContainText('这是第二章的内容')
 
-    // 添加书签
+    // 添加书签：书签列表收在「更多」里，顶栏只留快捷书签开关
+    await page.locator('#reader-more-toggle').click()
     await page.locator('#bookmarks-toggle').click()
     await page.locator('#bookmark-name').fill('独立书签测试')
     await page.locator('#add-bookmark').click()
@@ -1163,3 +1170,142 @@ for (const width of [320, 1440]) {
     await expect(page.locator('#reader')).toBeVisible()
   })
 }
+
+// ==================== iPhone 主屏幕阅读界面（2026-11 改版） ====================
+const novelText = Buffer.from(Array.from({ length: 6 }, (_, chapter) => `第${chapter + 1}章 远行之${['始', '路', '雨', '城', '夜', '归'][chapter]}\n` + Array.from({ length: 40 }, (_, line) =>
+  `　　${chapter + 1}-${line + 1} 清晨的雾气还没有散去，他沿着河岸慢慢往前走，脚下的石板被露水打湿，远处传来几声犬吠。风从山谷里吹过来，带着松针和泥土的味道。`).join('\n')).join('\n'), 'utf8')
+const novel: { entry: FileEntry; data: Buffer } = {
+  entry: { id: 150, name: '远行.txt', path: '/书库/远行.txt', is_dir: false, size: novelText.length, content_version: 'v1', created_at: 3000, modified_at: 3000, favorite: false },
+  data: novelText,
+}
+const shotDir = process.env.TGDRIVE_UI_SHOTS ?? join(tmpdir(), 'tgdrive-ui-shots')
+const iphone = { viewport: { width: 393, height: 852 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
+
+async function openNovel(page: Page) {
+  if (await page.locator('#tab-library').isVisible()) await page.locator('#tab-library').click()
+  await enterShelf(page)
+  await page.locator('.library-card[data-file-id="150"]').click()
+  await expect(page.locator('#reader')).toBeVisible()
+  await expect(page.locator('#reading-status')).toHaveText('')
+  await expect(page.locator('#position')).not.toHaveText('')
+}
+async function tapCenter(page: Page) {
+  const box = (await page.locator('#viewport').boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+}
+
+test.describe('iPhone 主屏幕阅读界面', () => {
+  for (const dark of [false, true]) {
+    test(`书库与阅读页简洁全屏 ${dark ? '深色' : '浅色'}`, async ({ browser }) => {
+      const context = await browser.newContext(iphone)
+      const page = await context.newPage()
+      const errors: string[] = []
+      page.on('pageerror', error => errors.push(error.message))
+      try {
+        await setupApp(page, { kind: 'mixed', extraFiles: [novel], dark, viewport: iphone.viewport })
+        const suffix = dark ? 'dark' : 'light'
+        // 书库界面在手机上也进入沉浸，不再显示宿主顶栏。
+        await expect.poll(() => page.evaluate(() => window.standaloneImmersion.active)).toBe(true)
+        await page.screenshot({ path: join(shotDir, `reader-home-${suffix}.png`) })
+        await page.locator('#tab-library').click()
+        await page.screenshot({ path: join(shotDir, `reader-library-${suffix}.png`) })
+        await enterShelf(page)
+        await page.screenshot({ path: join(shotDir, `reader-shelf-${suffix}.png`) })
+        await page.locator('#tab-me').click()
+        await expect(page.locator('#btn-me-close')).toBeVisible()
+        await page.screenshot({ path: join(shotDir, `reader-me-${suffix}.png`) })
+        await openNovel(page)
+        // 打开正文后工具栏默认隐藏，只留常驻章节与进度。
+        await expect(page.locator('#app')).toHaveAttribute('data-controls', 'hidden')
+        await expect(page.locator('#meta-chapter')).toBeVisible()
+        await expect(page.locator('#meta-progress')).toContainText('第 1/6 章')
+        await page.screenshot({ path: join(shotDir, `reader-page-${suffix}.png`) })
+        await tapCenter(page)
+        await expect(page.locator('#app')).toHaveAttribute('data-controls', 'visible')
+        for (const id of ['toc-toggle', 'appearance-toggle', 'preferences-toggle', 'paging-toggle', 'bookmark-quick', 'back', 'progress']) await expect(page.locator(`#${id}`)).toBeVisible()
+        await expect(page.locator('#previous')).toBeHidden()
+        await expect(page.locator('#sync')).toHaveCSS('position', 'absolute')
+        await page.screenshot({ path: join(shotDir, `reader-controls-${suffix}.png`) })
+        await page.locator('#preferences-toggle').click()
+        await expect(page.locator('#pref-advanced')).toBeHidden()
+        await page.screenshot({ path: join(shotDir, `reader-typography-${suffix}.png`) })
+        await page.locator('#preferences [data-font-step="1"]').click()
+        await expect(page.locator('#font-size-value')).toHaveText('19')
+        await page.locator('#pref-advanced-toggle').click()
+        await expect(page.locator('#font-size')).toBeVisible()
+        await page.locator('#preferences [data-close-panel]').click()
+        await page.locator('#appearance-toggle').click()
+        await page.screenshot({ path: join(shotDir, `reader-theme-${suffix}.png`) })
+        await page.locator('#appearance [data-close-panel]').click()
+        await page.locator('#paging-toggle').click()
+        await expect(page.locator('#paging [data-proxy="mode"] [data-value="page"]')).toHaveAttribute('aria-pressed', 'true')
+        await page.screenshot({ path: join(shotDir, `reader-paging-${suffix}.png`) })
+        expect(errors).toEqual([])
+      } finally { await context.close() }
+    })
+  }
+
+  test('跟手翻页、边缘让给系统、书签开关与进度条跳章', async ({ browser }) => {
+    const context = await browser.newContext(iphone)
+    const page = await context.newPage()
+    try {
+      await setupApp(page, { kind: 'mixed', extraFiles: [novel], viewport: iphone.viewport })
+      await openNovel(page)
+      const box = (await page.locator('#viewport').boundingBox())!, y = box.y + box.height / 2
+      const pageIndex = () => page.locator('#position').getAttribute('data-page')
+      expect(await pageIndex()).toBe('0')
+      // 拖动过程中正文跟随手指移动。
+      await page.mouse.move(box.x + 300, y); await page.mouse.down()
+      await page.mouse.move(box.x + 250, y, { steps: 3 }); await page.mouse.move(box.x + 150, y, { steps: 4 })
+      await expect(page.locator('.flow-content')).toHaveAttribute('style', /translate3d\(-1\d\dpx/)
+      await page.mouse.up()
+      await expect.poll(pageIndex).toBe('1')
+      await expect(page.locator('.flow-content')).not.toHaveAttribute('style', /translate3d/)
+      // 慢速拖动距离不足时回弹不翻页（快速轻扫 24px 以上会按甩动翻页）。
+      await page.mouse.move(box.x + 300, y); await page.mouse.down()
+      for (let step = 1; step <= 6; step++) { await page.mouse.move(box.x + 300 - step * 5, y); await page.waitForTimeout(40) }
+      await page.mouse.up()
+      await page.waitForTimeout(400)
+      expect(await pageIndex()).toBe('1')
+      // 左边缘起手的横滑留给系统返回手势。
+      await page.mouse.move(box.x + 8, y); await page.mouse.down(); await page.mouse.move(box.x + 200, y, { steps: 6 }); await page.mouse.up()
+      await page.waitForTimeout(400)
+      expect(await pageIndex()).toBe('1')
+      // 桌面鼠标拖动会选中文字（触屏横滑不会），先清掉，避免点按被当作选字。
+      await page.evaluate(() => getSelection()?.removeAllRanges())
+      // 点按左右 30% 区域翻页。
+      await page.mouse.click(box.x + box.width * .2, y)
+      await expect.poll(pageIndex).toBe('0')
+      await tapCenter(page)
+      await page.locator('#bookmark-quick').click()
+      await expect(page.locator('#bookmark-quick')).toHaveAttribute('aria-pressed', 'true')
+      await page.locator('#bookmark-quick').click()
+      await expect(page.locator('#bookmark-quick')).toHaveAttribute('aria-pressed', 'false')
+      await page.locator('#chapter-next').click()
+      await expect(page.locator('#position')).toHaveAttribute('data-section', '1')
+      await page.locator('#progress').fill('4')
+      await expect(page.locator('#position')).toHaveAttribute('data-section', '3')
+    } finally { await context.close() }
+  })
+
+  test('长条漫自动连续滚动，普通漫画保持单页', async ({ browser }) => {
+    const context = await browser.newContext(iphone)
+    const page = await context.newPage()
+    try {
+      await setupApp(page, { kind: 'mixed', viewport: iphone.viewport })
+      await page.locator('#tab-library').click()
+      await enterShelf(page)
+      await page.locator('.library-card[data-file-id="202"]').click()
+      await expect(page.locator('#viewport')).toHaveAttribute('data-format', 'comic')
+      await expect(page.locator('#comic-mode')).toHaveValue('scroll')
+      await page.screenshot({ path: join(shotDir, 'reader-strip.png') })
+      await tapCenter(page)
+      await page.locator('#back').click()
+      await page.locator('.library-card[data-file-id="201"]').click()
+      await expect(page.locator('#viewport')).toHaveAttribute('data-format', 'comic')
+      await page.waitForTimeout(500)
+      await expect(page.locator('#comic-mode')).toHaveValue('single')
+      await page.screenshot({ path: join(shotDir, 'reader-comic.png') })
+    } finally { await context.close() }
+  })
+})

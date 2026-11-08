@@ -155,6 +155,7 @@ export abstract class FlowReader implements ReaderView {
         const page = this.page(), next = page.index + delta
         if (next >= 0 && next < page.count) {
           this.pager.scrollLeft = next * this.stride
+          this.clearDrag()
           this.remember(); this.afterLayout(); this.context.changed()
           return
         }
@@ -162,6 +163,49 @@ export abstract class FlowReader implements ReaderView {
       await this.restoreContent({ format: this.format, index: this.index + delta, ratio: this.paged && delta < 0 ? 1 : 0 })
     })
   }
+  /** 跟手预览只改变正文 transform，不滚动、不写进度；越过本章边界且无相邻章节时加阻尼。 */
+  dragPage(dx: number) {
+    if (!this.paged || this.restoring || this.stopped || !this.article.textContent?.trim() && !this.article.querySelector('img')) return false
+    const state = this.navigationState(), width = Math.max(1, this.stride)
+    const blocked = dx < 0 ? !state.canNext : dx > 0 ? !state.canPrevious : false
+    const offset = blocked ? dx * .25 : Math.max(-width, Math.min(width, dx))
+    this.article.style.transition = 'none'
+    this.article.style.transform = offset ? `translate3d(${offset}px,0,0)` : ''
+    return true
+  }
+  settlePage(delta: -1 | 0 | 1) {
+    return this.run(async () => {
+      const state = this.navigationState()
+      const allowed = delta < 0 ? state.canPrevious : delta > 0 ? state.canNext : false
+      const target = allowed ? -delta * Math.max(1, this.stride) : 0
+      await this.animateDrag(target)
+      if (!allowed) { this.clearDrag(); return }
+      const page = this.page(), next = page.index + delta
+      if (next >= 0 && next < page.count) {
+        // 与清除 transform 同一任务内改写 scrollLeft，画面停在新页不闪回。
+        this.pager.scrollLeft = next * this.stride
+        this.clearDrag(); this.remember(); this.afterLayout(); this.context.changed()
+        return
+      }
+      try { await this.restoreContent({ format: this.format, index: this.index + delta, ratio: delta < 0 ? 1 : 0 }) }
+      finally { this.clearDrag() }
+    })
+  }
+  private animateDrag(target: number) {
+    const current = this.article.style.transform
+    if (!current && !target) return Promise.resolve()
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    return new Promise<void>((resolve) => {
+      let done = false
+      const finish = () => { if (done) return; done = true; this.article.removeEventListener('transitionend', finish); clearTimeout(timer); resolve() }
+      const timer = setTimeout(finish, reduce ? 0 : 320)
+      this.article.addEventListener('transitionend', finish)
+      this.article.style.transition = reduce ? 'none' : 'transform 220ms cubic-bezier(.2,.8,.2,1)'
+      this.article.style.transform = target ? `translate3d(${target}px,0,0)` : 'translate3d(0,0,0)'
+      if (reduce) finish()
+    })
+  }
+  private clearDrag() { this.article.style.transition = ''; this.article.style.transform = '' }
   restore(location: Location) { return this.run(() => this.restoreContent(location)) }
   private async restoreContent(location: Location) {
     const active = ++this.generation
@@ -176,6 +220,7 @@ export abstract class FlowReader implements ReaderView {
       if (active !== this.generation) return
       this.index = index; this.offsetBase = this.offsetFor(index)
       this.article.replaceChildren(fragment)
+      this.clearDrag()
       this.applyStyles()
       this.scroller.scrollTop = 0; this.scroller.scrollLeft = 0
       this.lastLocation = { ...location, index }; this.anchorPage = 0

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { seedReaderSource, enterReaderShelf, expandReaderFilters, revealReader, closeReaderPanel } from './reader-helpers'
+import { seedReaderSource, enterReaderShelf, expandReaderFilters, revealReader, closeReaderPanel, openReaderSettings, openReaderBookmarks, flushReaderSave } from './reader-helpers'
 import type { Progress } from '../../reader/state'
 const base = 'http://127.0.0.1:4187'
 async function authenticate(page: Page) {
@@ -117,7 +117,7 @@ test('图书在真实沙箱中阅读长 TXT、EPUB 2/3 和含中文字体的 PDF
   await frame.locator('#toc-toggle').click()
   await frame.locator('#toc').selectOption({ label: '第2章 终点' })
   await expect(frame.locator('#viewport')).toContainText('超过 256 KiB 的正文结尾')
-  await frame.locator('#bookmarks-toggle').click()
+  await openReaderBookmarks(frame)
   await frame.locator('#bookmark-name').fill('末尾书签')
   await frame.locator('#add-bookmark').click()
   await expect(frame.getByRole('textbox', { name: '修改书签名称' })).toHaveValue('末尾书签')
@@ -156,12 +156,12 @@ test('图书在真实沙箱中阅读长 TXT、EPUB 2/3 和含中文字体的 PDF
     const style = getComputedStyle(node)
     return Math.abs(width - (node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)) * scale)
   }, zoom)
-  await frame.locator('#preferences-toggle').click()
+  await openReaderSettings(frame)
   await frame.locator('#zoom').selectOption('1.5')
   await expect.poll(() => pdfWidthError(1.5)).toBeLessThan(1)
   await frame.locator('#zoom').selectOption('1')
   await expect.poll(() => pdfWidthError()).toBeLessThan(1)
-  await frame.locator('#preferences-toggle').click()
+  await openReaderSettings(frame)
   await page.screenshot({ path: info.outputPath('图书-PDF-桌面.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   // 旧画布仍可见不代表已适配窄屏，必须等待实际适宽重绘再验收。
@@ -196,7 +196,7 @@ test('漫画自然页序、两种模式、目录分章和有界归档读取', as
   await expect(frame.locator('#reading-status')).toHaveText('')
   await expect(frame.locator('#toc option')).toHaveText(['1 · 1.png', '2 · 2.png', '3 · 10.png'])
   await expect.poll(() => frame.locator('img[alt="1.png"]').evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(240)
-  await frame.locator('#preferences-toggle').click()
+  await openReaderSettings(frame)
   await frame.locator('#comic-mode').selectOption('single')
   await expect(frame.locator('.comic-page')).toHaveCount(1)
   await frame.locator('#next').click(); await expect(frame.locator('#position')).toHaveText('2 / 3')
@@ -220,7 +220,7 @@ test('漫画自然页序、两种模式、目录分章和有界归档读取', as
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(frame.locator('#app')).toHaveClass(/immersive/)
   await revealReader(page)
-  await frame.locator('#preferences-toggle').click()
+  await openReaderSettings(frame)
   await frame.locator('#comic-mode').selectOption('scroll')
   await expect(frame.locator('.comic-page')).toHaveCount(3)
   expect(await frame.locator('body').evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -234,7 +234,7 @@ test('跨浏览器恢复进度、书签及并发冲突保护', async ({ page, br
   await first.getByRole('button', { name: /中文.pdf/ }).click()
   await expect(first.locator('#reading-status')).toHaveText('')
   await first.locator('#next').click(); await expect(first.locator('#sync')).toHaveText('已同步')
-  await first.locator('#bookmarks-toggle').click(); await first.locator('#bookmark-name').fill('跨设备书签'); await first.locator('#add-bookmark').click()
+  await openReaderBookmarks(first); await first.locator('#bookmark-name').fill('跨设备书签'); await first.locator('#add-bookmark').click()
   await expect(first.getByRole('textbox', { name: '修改书签名称' })).toHaveValue('跨设备书签')
   const context = await browser.newContext({ baseURL: base })
   const secondPage = await context.newPage(); await authenticate(secondPage); await secondPage.goto('/apps/reader'); await secondPage.bringToFront()
@@ -245,7 +245,7 @@ test('跨浏览器恢复进度、书签及并发冲突保护', async ({ page, br
   await expect(second.locator('#reader')).toBeVisible()
   await expect(second.locator('#reading-status')).toHaveText('')
   await expect(second.locator('#position')).toHaveText('2 / 3')
-  await second.locator('#bookmarks-toggle').click(); await expect(second.getByRole('textbox', { name: '修改书签名称' })).toHaveValue('跨设备书签')
+  await openReaderBookmarks(second); await expect(second.getByRole('textbox', { name: '修改书签名称' })).toHaveValue('跨设备书签')
   await second.locator('#next').click(); await expect(second.locator('#sync')).toHaveText('已同步')
   await page.bringToFront()
   await first.locator('#previous').click()
@@ -275,17 +275,17 @@ test('长漫画窗口、末页定位及 TXT 调整字号后保持字符位置', 
   await expect(frame.locator('#reading-status')).toHaveText('')
   await frame.locator('#viewport').evaluate((node) => { node.scrollTop = 1000 })
   await revealReader(page)
-  await frame.locator('#retry-save').click(); await expect(frame.locator('#sync')).toHaveText('已同步')
+  await flushReaderSave(frame); await expect(frame.locator('#sync')).toHaveText('已同步')
   // 同一阅读馆保留漫画进度；按 TXT 节点取记录，不能假设最近列表首条就是当前书。
   const textId = await frame.locator('body').evaluate(async () => (await window.tgdrive.files.stat({ path: '/测试图书/长篇.txt' })).id)
   const saved = () => frame.locator('body').evaluate(async (_node, id) => (await window.tgdrive.storage.get<Progress>(`progress:${id}`))?.value.location.offset ?? -1, textId)
   await expect.poll(saved).toBeGreaterThan(100)
   const before = await saved()
-  await frame.locator('#preferences-toggle').click()
+  await openReaderSettings(frame)
   await frame.locator('#font-size').evaluate((node) => { const range=node as HTMLInputElement; range.value='26'; range.dispatchEvent(new Event('change')); range.value='30'; range.dispatchEvent(new Event('change')) })
   await expect(frame.locator('.flow-content')).toHaveCSS('font-size','30px')
   await closeReaderPanel(page)
-  await frame.locator('#retry-save').click(); await expect(frame.locator('#sync')).toHaveText('已同步')
+  await flushReaderSave(frame); await expect(frame.locator('#sync')).toHaveText('已同步')
   expect(Math.abs((await saved())-before)).toBeLessThan(150)
 })
 

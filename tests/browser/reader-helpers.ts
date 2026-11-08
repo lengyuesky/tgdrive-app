@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type FrameLocator, type Page } from '@playwright/test'
 /** 夹具直接使用现行来源存储，不借助已移除的目录设置。 */
 export async function seedReaderSource(page: Page, id: string, path: string, legacyPreferences = true) {
   expect(await (await page.request.get('/__apps_fixture')).json()).toEqual({ fixture: 'tgdrive-apps-tests' })
@@ -59,4 +59,19 @@ export async function revealReader(page: Page) {
 export async function closeReaderPanel(page: Page) {
   const frame = page.frameLocator('iframe')
   if (await frame.locator('[role="dialog"]').count()) await page.keyboard.press('Escape')
+}
+/** 1.1.0 起排版面板分两级：打开排版并展开「更多设置」，原有全部下拉框（模式、主题、缩放等）才可操作。 */
+export async function openReaderSettings(frame: FrameLocator) {
+  await frame.locator('#preferences-toggle').click()
+  const toggle = frame.locator('#pref-advanced-toggle')
+  if (await toggle.isVisible() && await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click()
+}
+/** 书签列表收在「更多」里，顶栏只保留快捷书签开关。 */
+export async function openReaderBookmarks(frame: FrameLocator) {
+  await frame.locator('#reader-more-toggle').click()
+  await frame.locator('#bookmarks-toggle').click()
+}
+/** 「重试同步」只在失败时显示；测试用它立即落盘时直接派发点击，不依赖可见性。 */
+export async function flushReaderSave(frame: FrameLocator) {
+  await frame.locator('#retry-save').dispatchEvent('click')
 }

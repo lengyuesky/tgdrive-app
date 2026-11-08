@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createReaderShelf, enterReaderShelf, expandReaderFilters, revealReader } from './reader-helpers'
+import { createReaderShelf, enterReaderShelf, expandReaderFilters, revealReader, openReaderSettings } from './reader-helpers'
 
 const host = 'http://127.0.0.1:4187'
 const frame = (page: Page) => page.frameLocator('iframe')
@@ -11,7 +11,7 @@ async function install(page: Page) {
   const index = await (await page.request.get('/api/apps')).json()
   for (const app of index.installed) expect((await page.request.delete(`/api/apps/${app.manifest.id}?purge_data=true`)).ok()).toBe(true)
   const reader = index.available.find((app: { manifest: { id: string } }) => app.manifest.id === 'reader')
-  expect(reader.manifest.version).toBe('1.0.5')
+  expect(reader.manifest.version).toBe('1.1.0')
   expect((await page.request.post('/api/apps/catalog/reader/install', { data: { digest: reader.digest } })).ok()).toBe(true)
   expect((await page.request.patch('/api/apps/reader/scope', { data: { mode: 'selected', paths: ['/混合书库'] } })).ok()).toBe(true)
   await page.goto('/apps/reader')
@@ -135,7 +135,7 @@ for (const width of [390, 1280]) {
       await expect.poll(() => viewport.evaluate(node => node.scrollTop)).toBeGreaterThan(100)
     }
     await revealReader(page)
-    await frame(page).locator('#preferences-toggle').click()
+    await openReaderSettings(frame(page))
     expect(await viewport.boundingBox()).toEqual(bounds)
     await frame(page).locator('#fit').selectOption('page')
     await expect.poll(async () => (await image.boundingBox())!.height).toBe(Math.min(900, width * 1.5))
@@ -161,10 +161,9 @@ test('新版书库截图来自手动创建的真实宿主目录书库', async ({
   await enterReaderShelf(page)
   await expect(frame(page).locator('#items .library-card')).toHaveCount(6)
   await page.locator('iframe').screenshot({ path: info.outputPath('mobile-library.png') })
-  await frame(page).locator('#btn-mobile-libraries').click()
-  await expect(frame(page).locator('#library-sidebar')).toBeVisible()
-  await page.locator('iframe').screenshot({ path: info.outputPath('mobile-sidebar.png') })
-  await frame(page).locator('#btn-sidebar-dismiss').click()
+  // 手机不再有抽屉：书库入口是书库页顶部的横滑筛选标签。
+  await expect(frame(page).locator('#btn-mobile-libraries')).toHaveCount(0)
+  await expect(frame(page).locator('#mobile-library-chips [aria-current="page"]')).toHaveText('我的阅读书库')
   await frame(page).locator('#items .library-card').filter({ hasText: '漫画.cbz' }).click()
   await expect(frame(page).locator('#position')).not.toHaveText('')
   await expect.poll(async () => (await frame(page).locator('#viewport img').boundingBox())!.width).toBe(390)

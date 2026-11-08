@@ -94,7 +94,9 @@ test('短视频安装、实际播放、收藏、设置与移动端布局', async
   await expect.poll(() => frame.locator('#video').evaluate((node) => (node as HTMLVideoElement).currentTime)).toBeGreaterThan(0.1)
   await page.screenshot({ path: testInfo.outputPath('短视频桌面.png') })
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(frame.getByRole('button', { name: '下一个视频', exact: true })).toBeVisible()
+  // 手机竖屏只保留右侧图标与上下滑动切换，↑↓ 按钮组隐藏。
+  await expect(frame.locator('#favorite')).toBeVisible()
+  await expect(frame.getByRole('button', { name: '下一个视频', exact: true })).toBeHidden()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect(await frame.locator('#video').evaluate((node) => node.getBoundingClientRect().height <= innerHeight)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath('短视频手机.png') })

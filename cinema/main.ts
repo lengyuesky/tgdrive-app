@@ -1,6 +1,8 @@
 import { seriesOptions, SleepTimer, type SeriesOptions } from './play-options'
+import '../ui/base.css'
 import './style.css'
 import './libraries.css'
+import { icon as sharedIcon, type IconName } from '../ui/icons'
 import type { FileEntry, RecordValue } from '../sdk/types'
 import { VIDEO_EXTENSIONS, extension, isVideo, naturalOrder, parentPath, preferences, sizeText, subtitleFiles, timeText, title, validProgress, type CinemaFavorite, type CinemaPreferences, type CinemaProgress } from './model'
 import { ReadScheduler, RangeFile, isAbort } from './io'
@@ -10,6 +12,7 @@ import { newLibraryId, LibrariesStore, LibraryAccess, requireDirectory, withinDi
 import { LibraryManager } from './libraries-ui'
 import { PlaybackSession, type PlaybackInfo } from './media'
 import { Captions, readSubtitle, type SubtitleTrack } from './subtitles'
+import { applyTheme, fullscreenOrder, ImmersiveSync, MOBILE_QUERY } from './shell'
 
 const drive = window.tgdrive
 const lifetime = new AbortController()
@@ -18,25 +21,35 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const show = (id: string, visible: boolean) => { $(id).hidden = !visible }
 const text = (id: string, value: string) => { $(id).textContent = value }
 const value = (id: string) => $<HTMLInputElement>(id).value
-const icons: Record<string, string> = {
-  home: 'M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z',
-  grid: 'M3 3h7v7H3Zm11 0h7v7h-7ZM3 14h7v7H3Zm11 0h7v7h-7Z',
-  heart: 'M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z',
-  clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3 2',
-  folder: 'M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z',
-  settings: 'M4 7h16M4 17h16M8 4v6m8 4v6',
-  back: 'm10 5-7 7 7 7M3 12h18', refresh: 'M20 7v5h-5m-11 5v-5h5M5 8a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3',
-  play: 'm8 4 13 8-13 8Z', pause: 'M7 4v16M17 4v16', info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 8v6m0-10v1',
-  search: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6', film: 'M4 3h16v18H4ZM4 8h16M4 16h16M8 3v18M16 3v18',
-  close: 'm6 6 12 12M6 18 18 6', download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5', rewind: 'M11 5 2 12l9 7Zm10 0-9 7 9 7Z', forward: 'm3 5 9 7-9 7Zm10 0 9 7-9 7Z',
-  previous: 'M4 4v16M20 5 7 12l13 7Z', next: 'M20 4v16M4 5l13 7-13 7Z', volume: 'M3 9h4l5-5v16l-5-5H3Zm13-2a7 7 0 0 1 0 10m3-13a11 11 0 0 1 0 16',
-  pip: 'M3 3h18v18H3Zm9 9h7v6h-7Z', fullscreen: 'M3 9V3h6m6 0h6v6M3 15v6h6m6 0h6v-6',
+// 通用图标取自 ui/icons；播放器专用图标在此补充，同样为 24×24 描边绘制。
+const sharedIcons = new Set<string>(['back', 'close', 'more', 'search', 'home', 'library', 'settings', 'exit', 'play', 'pause', 'heart', 'clock', 'grid', 'download', 'refresh', 'folder', 'prev', 'next'])
+const aliases: Record<string, string> = { previous: 'prev' }
+const localIcons: Record<string, string> = {
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.4"/>',
+  film: '<rect x="4" y="3.5" width="16" height="17" rx="1.5"/><path d="M4 8h16M4 16h16M8 3.5v17M16 3.5v17"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  restart: '<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4.5v4h4"/><path d="M10.5 9.5v5l4-2.5z" fill="currentColor"/>',
+  rewind: '<path d="M11 6.5 4.5 12l6.5 5.5zM19.5 6.5 13 12l6.5 5.5z" fill="currentColor"/>',
+  forward: '<path d="M13 6.5l6.5 5.5-6.5 5.5zM4.5 6.5 11 12l-6.5 5.5z" fill="currentColor"/>',
+  volume: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  pip: '<rect x="3.5" y="5" width="17" height="14" rx="1.5"/><rect x="12" y="12" width="6" height="4.5" rx="1" fill="currentColor"/>',
+  fullscreen: '<path d="M4 9V4h5M15 4h5v5M4 15v5h5M20 15v5h-5"/>',
+}
+function iconMarkup(name: string) {
+  const key = aliases[name] ?? name
+  if (sharedIcons.has(key)) return sharedIcon(key as IconName)
+  return `<svg class="tg-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${localIcons[key] ?? localIcons.film}</svg>`
 }
 function icon(name: string) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), path = document.createElementNS(svg.namespaceURI, 'path')
-  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); path.setAttribute('d', icons[name] ?? icons.film); svg.append(path); return svg
+  // 标记来自固定图标表，不拼接外部输入。
+  const template = document.createElement('template'); template.innerHTML = iconMarkup(name)
+  return template.content.firstElementChild as SVGSVGElement
 }
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach(node => node.replaceChildren(icon(node.dataset.icon!)))
+// 宿主就绪前先按系统深浅色显示启动页，就绪后以主站主题为准。
+const mobileQuery = window.matchMedia?.(MOBILE_QUERY)
+let dark = !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
+applyTheme(document.documentElement, dark)
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', body = '') { const node = document.createElement(tag); node.className = className; node.textContent = body; return node }
 let toastTimer: ReturnType<typeof setTimeout>
 function toast(message: string) { text('toast', message); show('toast', true); clearTimeout(toastTimer); toastTimer = setTimeout(() => show('toast', false), 5500) }
@@ -67,7 +80,27 @@ let series = seriesOptions(null), seriesKey = '', seriesRecord: RecordValue<Seri
 const sleep = new SleepTimer(() => { cancelNext(); video.pause(); persist(true); text('play-message', '定时播放已停止'); show('play-message', true); $<HTMLSelectElement>('sleep-timer').value = '0' })
 let seriesSaving = Promise.resolve()
 let closingPlayback = Promise.resolve()
-const detail = $<HTMLDialogElement>('detail'), player = $('player')
+const detail = $<HTMLDialogElement>('detail'), player = $('player'), moreMenu = $<HTMLDialogElement>('more-menu')
+function closeMore() { if (moreMenu.open) moreMenu.close() }
+// 详情顶部背景：海报解码完成后按小尺寸绘制到画布再模糊放大，不重新请求图片。
+const detailBackdrop = $('detail-backdrop')
+new MutationObserver(() => {
+  const image = $('detail-poster').querySelector('img')
+  if (!image?.naturalWidth) { detailBackdrop.replaceChildren(); return }
+  if (detailBackdrop.dataset.source === image.src && detailBackdrop.firstElementChild) return
+  const canvas = document.createElement('canvas'), width = 48, height = Math.max(1, Math.round(width * image.naturalHeight / image.naturalWidth))
+  canvas.width = width; canvas.height = height
+  try { canvas.getContext('2d')?.drawImage(image, 0, 0, width, height) } catch { return }
+  detailBackdrop.dataset.source = image.src; detailBackdrop.replaceChildren(canvas)
+}).observe($('detail-poster'), { childList: true, subtree: true })
+// 手机搜索栏默认收起，由顶栏搜索图标展开；桌面始终显示。
+let searchOpen = false
+function syncSearch() {
+  const available = !$('search-form').hidden
+  show('search-toggle', available)
+  $('search-form').classList.toggle('collapsed', !searchOpen)
+  $('search-toggle').setAttribute('aria-expanded', String(available && searchOpen))
+}
 function showPlayer(visible: boolean) {
   show('player', visible)
   document.querySelectorAll<HTMLElement>('.sidebar, #main, .bottom-nav').forEach(node => { node.inert = visible })
@@ -107,7 +140,7 @@ async function navigate(next: typeof view, libraryId: string | null = null) {
   pageController.abort(); art?.clear(); closeDetail()
   await closePlayer(false)
   if (generation !== navigationGeneration) return
-  view = next; activeLibraryId = libraryId; currentRoot = null; directory = null; directoryMode = false; query = ''; format = ''
+  view = next; activeLibraryId = libraryId; searchOpen = false; currentRoot = null; directory = null; directoryMode = false; query = ''; format = ''
   episodes = []; episodesComplete = false; heroFile = undefined; library.setScope(null); resetPages()
   $<HTMLInputElement>('search').value = ''; $<HTMLSelectElement>('format').value = ''
   await loadPage()
@@ -149,7 +182,7 @@ async function loadPage() {
   text('page-label', ''); text('source-label', ''); $('source-label').title = ''; text('list-status', '正在读取媒体库设置…')
   show('list-retry', false); $('items').setAttribute('aria-busy', 'true')
   $('main').scrollTop = 0
-  text('page-title', { home: '今晚，看点什么？', library: '我的媒体库', favorites: '把喜欢，留在身边', history: '每一次相遇，都有记录' }[view])
+  text('page-title', { home: '影视', library: '媒体库', favorites: '收藏', history: '观看历史' }[view])
   text('section-title', recordView ? view === 'history' ? '观看历史' : '我的收藏' : '我的媒体库')
   clearHistory.hidden = view !== 'history'
   try {
@@ -212,6 +245,7 @@ async function loadPage() {
   } catch (error) {
     if (!signal.aborted) { text('list-status', `${(error as Error).message}；可重试加载本页。`); show('empty', false); show('list-retry', true) }
   } finally {
+    syncSearch()
     if (!signal.aborted) $('items').setAttribute('aria-busy', 'false')
   }
 }
@@ -331,10 +365,14 @@ function syncStatus(message: string, conflict: boolean) {
   if (drive.can?.('ui.setExitMessage')) void drive.ui.setExitMessage?.(message.includes('未同步') ? '观看进度尚未同步，确定离开？' : '').catch(() => {})
   text('sync-status', message); show('sync-remote', conflict); show('sync-local', conflict); show('sync-retry', !conflict && message.includes('未同步'))
 }
-async function immersive(active: boolean) {
+// 宿主沉浸只由此处统一同步：手机常驻沉浸（主题底色），播放时黑底，桌面退出播放即恢复宿主顶栏。
+let hostShell: ImmersiveSync | undefined
+async function immersive() {
   const context = await drive.ready
-  if (context.capabilities?.includes('ui.setImmersive')) await drive.ui.setImmersive(active, active && context.capabilities.includes('ui.immersiveBackground') ? { background: '#07070b' } : undefined)
+  hostShell ??= new ImmersiveSync(drive, context, report)
+  return hostShell.update({ mobile: !!mobileQuery?.matches, playing: !player.hidden, dark })
 }
+async function leaveHost() { await hostShell?.dispose() }
 async function startPlayback(file: FileEntry, restart = false, suppliedQueue?: FileEntry[]) {
   const intent = ++startIntent, requiredId = playing ? playingLibraryId : detail.open ? detailLibraryId : activeLibraryId ?? undefined
   navigationGeneration++
@@ -356,7 +394,7 @@ async function startPlayback(file: FileEntry, restart = false, suppliedQueue?: F
   $<HTMLFieldSetElement>('series-options').disabled = true
   text('series-status', '正在读取本剧设置…')
   try {
-    await immersive(true); signal.throwIfAborted()
+    await immersive(); signal.throwIfAborted()
     const { file: current, library: root } = await scopedVideo(file, signal, requiredId)
     signal.throwIfAborted(); playing = current; playingRoot = root; playingLibraryId = root.id; text('playing-title', title(current.name))
     library.setScope(root.directoryPath)
@@ -466,7 +504,7 @@ async function closePlayer(reload = true, keepIntent = false) {
   if (document.fullscreenElement) await document.exitFullscreen().catch(() => {})
   showPlayer(false); show('play-options', false); player.classList.remove('css-fullscreen'); playing = undefined; playingRoot = null; playingLibraryId = undefined
   closingPlayback = (async () => {
-    await Promise.all([oldStore?.flush(), immersive(false)])
+    await Promise.all([oldStore?.flush(), immersive()])
     if (reload) { await loadPage(); $('main').focus() }
   })()
   await closingPlayback
@@ -490,9 +528,15 @@ function ended() {
 async function fullscreen() {
   if (document.fullscreenElement) { await document.exitFullscreen(); return }
   if (player.classList.contains('css-fullscreen')) { player.classList.remove('css-fullscreen'); $('fullscreen').setAttribute('aria-label', '全屏播放'); return }
-  if (player.requestFullscreen) { try { await player.requestFullscreen(); return } catch { /* 拒绝后继续降级，不影响正常播放。 */ } }
-  const v = video as HTMLVideoElement & { webkitEnterFullscreen?: () => void }
-  if (v.webkitEnterFullscreen && v.readyState) { try { v.webkitEnterFullscreen(); return } catch { /* 使用页面沉浸。 */ } }
+  // 手机优先 iOS 原生视频全屏，其次标准全屏；均被拒绝时降级为页面沉浸，不影响正常播放。
+  for (const method of fullscreenOrder(video, player, !!mobileQuery?.matches)) {
+    if (method === 'page') break
+    try {
+      if (method === 'native-video') (video as HTMLVideoElement & { webkitEnterFullscreen: () => void }).webkitEnterFullscreen()
+      else await player.requestFullscreen()
+      return
+    } catch { /* 被拒绝时继续下一种方式。 */ }
+  }
   player.classList.add('css-fullscreen'); $('fullscreen').setAttribute('aria-label', '退出全屏'); toast('已进入页面沉浸，可使用返回或退出全屏按钮离开')
 }
 
@@ -501,8 +545,20 @@ document.querySelector('.brand')!.addEventListener('click', event => { event.pre
 for (const id of ['source','empty-source','new-library']) on(id, 'click', () => manager.edit())
 for (const id of ['settings','mobile-source','library-back']) on(id, 'click', () => navigate('library'))
 on('library-edit-current', 'click', () => { const item = configSnapshot?.config.libraries.find(item => item.id === activeLibraryId); if (item) return manager.edit(item) })
-for (const id of ['exit','mobile-exit']) on(id, 'click', async () => { await closePlayer(false); await manager.flush(); await drive.ui.close() })
-on('refresh', 'click', () => { closeDetail(); library.clear(); resetPages(); return loadPage() })
+for (const id of ['exit', 'mobile-exit', 'more-exit']) on(id, 'click', async () => { closeMore(); await closePlayer(false); await manager.flush(); await leaveHost(); await drive.ui.close() })
+function refresh() { closeDetail(); library.clear(); resetPages(); return loadPage() }
+on('refresh', 'click', refresh)
+on('more-toggle', 'click', () => { if (!moreMenu.open) moreMenu.showModal() })
+on('more-cancel', 'click', closeMore)
+// 点击面板外的遮罩关闭“更多”。
+moreMenu.addEventListener('click', event => { if (event.target === moreMenu) closeMore() })
+on('more-refresh', 'click', () => { closeMore(); return refresh() })
+on('more-new', 'click', () => { closeMore(); return manager.edit() })
+on('more-settings', 'click', () => { closeMore(); return navigate('library') })
+on('search-toggle', 'click', () => {
+  searchOpen = !searchOpen; syncSearch()
+  if (searchOpen) $('search').focus()
+})
 on('list-retry', 'click', loadPage)
 on('detail-retry', 'click', () => selected && openDetail(selected))
 on('directory-mode', 'click', () => { if (!currentRoot) return; directoryMode = !directoryMode; directory = currentRoot.directoryPath; resetPages(); return loadPage() })
@@ -663,11 +719,14 @@ drive.on('files.changed', (value) => {
 })
 drive.on('sync.hint', refreshLists)
 drive.on('scope.changed', refreshLists)
-window.addEventListener('pagehide', () => { sleep.clear(); clearTimeout(hostEventTimer); pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
+window.addEventListener('pagehide', () => { void leaveHost(); sleep.clear(); clearTimeout(hostEventTimer); pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
 async function boot() {
   const signal = lifetime.signal
   const context = await drive.ready
   signal.throwIfAborted()
+  dark = !!context.dark; applyTheme(document.documentElement, dark)
+  // 手机打开即隐藏宿主顶栏；插件自带返回网盘与媒体库设置入口。
+  void immersive()
   show('detail-show-file', !!drive.can?.('ui.showFile')); show('detail-file-info', !!drive.can?.('ui.fileDetails'))
   await drive.lifecycle?.migrate(context.data_schema ?? 1, async signal => { await librariesStore.load(signal) })
   signal.throwIfAborted()
@@ -702,5 +761,9 @@ async function initialize() {
   } finally { booting = false }
 }
 on('boot-retry', 'click', initialize)
-on('boot-exit', 'click', () => drive.ui.close())
+drive.on('theme.changed', value => {
+  dark = !!(value as { dark?: boolean } | undefined)?.dark; applyTheme(document.documentElement, dark); handle(immersive())
+})
+mobileQuery?.addEventListener?.('change', () => { closeMore(); handle(immersive()) })
+on('boot-exit', 'click', async () => { await leaveHost(); await drive.ui.close() })
 void initialize()

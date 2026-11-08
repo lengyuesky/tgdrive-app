@@ -219,6 +219,13 @@ export class ComicReader implements ReaderView {
     }
     return { format: 'comic', index, entry: this.pages[index]?.entry, ratio: this.continuous ? Math.min(1, Math.max(0, (scroll - top) / Math.max(1, this.heights[index] ?? 1))) : this.pageRatio }
   }
+  /** 已知尺寸至少 3 页（或全部页）后判断形状；多数页高宽比大于 2 视为长条漫。 */
+  pageShape(): 'tall' | 'normal' | undefined {
+    const sizes = [...this.dimensions.values()]
+    if (!sizes.length || sizes.length < Math.min(3, this.pages.length)) return undefined
+    const tall = sizes.filter(size => size.height > size.width * 2).length
+    return tall * 2 > sizes.length ? 'tall' : 'normal'
+  }
   navigationState() {
     const index = this.current().index, first = this.continuous ? index : this.spread[0] ?? index, last = this.continuous ? index : this.spread.at(-1) ?? index
     return { ...sectionState(index, this.sections.length), pageIndex: index, pageCount: this.sections.length,

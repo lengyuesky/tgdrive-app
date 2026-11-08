@@ -1,15 +1,16 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { createReaderShelf, enterReaderShelf, expandReaderFilters, revealReader } from './reader-helpers'
+import { createReaderShelf, enterReaderShelf, expandReaderFilters, revealReader, openReaderBookmarks } from './reader-helpers'
 
 /** 必须安装真实旧包，再从宿主更新界面升级，不用合成清单冒充旧版。 */
 const previousPackages = {
   '1.0.2': 'TGDRIVE_READER_PREVIOUS_STABLE_PACKAGE',
   '1.0.3': 'TGDRIVE_READER_PREVIOUS_LATEST_PACKAGE',
   '1.0.4': 'TGDRIVE_READER_PREVIOUS_PATCH_PACKAGE',
+  '1.0.5': 'TGDRIVE_READER_PREVIOUS_RELEASE_PACKAGE',
 }
-for (const [previousVersion, variable] of Object.entries(previousPackages)) test(`阅读馆真实 ${previousVersion} 升级到 1.0.5 保留已有书库、分组、进度和书签`, async ({ page }) => {
+for (const [previousVersion, variable] of Object.entries(previousPackages)) test(`阅读馆真实 ${previousVersion} 升级到 1.1.0 保留已有书库、分组、进度和书签`, async ({ page }) => {
   const previous = process.env[variable]
   test.skip(!previous, `需显式提供 ${variable} 指向隔离的 ${previousVersion} 包`)
   await page.setViewportSize({ width: 390, height: 844 })
@@ -46,6 +47,7 @@ for (const [previousVersion, variable] of Object.entries(previousPackages)) test
   await frame.locator('#items .library-card').filter({ hasText: '文字.txt' }).click()
   await expect(frame.locator('#position')).not.toHaveText('')
   await revealReader(page)
+  // 升级前运行的是旧包界面，书签与排版按钮仍直接位于工具栏。
   await frame.locator('#bookmarks-toggle').click()
   await frame.locator('#bookmark-name').fill('升级前书签')
   await frame.locator('#add-bookmark').click()
@@ -77,17 +79,17 @@ for (const [previousVersion, variable] of Object.entries(previousPackages)) test
   expect(before.records.some(record => record.key === 'preferences')).toBe(true)
   const grant = await (await page.request.get('/api/apps/reader')).json()
   const packagePath = process.env.TGDRIVE_APP_CATALOG_DIR
-    ? join(process.env.TGDRIVE_APP_CATALOG_DIR, 'reader-1.0.5.tgapp')
-    : new URL('../../apps/reader-1.0.5.tgapp', import.meta.url)
+    ? join(process.env.TGDRIVE_APP_CATALOG_DIR, 'reader-1.1.0.tgapp')
+    : new URL('../../apps/reader-1.1.0.tgapp', import.meta.url)
   await page.locator('input[type="file"][accept=".tgapp,.zip"]').setInputFiles({
-    name: 'reader-1.0.5.tgapp', mimeType: 'application/octet-stream', buffer: await readFile(packagePath),
+    name: 'reader-1.1.0.tgapp', mimeType: 'application/octet-stream', buffer: await readFile(packagePath),
   })
   const dialog = page.getByRole('dialog', { name: '更新应用', exact: true })
-  await expect(dialog).toContainText('1.0.5')
+  await expect(dialog).toContainText('1.1.0')
   await dialog.getByRole('button', { name: '同意并更新', exact: true }).click()
   await expect(dialog).toBeHidden()
   const upgraded = await (await page.request.get('/api/apps/reader')).json()
-  expect(upgraded.manifest.version).toBe('1.0.5')
+  expect(upgraded.manifest.version).toBe('1.1.0')
   expect(upgraded.digest).not.toBe(preview.digest)
   expect(upgraded.scope_mode).toBe(grant.scope_mode)
   expect(upgraded.scope).toEqual(grant.scope)
@@ -107,6 +109,6 @@ for (const [previousVersion, variable] of Object.entries(previousPackages)) test
   await frame.locator('#items .library-card').click()
   await expect(frame.locator('#position')).not.toHaveText('')
   await revealReader(page)
-  await frame.locator('#bookmarks-toggle').click()
+  await openReaderBookmarks(frame)
   await expect(frame.getByRole('textbox', { name: '修改书签名称', exact: true })).toHaveValue('升级前书签')
 })

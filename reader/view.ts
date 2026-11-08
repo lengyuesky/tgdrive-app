@@ -43,6 +43,12 @@ export interface ReaderView {
   highlight?(match: SearchMatch): void
   thumbnail?(index: number, signal: AbortSignal): Promise<ReaderThumbnail>
   pan?(x: number, y: number): void
+  /** 跟手翻页：按手指水平位移 dx 预览相邻页，返回 false 表示当前布局不支持跟手。 */
+  dragPage?(dx: number): boolean
+  /** 结束跟手：delta 为 0 时回弹，±1 时滑过整页后翻到相邻页或相邻章节。 */
+  settlePage?(delta: -1 | 0 | 1): Promise<void>
+  /** 漫画页面形状：已知页多数高宽比大于 2 时为 tall（长条漫），样本不足时 undefined。 */
+  pageShape?(): 'tall' | 'normal' | undefined
   open(location?: Location): Promise<void>
   current(): Location
   navigationState(): NavigationState
