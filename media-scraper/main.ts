@@ -1,7 +1,8 @@
 import './style.css'
 import type { FileEntry, ScraperHistory, ScraperRecord } from '../sdk/types'
 import { resultReason, stateName } from './model'
-import { DirectoryScrape, readRecord, type RunItem } from './runner'
+import { DirectoryScrape, readRecord, currentRecords, type RunItem } from './runner'
+import { listDirectoryRuns, readDirectoryRun, reconcileDirectoryRun, type DirectoryRecord, type RunSummary } from './journal'
 
 const drive = window.tgdrive, scrape = drive.scraper!
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -14,6 +15,7 @@ const lifetime = new AbortController(), mobileQuery = window.matchMedia('(max-wi
 let runner: DirectoryScrape
 let root: FileEntry | undefined, dark = false, configuring = false, preparing = false, savedUrl = ''
 let setup = new AbortController(), currentRecord: ScraperRecord | undefined, historyCursor: string | undefined
+let currentDirectoryRecord: DirectoryRecord | undefined, legacyHistory = false
 let notice: ReturnType<typeof setTimeout>, visibleResults = 100, renderedItems: RunItem[] | undefined
 const resultRows = new Map<string, { row: HTMLElement; state: HTMLElement; reason: HTMLElement }>()
 function message(error: unknown) {
@@ -32,7 +34,7 @@ function setTab(tab: string) {
   document.querySelectorAll<HTMLElement>('[data-tab]').forEach(item => {
     item.classList.toggle('active', item.dataset.tab === tab); item.setAttribute('aria-current', item.dataset.tab === tab ? 'page' : 'false')
   })
-  if (tab === 'history') void loadHistory(true).catch(message)
+  if (tab === 'history') void loadHistory(true, false).catch(message)
 }
 function controls() {
   const busy = preparing || configuring || !!runner?.busy
@@ -41,6 +43,7 @@ function controls() {
   button('cancel').disabled = !preparing && !runner?.busy
   show('cancel', preparing || !!runner?.busy)
   if (currentRecord) button('continue-record').disabled = busy || currentRecord.read_only || ['running', 'stopping'].includes(currentRecord.status) || !currentRecord.items.some(item => item.status !== 'done')
+  if (currentDirectoryRecord) button('continue-record').disabled = busy || currentDirectoryRecord.read_only || !currentDirectoryRecord.items.some(item => item.state !== 'done')
 }
 const itemNames = { waiting: '等待处理', checking: '正在检查', ready: '等待刮削', running: '正在刮削', done: '已完成', skipped: '已跳过', failed: '失败', stopped: '未完成' }
 function render() {
@@ -88,9 +91,14 @@ async function freshFiles(ids: number[], directory: FileEntry, signal: AbortSign
 async function verifyBeforeRetry(record: ScraperRecord) {
   if (record.read_only) throw new Error('恢复记录仅供查看，请选择目录重新刮削')
   if (['running', 'stopping'].includes(record.status)) throw new Error('原任务尚未停止，请稍后重试')
-  if (record.items.some(item => item.status === 'needs_verification')) await scrape.verify(record.id)
+  if (record.items.some(item => item.status === 'needs_verification')) {
+    await scrape.verify(record.id)
+    record = await readRecord(drive, record.id, setup.signal)
+    if (record.items.some(item => item.status === 'needs_verification')) throw new Error('仍有写入结果尚未确认，请稍后重试')
+  }
+  return record
 }
-async function start(retry = false, record?: ScraperRecord) {
+async function start(retry = false, record?: ScraperRecord | DirectoryRecord) {
   if (runner.busy || preparing || configuring || !root) return
   preparing = true; setup = new AbortController(); controls()
   const signal = setup.signal, expected = root
@@ -99,10 +107,18 @@ async function start(retry = false, record?: ScraperRecord) {
     if (!directory.is_dir || directory.path !== expected.path) throw new Error('所选目录已变化，请重新选择')
     let files: FileEntry[] | undefined
     if (retry) {
-      if (record) await verifyBeforeRetry(record)
-      else for (const id of runner.recordIds) { signal.throwIfAborted(); await verifyBeforeRetry(await readRecord(drive, id, signal)) }
-      const ids = record ? record.items.filter(item => item.status !== 'done').flatMap(item => item.files.map(file => file.id)) : runner.items.filter(item => item.state !== 'done').flatMap(item => item.group.files.map(file => file.id))
-      files = await freshFiles(ids, directory, signal)
+      if (record?.read_only) throw new Error('kind' in record && record.warning ? record.warning : '恢复记录仅供查看，请选择目录重新刮削')
+      const recordIds = record ? ('kind' in record ? record.recordIds : [record.id]) : runner.recordIds
+      const completed = new Set<number>()
+      for await (const saved of currentRecords(drive, recordIds, signal)) {
+        signal.throwIfAborted()
+        const actual = await verifyBeforeRetry(saved)
+        for (const item of actual.items) if (item.status === 'done') for (const file of item.files) completed.add(file.id)
+      }
+      const ids = record
+        ? ('kind' in record ? record.items.filter(item => item.state !== 'done') : record.items.filter(item => item.status !== 'done')).flatMap(item => item.files.map(file => file.id))
+        : runner.items.filter(item => item.state !== 'done').flatMap(item => item.group.files.map(file => file.id))
+      files = await freshFiles(ids.filter(id => !completed.has(id)), directory, signal)
       if (!files.length) throw new Error('未找到仍在所选目录中的未完成视频')
     }
     signal.throwIfAborted(); preparing = false
@@ -111,6 +127,15 @@ async function start(retry = false, record?: ScraperRecord) {
   } finally { preparing = false; controls() }
 }
 async function stop() { setup.abort(); await runner?.stop(); controls() }
+const runStateName = (phase: string) => ({ completed: '已结束', stopped: '已停止', failed: '已停止', idle: '未开始', scanning: '未完成', checking: '未完成', running: '未完成', stopping: '正在停止' } as Record<string, string>)[phase] ?? phase
+function renderDirectoryHistory(entries: RunSummary[]) {
+  for (const entry of entries) {
+    const card = node('article', '', 'history-card'), copy = node('div'), open = node('button', '查看结果')
+    const counts = entry.counts
+    copy.append(node('p', `${runStateName(entry.phase)} · 成功 ${counts.done} / ${counts.total} 个视频`, 'file-name'), node('p', `跳过 ${counts.skipped} · 失败 ${counts.failed}`, 'hint'), node('p', entry.root_path, 'file-path'), node('time', new Date(entry.created_at * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })))
+    open.onclick = () => { void openDirectoryRecord(entry.id).catch(message) }; card.append(copy, open); $('history').append(card)
+  }
+}
 function renderHistory(entries: ScraperHistory[]) {
   for (const entry of entries) {
     const card = node('article', '', 'history-card'), copy = node('div'), open = node('button', '查看结果')
@@ -118,15 +143,51 @@ function renderHistory(entries: ScraperHistory[]) {
     open.onclick = () => { void openRecord(entry.id).catch(message) }; card.append(copy, open); $('history').append(card)
   }
 }
-async function loadHistory(reset: boolean) {
-  if (reset) { historyCursor = undefined; $('history').replaceChildren(); show('record-panel', false); currentRecord = undefined }
+async function loadHistory(reset: boolean, legacy = legacyHistory) {
+  if (reset) {
+    legacyHistory = legacy; historyCursor = undefined; $('history').replaceChildren(); show('record-panel', false)
+    currentRecord = undefined; currentDirectoryRecord = undefined
+  }
+  if (!legacyHistory) {
+    const result = await listDirectoryRuns(drive, historyCursor, lifetime.signal)
+    renderDirectoryHistory(result.records.map(record => record.value))
+    historyCursor = result.next_cursor ?? undefined; show('more-history', result.has_more)
+    if ($('history').children.length) { text('history-status', ''); show('legacy-history', true); return }
+    legacyHistory = true; historyCursor = undefined
+  }
   const result = await scrape.records({ cursor: historyCursor, limit: 30 }, { signal: lifetime.signal })
   renderHistory(result.records); historyCursor = result.next_cursor ?? undefined; show('more-history', result.has_more)
+  show('legacy-history', false)
   text('history-status', $('history').children.length ? '' : '暂无刮削记录。')
+}
+async function openDirectoryRecord(id: string) {
+  const record = await readDirectoryRun(drive, id, lifetime.signal)
+  try {
+    for await (const actual of currentRecords(drive, record.recordIds, lifetime.signal)) reconcileDirectoryRun(record, actual)
+  } catch (error) {
+    lifetime.signal.throwIfAborted(); record.read_only = true
+    record.warning = `部分执行记录暂时无法核实：${resultReason(error instanceof Error ? error.message : String(error))}。当前仅显示已保存结果，请重新选择目录刮削。`
+  }
+  currentRecord = undefined; currentDirectoryRecord = record
+  show('record-panel', true); $('record-items').replaceChildren()
+  const detail = record.phase === 'completed' ? '' : record.message
+  text('record-status', record.warning ?? (record.read_only ? '恢复记录仅供查看，请选择目录重新刮削。' : `${runStateName(record.phase)} · 成功 ${record.counts.done}，跳过 ${record.counts.skipped}，失败 ${record.counts.failed}。${detail}`))
+  for (const item of record.items) {
+    const row = node('article', '', 'record-row'), steps = node('div', '', 'steps')
+    row.append(node('p', item.files.map(file => file.name).join('、'), 'file-name'), node('p', item.files[0]?.path ?? '', 'file-path'))
+    steps.append(node('span', itemNames[item.state]))
+    if (item.result) for (const [title, step] of [['整理', item.result.organize], ['NFO', item.result.nfo], ['海报', item.result.poster]] as const) steps.append(node('span', `${title}：${stateName(step.state || 'pending')}`))
+    row.append(steps)
+    if (item.reason) row.append(node('p', resultReason(item.reason), 'result-reason'))
+    const attempts = item.attempts.filter(attempt => !item.reason.includes(attempt.reason))
+    if (attempts.length) row.append(node('p', attempts.map(attempt => `${attempt.provider}：${attempt.reason}`).join('；'), 'result-reason'))
+    $('record-items').append(row)
+  }
+  controls()
 }
 async function openRecord(id: string) {
   const record = await readRecord(drive, id, lifetime.signal)
-  currentRecord = record; show('record-panel', true); $('record-items').replaceChildren()
+  currentDirectoryRecord = undefined; currentRecord = record; show('record-panel', true); $('record-items').replaceChildren()
   text('record-status', record.read_only ? '恢复记录仅供查看，请选择目录重新刮削。' : `${stateName(record.status)}${record.message ? ` · ${resultReason(record.message)}` : ''}`)
   for (const item of record.items) {
     const row = node('article', '', 'record-row'), steps = node('div', '', 'steps')
@@ -138,7 +199,7 @@ async function openRecord(id: string) {
   controls()
 }
 async function continueRecord() {
-  const record = currentRecord
+  const record = currentDirectoryRecord ?? currentRecord
   if (!record) return
   const directory = await drive.files.stat({ id: record.root_id }, { signal: lifetime.signal })
   if (!directory.is_dir || directory.path !== record.root_path) throw new Error('原目录已变化，请重新选择目录')
@@ -165,7 +226,8 @@ on('cancel', 'click', stop)
 on('retry-run', 'click', () => start(true))
 on('more-results', 'click', () => { visibleResults += 100; render() })
 on('refresh-mode', 'change', () => show('refresh-options', input('refresh-mode').checked))
-on('reload-history', 'click', () => loadHistory(true))
+on('reload-history', 'click', () => loadHistory(true, false))
+on('legacy-history', 'click', () => loadHistory(true, true))
 on('more-history', 'click', () => loadHistory(false))
 on('continue-record', 'click', continueRecord)
 on('save-connection', 'click', saveConnection)
@@ -179,7 +241,8 @@ on('check-connection', 'click', async () => {
 on('exit', 'click', () => drive.ui.close())
 document.querySelectorAll<HTMLElement>('[data-tab]').forEach(item => { item.onclick = () => setTab(item.dataset.tab!) })
 drive.on('beforeClose', async () => {
-  await stop(); if (drive.can('ui.setImmersive')) await drive.ui.setImmersive(false); lifetime.abort()
+  await stop(); await runner?.settled
+  if (drive.can('ui.setImmersive')) await drive.ui.setImmersive(false); lifetime.abort()
 })
 window.addEventListener('pagehide', () => { setup.abort(); void runner?.stop().catch(() => {}); lifetime.abort() }, { once: true })
 drive.on('theme.changed', (value: unknown) => { dark = typeof value === 'boolean' ? value : !!(value as { dark?: boolean })?.dark; document.documentElement.dataset.theme = dark ? 'dark' : 'light'; void syncImmersion().catch(message) })

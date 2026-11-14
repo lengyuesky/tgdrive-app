@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { expect, test, type Page } from '@playwright/test'
 import type { FileEntry, FntvStatus, ScraperHandle, ScraperRecord } from '../../sdk/types'
 import { installCinema } from './cinema-helpers'
@@ -45,7 +47,7 @@ async function pick(page: Page, path: string, authorize = true) {
   }
   await expect(page.locator('.el-overlay:visible')).toHaveCount(0)
 }
-async function open(page: Page, path: string, publicBackend = false) {
+async function open(page: Page, path: string, publicBackend = false, backendUrl?: string) {
   await install(page, appId)
   await page.goto(`/apps/${appId}`)
   await expect(page.locator('iframe')).toHaveCount(0)
@@ -56,7 +58,7 @@ async function open(page: Page, path: string, publicBackend = false) {
   if (!publicBackend) {
     const fixture = await (await page.request.get('/__apps_fixture/scraper')).json()
     await frame.getByRole('button', { name: '设置', exact: true }).click()
-    await frame.locator('#backend-url').fill(fixture.backend_url)
+    await frame.locator('#backend-url').fill(backendUrl ?? fixture.backend_url)
     await frame.locator('#save-connection').click()
     await expect(frame.locator('#connection-status')).toHaveText('连接配置已保存。')
     await frame.locator('#check-connection').click()
@@ -82,7 +84,7 @@ async function startRun(page: Page) {
   try {
     const frame = page.frameLocator('iframe')
     await frame.locator('#start').click()
-    await expect.poll(() => calls.length).toBe(1)
+    await expect.poll(() => calls.length).toBeGreaterThanOrEqual(1)
     return calls[0]
   } finally { page.off('response', listener) }
 }
@@ -265,12 +267,13 @@ test('关闭真实应用页面会停止在途批次，重新打开不自行续�
   expect((await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).status).toBe('cancelled')
 })
 
-test('后端海报故障暂停，保留 NFO 并从操作记录补齐海报', async ({ page }) => {
+test('单部海报故障记录失败，保留 NFO 并从操作记录补齐海报', async ({ page }) => {
   const root = '/刮削验证/故障重试'
   const frame = await open(page, root)
   expect((await page.request.post('/__apps_fixture/scraper', { data: { fail_poster: true } })).ok()).toBe(true)
   const batch = await startRun(page)
-  await expect.poll(async () => (await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).status).toBe('paused')
+  await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 0，跳过 0，失败 1。')
+  expect((await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).status).toBe('paused')
   const originalNfo = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.nfo` })
   expect(originalNfo.size).toBeGreaterThan(4096)
   expect((await page.request.post('/__apps_fixture/scraper', { data: { fail_poster: false } })).ok()).toBe(true)
@@ -280,6 +283,109 @@ test('后端海报故障暂停，保留 NFO 并从操作记录补齐海报', asy
   await expect(frame.locator('#execution-status')).toContainText('刮削完成：成功 1')
   expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.nfo` })).content_version).toBe(originalNfo.content_version)
   expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.jpg` })).size).toBeLessThanOrEqual(2 * 1024 * 1024)
+})
+
+test('前一部先完成，慢查询和海报失败不阻塞后续，重开记录保留原因并只重试未完成项', async ({ page }, info) => {
+  const root = '/刮削验证/逐部执行', searched: string[] = []
+  const fixture = await (await page.request.get('/__apps_fixture/scraper')).json()
+  const image = Buffer.from(await (await fetch(`${fixture.backend_url}v1/images/primary/Fixture/abc123`)).arrayBuffer())
+  let healthy = false, release!: () => void
+  const laterSearch = new Promise<void>(resolve => { release = resolve })
+  const server = createServer((request, response) => {
+    void (async () => {
+      const url = new URL(request.url!, 'http://127.0.0.1'), number = decodeURIComponent(url.pathname.split('/').pop()!)
+      const json = (data: unknown) => { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ data })) }
+      if (url.pathname === '/v1/providers') return json({ movie_providers: { Fixture: 'https://fixture.invalid' } })
+      if (url.pathname === '/v1/movies/search') {
+        const query = url.searchParams.get('q')!; searched.push(query)
+        if (query === 'BBB-202' && !healthy) { await laterSearch; response.statusCode = 503; response.end('合成查询故障'); return }
+        return json([{ provider: 'Fixture', id: query, number: query, title: '合成目录影片' }])
+      }
+      if (url.pathname.startsWith('/v1/movies/')) return json({ provider: 'Fixture', id: number, number, title: '合成目录影片', summary: '用于验证逐部完成与单项失败后的连续执行。', release_date: '2025-06-01T00:00:00Z' })
+      if (number === 'CCC-303' && !healthy) { response.statusCode = 503; response.end('合成海报故障'); return }
+      response.setHeader('Content-Type', 'image/jpeg'); response.end(image)
+    })().catch(error => { response.statusCode = 500; response.end(String(error)) })
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    // 仅整理测试响应的显示顺序；所有文件引用、版本和后续写入仍由真实宿主核验。
+    await page.route(`**/api/apps/${appId}/rpc`, async route => {
+      const body = route.request().postDataJSON()
+      if (body?.method === 'files.searchPage' && body.params.under === root) {
+        const response = await route.fetch(), data = await response.json()
+        data.results.sort((a: FileEntry, b: FileEntry) => a.path.localeCompare(b.path, 'en'))
+        await route.fulfill({ response, json: data })
+      } else await route.continue()
+    })
+    const frame = await open(page, root, false, `http://127.0.0.1:${(server.address() as AddressInfo).port}/`)
+    const originalPoster = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/AAA-101/poster.png` })
+    await startRun(page)
+    await expect.poll(() => searched.includes('BBB-202')).toBe(true)
+    await expect(frame.locator('#done-count')).toHaveText('1')
+    const firstNfo = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/AAA-101/AAA-101.nfo` })
+    expect(firstNfo.size).toBeGreaterThan(0)
+    expect((await rpc<FileEntry>(page, 'files.stat', { id: originalPoster.id })).content_version).toBe(originalPoster.content_version)
+    release()
+    await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 2，跳过 1，失败 2。')
+    expect(searched).toEqual(['AAA-101', 'BBB-202', 'BBB-202', 'CCC-303', 'DDD-404'])
+    const partialNfo = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/CCC-303/CCC-303.nfo` })
+    const lastNfo = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/DDD-404/DDD-404.nfo` })
+    expect(partialNfo.size).toBeGreaterThan(0); expect(lastNfo.size).toBeGreaterThan(0)
+    await page.reload()
+    await expect(frame.locator('#app')).toBeVisible()
+    await expect(frame.locator('#progress-panel')).toBeHidden()
+    await frame.getByRole('button', { name: '操作记录', exact: true }).click()
+    await expect(frame.locator('.history-card')).toHaveCount(1)
+    await frame.locator('.history-card').getByRole('button', { name: '查看结果', exact: true }).click()
+    const failedSearch = frame.locator('#record-items .record-row').filter({ hasText: 'BBB-202.mp4' })
+    await expect(failedSearch).toContainText('查询 BBB-202 失败')
+    await expect(failedSearch).toContainText('503')
+    const failedPoster = frame.locator('#record-items .record-row').filter({ hasText: 'CCC-303.mp4' })
+    await expect(failedPoster).toContainText('NFO：已完成'); await expect(failedPoster).toContainText('503')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: info.outputPath('scraper-mixed-record.png'), fullPage: true })
+    expect(searched).toHaveLength(5)
+    // 单条执行明细过期不能遮住已经保存的整次目录错误，也不能允许盲目重试。
+    const missingRecord = async (route: import('@playwright/test').Route) => {
+      if (route.request().postDataJSON()?.method === 'scraper.record') await route.fulfill({ status: 404, json: { code: 'not_found', error: '执行记录已过期' } })
+      else await route.fallback()
+    }
+    await page.route(`**/api/apps/${appId}/rpc`, missingRecord)
+    await frame.locator('.history-card').getByRole('button', { name: '查看结果', exact: true }).click()
+    await expect(frame.locator('#record-status')).toContainText('部分执行记录暂时无法核实')
+    await expect(failedSearch).toContainText('503'); await expect(frame.locator('#continue-record')).toBeDisabled()
+    await page.unroute(`**/api/apps/${appId}/rpc`, missingRecord)
+    await frame.locator('.history-card').getByRole('button', { name: '查看结果', exact: true }).click()
+    await expect(frame.locator('#continue-record')).toBeEnabled()
+    healthy = true
+    await frame.locator('#continue-record').click()
+    await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 2，跳过 1，失败 0。')
+    expect(searched.slice(5)).toEqual(['BBB-202', 'CCC-303'])
+    for (const before of [firstNfo, partialNfo, lastNfo, originalPoster]) expect((await rpc<FileEntry>(page, 'files.stat', { id: before.id })).content_version).toBe(before.content_version)
+    expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/CCC-303/CCC-303.jpg` })).size).toBeGreaterThan(0)
+  } finally {
+    release(); server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  }
+})
+
+test('页面中未完成的实际番号通过公共后端逐部补齐 NFO，保留已有海报', async ({ page }, info) => {
+  test.skip(process.env.TGDRIVE_SCRAPER_PUBLIC_BACKEND !== '1', '需显式启用指定公共服务的网络验收')
+  test.setTimeout(240_000)
+  const root = '/刮削验证/实际番号', numbers = ['ABF-159', 'ADN-366', 'ADN-725']
+  const frame = await open(page, root, true)
+  const original = await Promise.all(numbers.map(number => rpc<FileEntry>(page, 'files.stat', { path: `${root}/${number}/poster.png` })))
+  await startRun(page)
+  await expect(frame.locator('#execution-status')).toContainText(/刮削完成|刮削已停止/, { timeout: 210_000 })
+  await info.attach('实际番号页面结果', { body: await frame.locator('#results').innerText(), contentType: 'text/plain' })
+  await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 3，跳过 0，失败 0。')
+  const results = []
+  for (let index = 0; index < numbers.length; index++) {
+    const number = numbers[index], nfo = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/${number}/${number}.nfo` })
+    const poster = await rpc<FileEntry>(page, 'files.stat', { id: original[index].id })
+    expect(nfo.size).toBeGreaterThan(0); expect(poster.content_version).toBe(original[index].content_version)
+    results.push({ number, nfo, poster })
+  }
+  await info.attach('实际番号合成目录验收', { body: JSON.stringify({ backend: 'https://metatube-server.hf.space/', results }, null, 2), contentType: 'application/json' })
 })
 
 test('指定公共 MetaTube 后端经真实沙箱写入合成视频的配套资料', async ({ page }, info) => {

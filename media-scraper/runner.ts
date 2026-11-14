@@ -1,10 +1,29 @@
-import type { Drive, FileEntry, ScraperCandidate, ScraperHandle, ScraperPreview, ScraperRecord } from '../sdk/types'
+import type { Drive, FileEntry, ScraperCandidate, ScraperHandle, ScraperPreview, ScraperRecord, ScraperResult } from '../sdk/types'
 import { VIDEO_EXTENSIONS, groups, normalizedNumber, reference, resultReason, sharedCompanion, foldName, stem, exactCandidates, type Group } from './model'
+import { JournalError, RunJournal } from './journal'
 
 export type ItemState = 'waiting' | 'checking' | 'ready' | 'running' | 'done' | 'skipped' | 'failed' | 'stopped'
-export interface RunItem { group: Group; state: ItemState; reason: string; plan?: ScraperPreview; candidate?: ScraperCandidate }
+export interface RunItem { group: Group; state: ItemState; reason: string; plan?: ScraperPreview; candidate?: ScraperCandidate; result?: ScraperResult }
 export interface RunOptions { refresh: boolean; update_nfo: boolean; update_poster: boolean }
 export type RunPhase = 'idle' | 'scanning' | 'checking' | 'running' | 'stopping' | 'completed' | 'stopped' | 'failed'
+const reason = (error: unknown) => resultReason(error instanceof Error ? error.message : String(error))
+const sourceReasons = (errors: string[]) => errors.slice(0, 3).join('；') + (errors.length > 3 ? `；另有 ${errors.length - 3} 次来源失败，详见操作记录` : '')
+const fatal = (error: unknown) => {
+  const failure = error as { code?: string; status?: number }
+  return error instanceof JournalError || failure?.status === 401 || failure?.status === 403 || failure?.code === 'app_changed'
+}
+const transient = (error: unknown) => {
+  const failure = error as { code?: string; status?: number }
+  return failure?.code === 'rate_limited' || failure?.status === 429 || /HTTP\s*(?:429|5\d\d)|超时|连接失败|连接中断|响应中断|网络|timeout|failed to fetch/i.test(reason(error))
+}
+function retryDelay(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    signal.throwIfAborted()
+    const cancelled = () => { clearTimeout(timer); reject(signal.reason) }
+    const timer = setTimeout(() => { signal.removeEventListener('abort', cancelled); resolve() }, 800)
+    signal.addEventListener('abort', cancelled, { once: true })
+  })
+}
 
 /** 先读完目录快照再写入，避免移动视频使后续搜索分页失效或漏项。 */
 export async function scanDirectory(drive: Drive, root: FileEntry, signal: AbortSignal, progress: (count: number) => void): Promise<Group[]> {
@@ -26,7 +45,7 @@ export async function scanDirectory(drive: Drive, root: FileEntry, signal: Abort
   return groups([...files.values()])
 }
 
-/** 页面负责推进所有步骤；关闭页面或停止后不再发起下一步。 */
+/** 页面逐番号推进；同号各组同批检查目标关系，文件仍按各自原目录整理。 */
 export class DirectoryScrape {
   phase: RunPhase = 'idle'
   items: RunItem[] = []
@@ -35,14 +54,21 @@ export class DirectoryScrape {
   current = ''
   batch?: ScraperHandle
   recordIds: string[] = []
+  journal?: RunJournal
+  settled: Promise<void> = Promise.resolve()
+  private finish?: () => void
   private controller = new AbortController()
   private executionController = new AbortController()
   private mutation?: Promise<unknown>
   private stopPromise?: Promise<void>
+  private batchStop?: Promise<void>
   private heartbeat?: ReturnType<typeof setInterval>
+  private generation = 0
   private active = false
+  private indexes = new Map<RunItem, number>()
   private sources = new Map<string, Promise<ScraperCandidate[]>>()
   private sourceChoices = new Map<string, ScraperCandidate>()
+  private sourcePins = new Map<string, ScraperCandidate>()
   private readonly scrape
 
   constructor(private drive: Drive, private changed: () => void) {
@@ -57,72 +83,97 @@ export class DirectoryScrape {
   }
   private update() { this.changed() }
   private check() { this.controller.signal.throwIfAborted() }
+  private async saveItem(item: RunItem) { await this.journal!.item(this.indexes.get(item)!, item, this.batch?.id); this.update() }
   private async create(root: FileEntry) {
     this.check()
-    this.sourceChoices.clear()
-    this.mutation = this.scrape.create(reference(root)).then(batch => { this.batch = batch; this.recordIds.push(batch.id) })
+    const fresh = await this.drive.files.stat({ id: root.id }, { signal: this.controller.signal })
+    if (!fresh.is_dir || fresh.path !== root.path) throw new Error('所选目录已变化，请重新选择')
+    this.check(); this.sourceChoices.clear(); this.executionController = new AbortController()
+    this.mutation = this.scrape.create(reference(fresh)).then(async batch => {
+      this.batch = batch; this.recordIds.push(batch.id)
+      // 批次标识必须先确认保存，随后才能 begin/next；不会把 owner 写入可恢复记录。
+      await this.journal!.batch(batch.id)
+    })
     try { await this.mutation } finally { this.mutation = undefined }
     this.check()
   }
   async start(root: FileEntry, options: RunOptions, retryFiles?: FileEntry[]): Promise<void> {
     if (this.busy) return
+    this.settled = new Promise(resolve => { this.finish = resolve })
     this.active = true; this.phase = 'scanning'; this.items = []; this.scanned = 0; this.current = ''
-    this.controller = new AbortController(); this.executionController = new AbortController(); this.stopPromise = undefined; this.batch = undefined; this.recordIds = []; this.sources.clear()
+    this.controller = new AbortController(); this.executionController = new AbortController(); this.stopPromise = undefined; this.batchStop = undefined
+    this.batch = undefined; this.recordIds = []; this.journal = undefined; this.sources.clear(); this.sourcePins.clear(); this.indexes.clear()
     this.status = '正在扫描目录及子目录…'; this.update()
-    let failed = false
     try {
+      this.journal = await RunJournal.create(this.drive, root); this.check()
       const found = retryFiles ? groups(retryFiles) : await scanDirectory(this.drive, root, this.controller.signal, count => { this.scanned = count; this.update() })
       this.check()
-      this.items = found.map(group => ({ group, state: 'waiting', reason: '' }))
+      this.items = found.map(group => ({ group, state: group.number ? 'waiting' : 'skipped', reason: group.number ? '' : '文件名和所在目录中没有唯一可识别的番号' }))
+      this.items.forEach((item, index) => this.indexes.set(item, index))
       this.scanned = found.reduce((sum, group) => sum + group.files.length, 0)
-      if (!found.length) { this.phase = 'completed'; this.status = '目录中没有支持的视频。'; return }
-      let pending = this.items
-      // 只有检查结果明确的项目进入执行批次；网络中断或跨组资料冲突时重建剩余批次。
-      for (;;) {
-        await this.create(root)
-        this.phase = 'checking'
-        let rebuild = false
-        for (const item of pending) {
-          this.check(); this.current = item.group.files.map(file => file.name).join('、')
-          item.state = 'checking'; this.status = '正在识别视频和检查已有资料…'; this.update()
-          try { await this.prepare(item, options) }
-          catch (error) {
-            this.check()
-            item.state = 'failed'; item.reason = resultReason(error instanceof Error ? error.message : String(error))
-            rebuild = true
-          }
-          this.update()
-        }
-        const ready = pending.filter(item => item.state === 'ready')
-        for (const item of ready) {
-          const related = ready.filter(other => other.plan?.target_path === item.plan?.target_path)
-          const bases = new Set(related.flatMap(other => other.group.files.map(file => foldName(stem(file.name)))))
-          if (bases.size > 1 && [item.plan?.nfo, item.plan?.poster].some(artifact => artifact && artifact.action !== 'keep' && sharedCompanion(artifact.name, bases))) {
-            item.state = 'skipped'; item.reason = '配套资料同时关联多个视频，无法确定归属'; rebuild = true
-          }
-        }
-        pending = ready.filter(item => item.state === 'ready')
-        if (!pending.length) { await this.closeDraft(); break }
-        if (!rebuild) { await this.execute(pending); break }
-        // 本轮至少剔除一个失败或冲突项目；每次重建都缩小待处理范围。
-        await this.closeDraft()
+      await this.journal.discovered(this.items); this.check()
+      await this.journal.save('checking', '正在逐部刮削…', this.counts)
+      const units = new Map<string, RunItem[]>()
+      for (const item of this.items) {
+        const key = normalizedNumber(item.group.number)
+        if (!key) continue
+        const unit = units.get(key) ?? []; unit.push(item); units.set(key, unit)
       }
-      this.check()
-      this.phase = 'completed'; this.current = ''
-      this.status = `刮削完成：成功 ${this.counts.done}，跳过 ${this.counts.skipped}，失败 ${this.counts.failed}。`
+      for (const unit of units.values()) {
+        this.check(); await this.runUnit(root, unit, options)
+        await this.journal.save(this.phase, this.status, this.counts)
+      }
+      this.check(); this.phase = 'completed'; this.current = ''
+      this.status = found.length ? `刮削完成：成功 ${this.counts.done}，跳过 ${this.counts.skipped}，失败 ${this.counts.failed}。` : '目录中没有支持的视频。'
     } catch (error) {
-      failed = !this.controller.signal.aborted
-      if (failed) this.status = resultReason(error instanceof Error ? error.message : String(error))
-      const reason = this.status
+      const failed = !this.controller.signal.aborted, message = failed ? reason(error) : this.status
       try { await this.stop() } catch { /* 未确认停止时保留停止状态和再次停止入口。 */ }
       if (!this.awaitingStop) {
         this.phase = failed ? 'failed' : 'stopped'
-        this.status = failed ? `刮削已停止：${reason}` : '已停止刮削，已完成的结果保留。'
+        this.status = failed ? `刮削已停止：${message}` : '已停止刮削，已完成的结果保留。'
       }
     } finally {
-      this.active = false; clearInterval(this.heartbeat); this.heartbeat = undefined
+      this.clearHeartbeat()
       for (const item of this.items) if (['waiting', 'checking', 'ready', 'running'].includes(item.state)) item.state = 'stopped'
-      this.update()
+      try { await this.journal?.save(this.phase, this.status, this.counts) }
+      catch (error) { this.status = `${this.status} ${reason(error)}`; if (this.phase === 'completed') this.phase = 'failed' }
+      this.active = false; this.update(); this.finish?.(); this.finish = undefined
+    }
+  }
+  private async runUnit(root: FileEntry, unit: RunItem[], options: RunOptions) {
+    let pending = unit
+    while (pending.length) {
+      await this.create(root)
+      this.phase = 'checking'
+      let rebuild = false
+      for (const item of pending) {
+        this.check(); this.current = item.group.files.map(file => file.name).join('、')
+        item.state = 'checking'; item.reason = ''; item.plan = undefined; item.candidate = undefined; item.result = undefined
+        this.status = `正在检查 ${item.group.number} 的已有资料…`; this.update()
+        try { await this.prepare(item, options) }
+        catch (error) {
+          this.check(); item.state = 'failed'; item.reason = reason(error)
+          if (fatal(error)) { await this.saveItem(item); throw error }
+          rebuild = true
+        }
+        await this.saveItem(item)
+      }
+      const ready = pending.filter(item => item.state === 'ready'), conflicts = new Set<RunItem>()
+      for (const item of ready) {
+        const related = ready.filter(other => other.plan?.target_path === item.plan?.target_path)
+        const bases = new Set(related.flatMap(other => other.group.files.map(file => foldName(stem(file.name)))))
+        const names = [item.plan?.nfo, item.plan?.poster].filter(artifact => artifact && artifact.action !== 'keep').map(artifact => artifact!.name)
+        names.push(...(item.plan?.moving ?? []).map(file => file.name))
+        if (bases.size > 1 && names.some(name => sharedCompanion(name, bases))) for (const other of related) conflicts.add(other)
+      }
+      for (const item of conflicts) {
+        item.state = 'skipped'; item.reason = '配套资料同时关联多个视频，无法确定归属'; rebuild = true; await this.saveItem(item)
+      }
+      pending = ready.filter(item => item.state === 'ready')
+      if (!pending.length) { await this.stopCurrentBatch(); return }
+      if (rebuild) { await this.stopCurrentBatch(); continue }
+      await this.execute(pending)
+      pending = pending.filter(item => item.state === 'ready' || item.state === 'running')
     }
   }
   private async prepare(item: RunItem, options: RunOptions) {
@@ -130,103 +181,144 @@ export class DirectoryScrape {
     const request = (candidate?: ScraperCandidate) => this.scrape.preview({ batch: this.batch!, files: group.files.map(reference), number: group.number, candidate: candidate ?? null, shared_ids: [], ...options }, { signal })
     item.plan = await request(); this.check()
     if (item.plan.needs_candidate) {
-      const key = normalizedNumber(group.number)
-      const chosen = this.sourceChoices.get(key)
+      const key = normalizedNumber(group.number), chosen = this.sourcePins.get(key) ?? this.sourceChoices.get(key)
       let candidates = chosen ? [chosen] : undefined
       if (!candidates) {
+        this.status = `正在查询 ${group.number} 的影视资料…`; this.update()
         let source = this.sources.get(key)
-        if (!source) { source = this.scrape.search(group.number, { signal }); this.sources.set(key, source) }
-        try { candidates = exactCandidates(await source, group.number) } catch (error) { this.sources.delete(key); throw error }
+        if (!source) {
+          source = (async () => {
+            try { return await this.scrape.search(group.number, { signal }) }
+            catch (error) {
+              this.check(); if (fatal(error) || !transient(error)) throw error
+              await this.journal!.source(this.indexes.get(item)!, '搜索', reason(error))
+              this.status = `${group.number} 查询暂时失败，正在重试…`; this.update()
+              await retryDelay(signal); this.check()
+              return this.scrape.search(group.number, { signal })
+            }
+          })()
+          this.sources.set(key, source)
+        }
+        try { candidates = exactCandidates(await source, group.number) }
+        catch (error) {
+          this.sources.delete(key); if (fatal(error)) throw error
+          throw new Error(`查询 ${group.number} 失败：${reason(error)}`, { cause: error })
+        }
         this.check()
       }
-      if (!candidates.length) {
-        item.state = 'skipped'; item.reason = `未找到 ${group.number} 的匹配资料`; return
-      }
-      const errors: string[] = []
-      for (const candidate of candidates) {
-        this.check()
-        try {
-          const plan = await request(candidate); this.check()
-          if (plan.ready) {
-            item.candidate = candidate; item.plan = plan
-            // 宿主按批次保存该来源详情；同号后续分段复用，避免一次任务混用多个来源。
-            this.sourceChoices.set(key, candidate)
-            item.state = 'ready'; item.reason = ''; return
+      if (!candidates.length) { item.state = 'skipped'; item.reason = `未找到 ${group.number} 的匹配资料`; return }
+      const errors: string[] = [], retry: ScraperCandidate[] = []
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt) {
+          if (!retry.length) break
+          this.status = `${group.number} 的资料源暂时失败，正在重试…`; this.update()
+          await retryDelay(signal)
+        }
+        for (const candidate of attempt ? retry : candidates) {
+          this.check(); this.status = `正在${attempt ? '重试' : '读取'} ${group.number} 的资料（${candidate.provider}）…`; this.update()
+          let failure: string, retryable = false
+          try {
+            const plan = await request(candidate); this.check()
+            if (plan.ready) {
+              item.candidate = candidate; item.plan = plan; this.sourceChoices.set(key, candidate)
+              item.state = 'ready'; item.reason = ''; return
+            }
+            failure = reason(plan.error ?? '未返回可用资料'); retryable = transient(plan.error)
+          } catch (error) {
+            this.check(); if (fatal(error)) throw error
+            failure = reason(error); retryable = transient(error)
           }
-          errors.push(`${candidate.provider}：${resultReason(plan.error ?? '未返回可用资料')}`)
-        } catch (error) {
-          this.check()
-          const failure = error as Error & { code?: string; status?: number }
-          if (failure.status === 401 || failure.status === 403 || failure.code === 'app_changed') throw error
-          errors.push(`${candidate.provider}：${resultReason(error instanceof Error ? error.message : String(error))}`)
+          if (!attempt && retryable) retry.push(candidate)
+          const detail = `${attempt ? '重试后仍失败：' : ''}${failure}`
+          errors.push(`${candidate.provider}：${detail}`); item.reason = sourceReasons(errors)
+          await this.journal!.source(this.indexes.get(item)!, candidate.provider, detail)
+          this.update()
         }
       }
-      // 来源失败不等于番号不明确。抛出后由外层重建可执行批次，排除本组旧计划。
-      throw new Error(`${group.number} 的匹配来源暂不可用（${errors.join('；')}）`)
+      throw new Error(`${group.number} 的匹配来源暂不可用（${sourceReasons(errors)}）`)
     }
     item.state = item.plan.ready ? 'ready' : 'skipped'
     item.reason = item.plan.ready ? '' : resultReason(item.plan.error ?? '无法确定该视频的资料或文件归属')
   }
+  private clearHeartbeat() { clearInterval(this.heartbeat); this.heartbeat = undefined; this.generation++ }
   private async execute(items: RunItem[]) {
-    const batch = this.batch!
-    this.check()
-    this.mutation = this.scrape.begin(batch)
+    const batch = this.batch!, generation = ++this.generation
+    this.check(); this.mutation = this.scrape.begin(batch)
     try { await this.mutation } finally { this.mutation = undefined }
-    this.check(); this.phase = 'running'; this.status = '正在刮削…'; this.update()
+    this.check(); this.phase = 'running'; this.status = '正在整理视频并写入 NFO、海报…'; this.update()
+    let heartbeatPending = false
     this.heartbeat = setInterval(() => {
+      if (heartbeatPending) return
+      heartbeatPending = true
       void this.scrape.heartbeat(batch).catch(error => {
-        this.status = resultReason(error instanceof Error ? error.message : String(error))
-        void this.stop().catch(() => {})
-      })
+        if (this.generation !== generation || this.batch?.id !== batch.id) return
+        this.status = reason(error); void this.stop().catch(() => {})
+      }).finally(() => { heartbeatPending = false })
     }, 5000)
     const byId = new Map(items.map(item => [item.plan!.id, item]))
-    for (;;) {
-      this.check()
-      const next = items.find(item => item.state === 'ready' || item.state === 'running')
-      if (next) { next.state = 'running'; this.current = next.group.files.map(file => file.name).join('、'); this.update() }
-      const result = await this.scrape.next(batch, { signal: this.executionController.signal })
-      this.check()
-      const item = result.item_id ? byId.get(result.item_id) : undefined
-      if (item) {
-        item.reason = resultReason(result.result?.reason ?? '')
-        if (result.status === 'done') item.state = 'done'
-        else if (result.status === 'needs_user') item.state = 'skipped'
-        else if (result.paused || result.status === 'needs_verification') item.state = 'failed'
+    try {
+      for (;;) {
+        this.check()
+        const next = items.find(item => item.state === 'ready' || item.state === 'running')
+        if (next) { next.state = 'running'; this.current = next.group.files.map(file => file.name).join('、'); this.update() }
+        const result = await this.scrape.next(batch, { signal: this.executionController.signal })
+        this.check()
+        // 宿主在暂停/完成时已结束租约，保存日志期间不能再向该批发送心跳。
+        if (result.done || result.paused || result.status === 'needs_verification') this.clearHeartbeat()
+        const item = result.item_id ? byId.get(result.item_id) : undefined
+        if (item) {
+          item.result = result.result; item.reason = resultReason(result.result?.reason ?? '')
+          if (item.candidate && [result.result?.organize.state, result.result?.nfo.state, result.result?.poster.state].includes('done')) {
+            // 同号已有步骤提交后，后续分段即使重建批次也不能悄悄混用另一来源。
+            this.sourcePins.set(normalizedNumber(item.group.number), item.candidate)
+          }
+          if (result.status === 'done') item.state = 'done'
+          else if (result.status === 'needs_user') item.state = 'skipped'
+          else if (result.paused || result.status === 'needs_verification') item.state = 'failed'
+          // 中间步骤已由宿主持久保存；这里只追加终态，减少大目录日志与往返次数。
+          if (['done', 'skipped', 'failed'].includes(item.state)) await this.saveItem(item)
+        }
+        this.update()
+        if (result.done) { this.batch = undefined; return }
+        if (result.paused || result.status === 'needs_verification') {
+          if (!item || result.status === 'needs_verification' || [result.result?.nfo.state, result.result?.poster.state].includes('uploading')) {
+            throw new Error(item?.reason || '写入结果尚未确认，请在记录中核实后重试')
+          }
+          // 宿主已返回确定的单项失败；先确认收尾，再处理其余影片。
+          await this.stopCurrentBatch(); this.check(); return
+        }
       }
-      this.update()
-      if (result.done) { this.batch = undefined; return }
-      if (result.paused) throw new Error(resultReason(result.result?.reason ?? '服务连接中断，请稍后重试未完成项'))
-    }
+    } finally { if (this.generation === generation) this.clearHeartbeat() }
   }
-  private async closeDraft() {
-    this.check()
-    if (this.batch) {
-      const result = await this.scrape.stop(this.batch)
-      if (!result.stopped) throw new Error('正在停止上一次检查，请稍后重试')
-      this.batch = undefined
-    }
-    this.check()
+  private stopCurrentBatch(): Promise<void> {
+    if (this.batchStop) return this.batchStop
+    this.clearHeartbeat()
+    const stopping = (async () => {
+      await this.mutation?.catch(() => {})
+      const batch = this.batch
+      if (batch) {
+        let result = await this.scrape.stop(batch)
+        for (let attempt = 0; !result.stopped && attempt < 10; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 250)); result = await this.scrape.stop(batch)
+        }
+        if (!result.stopped) throw new Error('在途操作尚未确认停止，请稍后查看记录或再次停止')
+        if (this.batch?.id === batch.id) this.batch = undefined
+      }
+      this.executionController.abort()
+    })()
+    this.batchStop = stopping
+    void stopping.finally(() => { if (this.batchStop === stopping) this.batchStop = undefined }).catch(() => {})
+    return stopping
   }
   stop(): Promise<void> {
     if (!this.busy && !this.batch) return Promise.resolve()
     if (this.stopPromise) return this.stopPromise
-    this.controller.abort(); clearInterval(this.heartbeat); this.heartbeat = undefined
+    this.controller.abort(); this.clearHeartbeat()
     this.phase = 'stopping'; this.status = '正在停止刮削…'; this.update()
     this.stopPromise = (async () => {
       try {
-        // create / begin 没有取消参数，必须等返回后停止，避免关闭页面后才开始执行。
-        await this.mutation?.catch(() => {})
-        if (this.batch) {
-          let result = await this.scrape.stop(this.batch)
-          for (let attempt = 0; !result.stopped && attempt < 10; attempt++) {
-            await new Promise(resolve => setTimeout(resolve, 250))
-            result = await this.scrape.stop(this.batch)
-          }
-          if (!result.stopped) { this.status = '正在停止在途操作，可再次点击停止或在记录中查看结果。'; return }
-          this.batch = undefined
-        }
-        // 先让宿主核实在途写入，再关闭等待中的响应，避免丢失提交状态。
-        this.executionController.abort()
+        // create / begin 不可取消；等返回后再停止，写入请求也只在宿主回执后取消。
+        await this.stopCurrentBatch()
         this.phase = 'stopped'; this.status = '已停止刮削，已完成的结果保留。'
       } catch (error) { this.status = '停止请求尚未确认，请重试停止或查看操作记录。'; throw error }
       finally { if (this.phase === 'stopping') this.stopPromise = undefined; this.update() }
@@ -247,4 +339,11 @@ export async function readRecord(drive: Drive, id: string, signal: AbortSignal):
     record = { ...record, items: [...record.items, ...next.items], has_more: next.has_more, next_after: next.next_after }
   }
   return record
+}
+
+/** 宿主列表会恢复已过期租约；单条 record/verify 不触发恢复，必须先读取列表。 */
+export async function* currentRecords(drive: Drive, ids: string[], signal: AbortSignal) {
+  if (!ids.length) return
+  await drive.scraper!.records({ limit: 1 }, { signal })
+  for (const id of new Set(ids)) { signal.throwIfAborted(); yield await readRecord(drive, id, signal) }
 }

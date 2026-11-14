@@ -9,7 +9,7 @@
     <section class="panel directory-panel">
       <h2>刮削目录</h2>
       <div class="directory-picker"><output id="directory">请选择目录</output><button id="choose" type="button">选择目录</button></div>
-      <p class="hint">包含所有子目录。已有资料默认保留，无法确定的项目自动跳过。</p>
+      <p class="hint">包含所有子目录，逐部补齐资料。已有资料默认保留，单部失败会记录原因并继续。</p>
       <div class="actions"><button id="start" class="primary start-button" type="button" disabled>开始刮削</button><button id="cancel" type="button" hidden>停止刮削</button></div>
       <p class="page-note">请保持页面打开，关闭页面即停止。</p>
     </section>
@@ -22,7 +22,7 @@
     </section>
     <section id="results-panel" hidden><h2 class="results-heading">本次结果</h2><div id="results" class="result-list"></div><button id="more-results" class="more" hidden>显示更多结果</button></section>
   </section>
-  <section id="history-view" hidden><div class="section-heading"><div><h2>操作记录</h2><p>保留最近 30 天的刮削结果</p></div><button id="reload-history">刷新记录</button></div><p id="history-status" role="status"></p><div id="history" class="history-list"></div><button id="more-history" class="more" hidden>更多记录</button><section id="record-panel" class="panel" hidden><h3>刮削结果</h3><p id="record-status" role="status"></p><div id="record-items"></div><button id="continue-record" class="primary">重试未完成项</button></section></section>
+  <section id="history-view" hidden><div class="section-heading"><div><h2>操作记录</h2><p>保留最近 30 天的目录刮削结果与失败原因</p></div><button id="reload-history">刷新记录</button></div><p id="history-status" role="status"></p><div id="history" class="history-list"></div><button id="more-history" class="more" hidden>更多记录</button><button id="legacy-history" class="quiet" hidden>查看旧版记录与执行明细</button><section id="record-panel" class="panel" hidden><h3>刮削结果</h3><p id="record-status" role="status"></p><div id="record-items"></div><button id="continue-record" class="primary">重试未完成项</button></section></section>
   <section id="connection-view" hidden>
     <section id="connection-form" class="panel connection-panel" aria-label="后端连接配置"><h2>MetaTube 后端</h2><label for="backend-url">后端地址</label><input id="backend-url" type="url" required autocomplete="off" spellcheck="false" placeholder="https://metatube-server.hf.space/"/><label for="backend-token">Token（可选）</label><input id="backend-token" type="password" autocomplete="new-password" placeholder="留空保留已保存的 Token"/><p id="token-status" class="hint"></p><label class="check"><input id="clear-token" type="checkbox"/>清除已保存的 Token</label><div class="actions"><button id="save-connection" class="primary" type="button">保存连接</button><button id="check-connection" type="button">检查连接</button></div><p id="connection-status" role="status"></p><div id="providers" class="provider-list"></div></section>
     <section class="panel options-panel"><h2>刮削选项</h2><p class="hint">散放视频按番号整理到当前目录下的文件夹，保留视频原名；明确关联的字幕随视频移动。</p><label class="check"><input id="refresh-mode" type="checkbox"/>重新获取并覆盖已有资料</label><div id="refresh-options" class="refresh-options" hidden><label><input id="update-nfo" type="checkbox" checked/>更新 NFO（整份替换，包括手工编辑内容）</label><label><input id="update-poster" type="checkbox" checked/>更新海报</label></div><button id="authorize" class="quiet" type="button">管理目录授权</button></section>

@@ -18,21 +18,21 @@
     "host_ref_kind": "verified_commit",
     "host_base_tree": "2126bbd8ade7a130053303890a79d850098261b2",
     "worktree_dirty": false,
-    "plugin_base_ref": "59daeb6e690e9d2ff8e5ef2b59fb593e0d8351d1",
+    "plugin_base_ref": "b71c2327edf4c03fd05e296d4024ce157907b208",
     "plugin_worktree_dirty": true,
     "target_apps": {
       "cinema": "1.5.1",
       "fntv": "0.1.4",
-      "media-scraper": "0.1.2",
+      "media-scraper": "0.1.3",
       "reader": "1.1.2",
       "shorts": "1.5.1"
     },
     "validation_status": "passed_commit",
     "validation_date": "2026-11-14",
-    "validation_report": "docs/media-scraper-0.1.2-validation.md",
-    "validation_note": "在干净宿主 0.3.11 提交与本次根目录五包上完成 82 项完整本机 E2E，零失败、零跳过、无重试通过项。包含 SONE-614 标准目录经指定公共 MetaTube 的真实同号多来源检索及 NFO/海报写入、同号首来源不可用后的自动回退、一键全目录分页、关闭页面停止与自动核实后手动重试、Cinema 页面和 FNTV 协议消费，以及阅读馆真实历史包升级。五步分发门禁按顺序退出 0，66 个测试文件、694 项单测通过。旧代码对新增关键回归有 7 项失败，修复后刮削模型及执行器 33 项通过。影视刮削升级为 0.1.2，源清单、包内清单、截图及目录摘要一致；其他四包和清单条目与上一版一致。插件基线和 dirty 字段记录验收启动时状态；本轮未修改宿主执行逻辑，未重跑官方飞牛原生界面、宿主全量 Rust、真机或真实 Telegram 附件写入。",
+    "validation_report": "docs/media-scraper-0.1.3-validation.md",
+    "validation_note": "在干净宿主 0.3.11 提交与本次根目录五包上完成 84 项完整本机 E2E，零失败、零跳过、无重试通过项。逐部执行的混合目录覆盖前一部先写完、后续慢查询和海报失败后继续、重开保留具体错误、仅重试未完成项、已有 NFO 和海报保持版本；公共 MetaTube 实际验证 ABF-159、ADN-366、ADN-725、IPX-001、SONE-614 成功。另含完整分页、同号多来源、关闭停止、恢复记录、Cinema 页面与 FNTV 协议消费及阅读馆真实历史包升级。五步分发门禁依序退出 0，67 个测试文件、718 项单测通过，其中刮削模型、执行器与分页记录 57 项；修改前两个行为回归失败。首次候选捕获 ADN-725 详情 HTTP 500，后续加入有上限的可取消重试；最终候选及完整测试均通过。影视刮削升级为 0.1.3，四张本轮截图和源/包/目录清单一致，其他四包摘要不变。插件基线和 dirty 字段记录验收启动状态；本轮未改宿主执行源码，未运行生产刮削、真实 Telegram 写入、官方飞牛原生界面或宿主全量 Rust。",
     "host_tree": "2126bbd8ade7a130053303890a79d850098261b2",
     "host_base_ref": "b69ca6923d098af3683c0c23affa312e5167b9be",
-    "plugin_catalog_sha256": "62ee7d224a00af4f23dbd41ea2bfda64a223aa1f819a7f4cc60b0f1126eb5218"
+    "plugin_catalog_sha256": "d066c0e9224424c229d5a1d26e578622e969acfded657bd4409708a0c1e3bbd4"
   }
 }

@@ -26,4 +26,16 @@ export async function seedMediaScraper(root) {
   const standard = `${root}/视频/AV/SONE-614`
   await mkdir(standard, { recursive: true })
   await copyFile(mp4, `${standard}/SONE-614.mp4`)
+  // 混合目录覆盖慢查询、单部海报失败、后续成功和保留已有海报。
+  const mixed = `${root}/刮削验证/逐部执行`
+  await mkdir(`${mixed}/AAA-101`, { recursive: true })
+  await copyFile(mp4, `${mixed}/AAA-101/AAA-101.mp4`)
+  await copyFile(`${root}/测试影视/poster.png`, `${mixed}/AAA-101/poster.png`)
+  for (const number of ['BBB-202', 'CCC-303', 'DDD-404', '无番号']) await copyFile(mp4, `${mixed}/${number}.mp4`)
+  for (const number of ['ABF-159', 'ADN-366', 'ADN-725']) {
+    const directory = `${root}/刮削验证/实际番号/${number}`
+    await mkdir(directory, { recursive: true })
+    await copyFile(mp4, `${directory}/${number}.mp4`)
+    await copyFile(`${root}/测试影视/poster.png`, `${directory}/poster.png`)
+  }
 }
