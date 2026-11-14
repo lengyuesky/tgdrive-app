@@ -1,5 +1,7 @@
 # 影视刮削验收与 main 交付记录
 
+本文保留 `media-scraper 0.1.0` 的历史验收。目录一键刮削改版及当前 `0.1.1` 的实际验证见 [新版验收记录](media-scraper-simple-validation.md)。
+
 日期：2026-11-14。用户已确认 Q1–Q42，默认及公共验收后端为 `https://metatube-server.hf.space/`。本轮源码、五个应用包、catalog 与摘要按用户授权直接交付到两个仓库的 main，不新建其他分支；日常服务未部署，未创建宿主版本标签。
 
 ## 代码与包基线

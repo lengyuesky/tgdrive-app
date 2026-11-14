@@ -8,7 +8,7 @@ import manifest from '../../media-scraper/app.json?raw'
 import type { Drive, FileEntry } from '../../sdk/types'
 
 const file = (name: string, id = 2, path = `/待整理/${name}`): FileEntry => ({id,name,path,is_dir:false,size:1024,content_version:'a'.repeat(64),created_at:1,modified_at:1,favorite:false})
-describe('番号识别、候选确认与共用文件范围', () => {
+describe('番号识别、自动匹配与共用文件范围', () => {
   it('识别常见番号和分段后缀，画质及电视剧季集不单独成为番号', () => {
     expect(numbers('ipx-001-4K.mp4')).toEqual(['IPX-001'])
     expect(numbers('IPX001-CD1.mkv')).toEqual(['IPX-001'])
@@ -22,13 +22,15 @@ describe('番号识别、候选确认与共用文件范围', () => {
   it('同目录同基本名的扩展名版本分成同一组，分段保留独立组', () => {
     const result = groups([file('ABC-123.mp4'),file('ABC-123.mkv',3),file('ABC-123-CD1.mp4',4)])
     expect(result.map(group=>group.files.length)).toEqual([2,1])
-    expect(result.every(group=>!group.selected)).toBe(true)
+    expect(result[0].files.map(file=>file.id)).toEqual([2,3])
   })
-  it('只有一个精确候选才自动采用；多来源匹配仍需要选择', () => {
+  it('采用唯一精确候选，忽略模糊结果；多个精确来源直接跳过', () => {
     const one = {provider:'A',id:'a1',number:'ABC-123',title:'影片'}
     expect(uniqueExact([one],'abc123')).toEqual(one)
     expect(uniqueExact([one,{...one,provider:'B'}],'ABC-123')).toBeUndefined()
     expect(uniqueExact([{...one,number:'ABC-124'}],'ABC-123')).toBeUndefined()
+    expect(uniqueExact([one,{...one,id:'other',number:'ABC-124'}],'ABC-123')).toEqual(one)
+    expect(uniqueExact([one,one],'ABC-123')).toEqual(one)
   })
   it('字幕语言后缀和海报别名同时匹配多个视频时列为共用文件', () => {
     const videos=new Set(['abc-123','abc-123.zh','abc-123-poster'])

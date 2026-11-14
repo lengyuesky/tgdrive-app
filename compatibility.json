@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "host_repository": "lengyuesky/tgdrive",
-  "host_ref": "033dd6563b695b4cb75644036283aac996d09217",
-  "host_version": "0.3.10",
-  "host_base_version": "0.3.9",
+  "host_ref": "b69ca6923d098af3683c0c23affa312e5167b9be",
+  "host_version": "0.3.11",
+  "host_base_version": "0.3.11",
   "min_host_version": "0.3.10",
   "api_version": 2,
   "supported_api_versions": [
@@ -16,23 +16,23 @@
     "fixture_command": "cargo test --locked apps::tests::browser_fixture -- --ignored --exact --nocapture",
     "fixture_url": "http://127.0.0.1:4187/__apps_fixture",
     "host_ref_kind": "verified_commit",
-    "host_base_tree": "2e1ee725297f69f5577f85ef28f87db3b145c684",
+    "host_base_tree": "2126bbd8ade7a130053303890a79d850098261b2",
     "worktree_dirty": false,
-    "plugin_base_ref": "9ae5727fd4d76a5acc8f3d4b0e9b99d8efdf5434",
+    "plugin_base_ref": "972c46f773c74615c287d97d1212e8581b9085be",
     "plugin_worktree_dirty": true,
     "target_apps": {
-      "shorts": "1.5.1",
-      "reader": "1.1.2",
       "cinema": "1.5.1",
       "fntv": "0.1.4",
-      "media-scraper": "0.1.0"
+      "media-scraper": "0.1.1",
+      "reader": "1.1.2",
+      "shorts": "1.5.1"
     },
     "validation_status": "passed_commit",
     "validation_date": "2026-11-14",
-    "validation_report": "docs/media-scraper-validation.md",
-    "validation_note": "host_ref 与 host_tree 标识实际通过完整验收的宿主 0.3.10 提交，worktree_dirty=false 描述该独立已提交宿主。该提交上的格式检查、严格 Clippy（-D warnings）及完整 Rust 回归均退出 0，436 项通过、6 项显式环境夹具忽略；中断续传回归连续 20 次通过，未放宽不确定上传禁止重发的保护。宿主前端 215 项结果沿用源码未变的首轮。插件 672 项独立测试及五步分发门禁通过；完整跨库 E2E 在此宿主提交和根目录五包上执行，80 项全部通过、零失败、零跳过、无重试通过项，包含指定公共 MetaTube 后端、阅读馆 1.0.1–1.0.5 升级及截图用例。此前阅读馆独立浏览器 25 项、受控图片横竖屏重复 10 项、原失败用例重复 5 项通过。根目录五包和目录摘要与所验资产一致，官方 1.12.3 所验 FNTV 包摘要亦一致。plugin_base_ref 与 plugin_worktree_dirty 只记录集成验收启动时插件尚未提交的状态；源码、五包、catalog、摘要和本记录按用户授权一并交付 main。原宿主其他改动保留，未部署日常服务、未创建宿主标签，未验收真实 Telegram 附件写入或真机。",
-    "host_tree": "6f8d698839a42071d9d5960d870d309f77b4275d",
-    "host_base_ref": "3ad8b3f6b86dd23c49569b2bc2ad41a8cb882ff9",
-    "plugin_catalog_sha256": "44f2d01ecdb9a489c30ec261ee0357da68c355c583e520b5c7b1cb608b5e863c"
+    "validation_report": "docs/media-scraper-simple-validation.md",
+    "validation_note": "在干净宿主 0.3.11 提交及本次根目录五包上完成 81 项完整本机 E2E，零失败、零跳过、无重试通过项；包含一键处理 105 个视频的递归分页与不确定项跳过、关闭页面停止、取消后自动核实并手动重试、资料补缺、恢复记录、指定公共 MetaTube 后端、Cinema 页面与 FNTV 协议读取，以及阅读馆 1.0.1–1.0.5 的真实旧包升级。插件五步门禁依序退出 0，66 个测试文件、686 项单测通过。影视刮削更新为 0.1.1，源清单、包内清单、四张新版截图及目录摘要一致，其他四个应用包及清单条目与上一版一致。plugin_base_ref 与 plugin_worktree_dirty 记录验收启动时的插件状态。本轮未改变宿主执行逻辑，未重跑宿主全量 Rust 或官方飞牛原生界面验收；未操作真实 Telegram 附件、生产服务或真机。",
+    "host_tree": "2126bbd8ade7a130053303890a79d850098261b2",
+    "host_base_ref": "b69ca6923d098af3683c0c23affa312e5167b9be",
+    "plugin_catalog_sha256": "fe1bc00e87e67583c0ab531732c104cf6082f79f536cafe9912ca27ba9af2382"
   }
 }

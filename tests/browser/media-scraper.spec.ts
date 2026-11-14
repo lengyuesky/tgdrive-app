@@ -36,11 +36,14 @@ async function pick(page: Page, path: string, authorize = true) {
     else await item.locator('..').getByRole('button', { name: '展开目录', exact: true }).click()
   }
   await picker.getByRole('button', { name: '确定', exact: true }).click()
+  await expect(picker).toBeHidden()
   if (authorize) {
     const grant = page.getByRole('dialog', { name: '授权目录', exact: true })
     await expect(grant).toContainText('写入 NFO 和海报')
     await grant.getByRole('button', { name: '允许整理与刮削', exact: true }).click()
+    await expect(grant).toBeHidden()
   }
+  await expect(page.locator('.el-overlay:visible')).toHaveCount(0)
 }
 async function open(page: Page, path: string, publicBackend = false) {
   await install(page, appId)
@@ -52,7 +55,7 @@ async function open(page: Page, path: string, publicBackend = false) {
   await expect(frame.locator('#app')).toBeVisible()
   if (!publicBackend) {
     const fixture = await (await page.request.get('/__apps_fixture/scraper')).json()
-    await frame.getByRole('button', { name: '后端连接', exact: true }).click()
+    await frame.getByRole('button', { name: '设置', exact: true }).click()
     await frame.locator('#backend-url').fill(fixture.backend_url)
     await frame.locator('#save-connection').click()
     await expect(frame.locator('#connection-status')).toHaveText('连接配置已保存。')
@@ -63,11 +66,12 @@ async function open(page: Page, path: string, publicBackend = false) {
   await frame.locator('#choose').click()
   await pick(page, path, false)
   await expect(frame.locator('#directory')).toHaveText(path)
-  await expect(frame.locator('#videos .video-row')).not.toHaveCount(0)
-  await frame.locator('#select-page').check()
+  await expect(frame.locator('#start')).toBeEnabled()
+  await expect(frame.locator('#progress-panel')).toBeHidden()
+  await expect(frame.locator('#select-page,#preview,#execute')).toHaveCount(0)
   return frame
 }
-async function prepare(page: Page) {
+async function startRun(page: Page) {
   const calls: ScraperHandle[] = []
   const listener = (response: import('@playwright/test').Response) => {
     if (response.url().endsWith(`/api/apps/${appId}/rpc`) && response.request().postDataJSON()?.method === 'scraper.batch.create') {
@@ -77,22 +81,19 @@ async function prepare(page: Page) {
   page.on('response', listener)
   try {
     const frame = page.frameLocator('iframe')
-    await frame.locator('#preview').click()
-    await expect(frame.locator('#preview-status')).toContainText('预览完成')
-    await expect(frame.locator('#execute')).toBeEnabled()
+    await frame.locator('#start').click()
     await expect.poll(() => calls.length).toBe(1)
     return calls[0]
   } finally { page.off('response', listener) }
 }
-async function stopAndVerify(page: Page, batch: ScraperHandle) {
+async function stoppedRecord(page: Page, batch: ScraperHandle) {
+  await expect.poll(async () => (await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).status).toMatch(/^(stopping|cancelled)$/)
   expect((await page.request.post('/__apps_fixture/scraper', { data: { block_uploads: false } })).ok()).toBe(true)
   await expect.poll(async () => (await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).status).toBe('cancelled')
   const before = await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })
   expect(before.items[0].status).toBe('needs_verification')
   expect(before.items[0].result.organize.state).toBe('done')
-  const verified = await rpc<ScraperRecord>(page, 'scraper.verify', { id: batch.id })
-  expect(verified.items[0].status).toBe('needs_user')
-  expect(verified.items[0].result.nfo.state).toBe('cancelled')
+  return before
 }
 
 test.beforeEach(async ({ page }) => {
@@ -104,27 +105,34 @@ test.beforeEach(async ({ page }) => {
   for (const entry of index.installed) expect((await page.request.delete(`/api/apps/${entry.manifest.id}?purge_data=true`)).ok()).toBe(true)
 })
 
-test('真实沙箱预览不移动，整组写入后 Cinema 与飞牛读取完整资料', async ({ page }, info) => {
+test('选择目录后一次开始完成全部视频，Cinema 与飞牛读取完整资料', async ({ page }, info) => {
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   const root = '/刮削验证/整组'
   const frame = await open(page, root)
-  await expect(frame.locator('#videos .video-row')).toHaveCount(2)
-  await expect(frame.locator('#selected-count')).toContainText('3 个视频')
-  const batch = await prepare(page)
-  await expect(frame.locator('#plans .plan-card')).toHaveCount(2)
-  await expect(frame.locator('#plans')).toContainText('Fixture · ABC-123 · 星海远航')
+  // 退出覆盖模式后，隐藏的单项选项不能阻止默认补缺。
+  await frame.getByRole('button', { name: '设置', exact: true }).click()
+  await frame.locator('#refresh-mode').check()
+  await frame.locator('#update-nfo').uncheck()
+  await frame.locator('#update-poster').uncheck()
+  await frame.locator('#refresh-mode').uncheck()
+  await expect(frame.locator('#refresh-options')).toBeHidden()
+  await frame.getByRole('button', { name: '目录刮削', exact: true }).click()
   expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123.mp4` })).is_dir).toBe(false)
-  await page.setViewportSize({ width: 1440, height: 1480 })
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.screenshot({ path: info.outputPath('scraper-desktop-preview.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.host-toolbar')).toBeHidden()
   expect(await frame.locator('body').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await page.screenshot({ path: info.outputPath('scraper-mobile-directory.png'), fullPage: true })
-  await frame.locator('#preview-panel').scrollIntoViewIfNeeded()
+  expect((await page.request.post('/__apps_fixture/scraper', { data: { block_uploads: true } })).ok()).toBe(true)
+  const batch = await startRun(page)
+  await expect.poll(async () => (await (await page.request.get('/__apps_fixture/scraper')).json()).upload_pending).toBe(true)
+  await expect(frame.locator('#total-count')).toHaveText('3')
+  await expect(frame.locator('#results .result-row')).toHaveCount(2)
   await page.screenshot({ path: info.outputPath('scraper-mobile-preview.png'), fullPage: true })
-  await frame.locator('#execute').click()
-  await expect(frame.locator('#execution-status')).toContainText('可执行项目已结束')
+  expect((await page.request.post('/__apps_fixture/scraper', { data: { block_uploads: false } })).ok()).toBe(true)
+  await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 3，跳过 0，失败 0。')
   const record = await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })
   expect(record.status).toBe('completed')
   expect(record.items.every(item => item.status === 'done' && item.result.organize.state === 'done' && item.result.nfo.state === 'done' && item.result.poster.state === 'done')).toBe(true)
@@ -187,58 +195,85 @@ test('真实沙箱预览不移动，整组写入后 Cinema 与飞牛读取完整
   expect(errors).toEqual([])
 })
 
-test('真实取消在途写入，已整理视频保留并核实后手动继续', async ({ page }) => {
+test('一键处理超过一页的整个目录，不确定项跳过且子目录视频完成', async ({ page }) => {
+  const root = '/刮削验证/完整目录', searched: unknown[] = []
+  // 两个精确来源都不能代替用户作出选择；直接跳过，继续真实沙箱中的其他文件。
+  await page.route(`**/api/apps/${appId}/rpc`, async route => {
+    const body = route.request().postDataJSON()
+    if (body?.method === 'scraper.search' && body.params.number === 'ZZZ-789') {
+      await route.fulfill({ json: { candidates: ['A', 'B'].map(provider => ({ provider, id: 'synthetic', number: 'ZZZ-789', title: '多来源合成影片' })) } })
+    } else await route.continue()
+  })
+  page.on('request', request => {
+    if (request.url().endsWith(`/api/apps/${appId}/rpc`) && request.postDataJSON()?.method === 'files.searchPage') searched.push(request.postDataJSON().params)
+  })
+  const frame = await open(page, root)
+  expect(searched).toHaveLength(0)
+  await startRun(page)
+  await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 2，跳过 103，失败 0。', { timeout: 60_000 })
+  expect(searched.length).toBeGreaterThanOrEqual(2)
+  await expect(frame.locator('#total-count')).toHaveText('105')
+  await expect(frame.locator('#more-results')).toBeVisible()
+  await frame.locator('#more-results').click()
+  await expect(frame.locator('#results .result-row')).toHaveCount(104)
+  await expect(frame.locator('#results .result-row').filter({ hasText: 'ZZZ-789.mp4' })).toContainText('未找到唯一的番号精确匹配')
+  for (const name of ['ABC-123.mp4', 'ABC-123.mkv', 'ABC-123.nfo', 'ABC-123.jpg']) {
+    expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/子目录/ABC-123/${name}` })).is_dir).toBe(false)
+  }
+  expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123-DEF-456.mp4` })).path).toBe(`${root}/ABC-123-DEF-456.mp4`)
+  expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ZZZ-789.mp4` })).path).toBe(`${root}/ZZZ-789.mp4`)
+  expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/未识别影片100.mp4` })).path).toBe(`${root}/未识别影片100.mp4`)
+})
+
+test('真实取消在途写入，点击重试自动核实并补齐资料', async ({ page }) => {
   const root = '/刮削验证/取消操作'
   const frame = await open(page, root)
-  const batch = await prepare(page)
   expect((await page.request.post('/__apps_fixture/scraper', { data: { block_uploads: true } })).ok()).toBe(true)
-  await frame.locator('#execute').click()
+  const batch = await startRun(page)
   await expect.poll(async () => (await (await page.request.get('/__apps_fixture/scraper')).json()).upload_pending).toBe(true)
   expect((await (await page.request.get('/api/uploads')).json()).sessions).toEqual([])
   await frame.locator('#cancel').click()
-  await expect(frame.locator('#execution-status')).toContainText(/正在停止在途步骤|后续操作已停止/)
-  await stopAndVerify(page, batch)
+  await expect(frame.locator('#execution-status')).toContainText(/正在停止|已停止刮削/)
+  await stoppedRecord(page, batch)
   await frame.getByRole('button', { name: '操作记录', exact: true }).click()
   await frame.locator('.history-card').filter({ hasText: root }).getByRole('button', { name: '查看结果', exact: true }).click()
   await frame.locator('#continue-record').click()
-  await expect(frame.locator('#preview-status')).toContainText('预览完成')
-  await frame.locator('#execute').click()
-  await expect(frame.locator('#execution-status')).toContainText('可执行项目已结束')
+  await expect(frame.locator('#execution-status')).toContainText('刮削完成：成功 1')
+  expect((await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).items[0].status).toBe('needs_user')
   expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.nfo` })).size).toBeGreaterThan(4096)
 })
 
 test('关闭真实应用页面会停止在途批次，重新打开不自行续跑', async ({ page }) => {
   const root = '/刮削验证/关闭页面'
   const frame = await open(page, root)
-  const batch = await prepare(page)
   expect((await page.request.post('/__apps_fixture/scraper', { data: { block_uploads: true } })).ok()).toBe(true)
-  await frame.locator('#execute').click()
+  const batch = await startRun(page)
   await expect.poll(async () => (await (await page.request.get('/__apps_fixture/scraper')).json()).upload_pending).toBe(true)
   await frame.locator('#exit').click()
-  await page.getByRole('dialog', { name: '离开应用', exact: true }).getByRole('button', { name: '离开', exact: true }).click()
   await expect(page).toHaveURL(/\/files\//)
-  await stopAndVerify(page, batch)
+  await stoppedRecord(page, batch)
   await page.goto(`/apps/${appId}`)
   await expect(frame.locator('#app')).toBeVisible()
-  await expect(frame.locator('#directory')).toHaveText('尚未选择')
-  await expect(frame.locator('#execute')).toBeDisabled()
+  await expect(frame.locator('#directory')).toHaveText(root)
+  await expect(frame.locator('#start')).toBeEnabled()
+  await expect(frame.locator('#progress-panel')).toBeHidden()
+  expect((await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).status).toBe('cancelled')
 })
 
 test('后端海报故障暂停，保留 NFO 并从操作记录补齐海报', async ({ page }) => {
   const root = '/刮削验证/故障重试'
   const frame = await open(page, root)
-  const batch = await prepare(page)
   expect((await page.request.post('/__apps_fixture/scraper', { data: { fail_poster: true } })).ok()).toBe(true)
-  await frame.locator('#execute').click()
+  const batch = await startRun(page)
   await expect.poll(async () => (await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })).status).toBe('paused')
-  expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.nfo` })).size).toBeGreaterThan(4096)
+  const originalNfo = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.nfo` })
+  expect(originalNfo.size).toBeGreaterThan(4096)
   expect((await page.request.post('/__apps_fixture/scraper', { data: { fail_poster: false } })).ok()).toBe(true)
   await frame.getByRole('button', { name: '操作记录', exact: true }).click()
   await frame.locator('.history-card').filter({ hasText: root }).getByRole('button', { name: '查看结果', exact: true }).click()
   await frame.locator('#continue-record').click()
-  await expect(frame.locator('#plans')).toContainText('保留已有')
-  await frame.locator('#execute').click()
-  await expect(frame.locator('#execution-status')).toContainText('可执行项目已结束')
+  await expect(frame.locator('#execution-status')).toContainText('刮削完成：成功 1')
+  expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.nfo` })).content_version).toBe(originalNfo.content_version)
   expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/ABC-123/ABC-123.jpg` })).size).toBeLessThanOrEqual(2 * 1024 * 1024)
 })
 
@@ -247,14 +282,13 @@ test('指定公共 MetaTube 后端经真实沙箱写入合成视频的配套资�
   test.setTimeout(180_000)
   const root = '/刮削验证/公共后端'
   const frame = await open(page, root, true)
-  await frame.getByRole('button', { name: '后端连接', exact: true }).click()
+  await frame.getByRole('button', { name: '设置', exact: true }).click()
   await expect(frame.locator('#backend-url')).toHaveValue('https://metatube-server.hf.space/')
   await frame.locator('#check-connection').click()
   await expect(frame.locator('#connection-status')).toContainText('连接正常', { timeout: 65_000 })
   await frame.getByRole('button', { name: '目录刮削', exact: true }).click()
-  const batch = await prepare(page)
-  await frame.locator('#execute').click()
-  await expect(frame.locator('#execution-status')).toContainText('可执行项目已结束', { timeout: 100_000 })
+  const batch = await startRun(page)
+  await expect(frame.locator('#execution-status')).toContainText('刮削完成：成功 1', { timeout: 100_000 })
   const record = await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })
   expect(record.status).toBe('completed')
   expect(record.items[0].status).toBe('done')
@@ -267,10 +301,15 @@ test('指定公共 MetaTube 后端经真实沙箱写入合成视频的配套资�
   await info.attach('公共服务写入结果', { body: JSON.stringify({ backend: 'https://metatube-server.hf.space/', record, nfo, jpg }, null, 2), contentType: 'application/json' })
 })
 
-test('备份恢复后的未完成记录仅供查看，重新扫描后才生成新预览', async ({ page }) => {
+test('备份恢复后的未完成记录仅供查看，手动重新开始才创建新任务', async ({ page }) => {
   const root = '/刮削验证/恢复记录'
   const frame = await open(page, root)
-  const batch = await prepare(page)
+  expect((await page.request.post('/__apps_fixture/scraper', { data: { block_uploads: true } })).ok()).toBe(true)
+  const batch = await startRun(page)
+  await expect.poll(async () => (await (await page.request.get('/__apps_fixture/scraper')).json()).upload_pending).toBe(true)
+  await frame.locator('#cancel').click()
+  await stoppedRecord(page, batch)
+  await expect(frame.locator('#start')).toBeEnabled()
   expect((await page.request.post('/__apps_fixture/scraper', { data: { restore_records: true } })).ok()).toBe(true)
   const restored = await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })
   expect(restored.read_only).toBe(true)
@@ -278,11 +317,8 @@ test('备份恢复后的未完成记录仅供查看，重新扫描后才生成�
   await frame.locator('.history-card').filter({ hasText: root }).getByRole('button', { name: '查看结果', exact: true }).click()
   await expect(frame.locator('#record-status')).toContainText('恢复记录仅供查看')
   await expect(frame.locator('#continue-record')).toBeDisabled()
-  await expect(frame.locator('#verify-record')).toBeDisabled()
   await frame.getByRole('button', { name: '目录刮削', exact: true }).click()
-  await frame.locator('#scan').click()
-  await expect(frame.locator('#select-page')).not.toBeChecked()
-  await frame.locator('#select-page').check()
-  const fresh = await prepare(page)
+  const fresh = await startRun(page)
   expect(fresh.id).not.toBe(batch.id)
+  await expect(frame.locator('#execution-status')).toContainText('刮削完成：成功 1')
 })

@@ -10,9 +10,9 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 | `reader` | 阅读馆 | `1.1.2` | 2 | 修复纯图片 EPUB 解码、回收时提前跳章，保留沉浸书库、跟手翻页与阅读记录，最低宿主 0.3.3 |
 | `cinema` | 影视 | `1.5.1` | 2 | 读取 NFO 标题、长简介和年份，统一海报匹配；同番号版本独立播放，保留原有字幕和 MKV 流式解封装 |
 | `fntv` | 飞牛影视服务 | `0.1.4` | 2 | 独立影视账号、媒体库、授权和服务启停，自动补图及缺图重试；管理页跟随主站深浅色，最低宿主 0.3.7 |
-| `media-scraper` | 影视刮削 | `0.1.0` | 2 | 手动递归扫描 TGDrive 目录，预览番号目录整理、NFO 和海报写入；要求宿主 0.3.10 |
+| `media-scraper` | 影视刮削 | `0.1.1` | 2 | 选择目录后一键刮削全部子目录，不确定项跳过，关闭页面停止；要求宿主 0.3.10 |
 
-上述版本随 main 统一分发，准确宿主提交和验收范围见[本轮验收记录](docs/media-scraper-validation.md)。影视刮削使用可配置的 MetaTube 后端，默认 `https://metatube-server.hf.space/`；用法见[影视刮削说明](media-scraper/README.md)。共享 SDK 新增刮削接口，因此原四款包同时提升修订号，避免覆盖同版本摘要。
+上述版本随 main 统一分发。影视刮削 0.1.1 简化为目录一键执行，准确宿主提交和验收范围见[本轮验收记录](docs/media-scraper-simple-validation.md)；其他四款包保持原版本和摘要。MetaTube 默认后端为 `https://metatube-server.hf.space/`；用法见[影视刮削说明](media-scraper/README.md)。
 
 飞牛影视服务已纳入公开目录。在宿主 `0.3.7` 或更高版本的「应用中心」刷新后安装，选择允许读取的目录、设置独立影视账号并创建媒体库，最后主动启动服务。无海报视频依次使用 Telegram 小图或受限截帧；管理页显示封面状态，“刷新媒体库”可重试缺图，完成后刷新客户端列表或重新进入页面。客户端使用管理页显示的服务根地址。说明与本机验收见 [插件说明](fntv/README.md)及 [0.1.2 验收记录](docs/fntv-0.1.2-local-validation.md)。
 
@@ -30,7 +30,7 @@ tgdrive 官方独立插件库与扩展开发套件。包含短视频（Shorts）
 ├── comics/                # 保留漫画解析器（图片/CBZ/ZIP，独立入口退役）
 ├── cinema/                # 影视插件源码（流式转封装/媒体库）
 ├── fntv/                  # 飞牛影视服务管理页（账号/媒体库/启停）
-├── media-scraper/         # 手动影视刮削（目录/预览/连接/操作记录）
+├── media-scraper/         # 一键目录刮削（进度/结果/设置）
 ├── reader/                # 统一阅读馆入口、共用逻辑与样式
 ├── sdk/                   # 插件 SDK 运行时 (tgdrive-sdk.js) 与 TypeScript 类型
 ├── tests/
@@ -95,7 +95,7 @@ sha256sum -c SHA256SUMS
 ## 分发资产与目录协议 (Catalog Protocol)
 
 本仓库采用根目录 `catalog.json`（schema_version: 2）与 `apps/` 目录直链分发机制：
-- `apps/<id>-<version>.tgapp`（各插件最新打包文件：`shorts-1.5.1.tgapp`、`reader-1.1.2.tgapp`、`cinema-1.5.1.tgapp`、`fntv-0.1.4.tgapp`、`media-scraper-0.1.0.tgapp`）
+- `apps/<id>-<version>.tgapp`（各插件最新打包文件：`shorts-1.5.1.tgapp`、`reader-1.1.2.tgapp`、`cinema-1.5.1.tgapp`、`fntv-0.1.4.tgapp`、`media-scraper-0.1.1.tgapp`）
 - `catalog.json`（根目录索引文件，schema_version 为 2）
 - `SHA256SUMS`（全资产校验清单，包含 `apps/` 路径）
 

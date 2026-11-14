@@ -15,4 +15,11 @@ export async function seedMediaScraper(root) {
       await copyFile(mp4, `${directory}/ABC-123-4K.mp4`)
     }
   }
+  const large = `${root}/刮削验证/完整目录`
+  await mkdir(`${large}/子目录`, { recursive: true })
+  for (let index = 0; index < 101; index++) await copyFile(mp4, `${large}/未识别影片${String(index).padStart(3, '0')}.mp4`)
+  await copyFile(mp4, `${large}/ABC-123-DEF-456.mp4`)
+  await copyFile(mp4, `${large}/ZZZ-789.mp4`)
+  await copyFile(mp4, `${large}/子目录/ABC-123.mp4`)
+  await copyFile(mkv, `${large}/子目录/ABC-123.mkv`)
 }

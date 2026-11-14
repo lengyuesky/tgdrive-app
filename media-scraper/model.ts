@@ -28,22 +28,22 @@ export function inferNumber(file: FileEntry): string {
   return directory.length === 1 ? directory[0] : ''
 }
 export function uniqueExact(candidates: ScraperCandidate[], number: string): ScraperCandidate | undefined {
-  const exact = candidates.filter(c => normalizedNumber(c.number) === normalizedNumber(number))
-  return candidates.length === 1 && exact.length === 1 ? exact[0] : undefined
+  const exact = new Map(candidates.filter(c => normalizedNumber(c.number) === normalizedNumber(number)).map(c => [`${c.provider}\0${c.id}`, c]))
+  return exact.size === 1 ? exact.values().next().value : undefined
 }
 export const reference = ({ id, path, content_version }: FileEntry): ScraperReference => ({ id, path, content_version })
-export interface Group { key: string; files: FileEntry[]; number: string; selected: boolean; candidate?: ScraperCandidate; sharedIds: number[] }
+export interface Group { key: string; files: FileEntry[]; number: string }
 export function groups(files: FileEntry[]): Group[] {
   const result = new Map<string, Group>()
   for (const file of files) {
     const key = `${parent(file.path)}\0${foldName(stem(file.name))}`
     let group = result.get(key)
-    if (!group) { group = { key, files: [], number: inferNumber(file), selected: false, sharedIds: [] }; result.set(key, group) }
+    if (!group) { group = { key, files: [], number: inferNumber(file) }; result.set(key, group) }
     group.files.push(file)
   }
   return [...result.values()]
 }
-/** 目录共用资料及同时关联多个基本名的字幕、海报必须由用户明确选择。 */
+/** 不能唯一归属的视频配套文件由自动刮削跳过。 */
 export function sharedCompanion(name: string, videos: Set<string>): boolean {
   const value=foldName(name), base=stem(value), ext=value.split('.').pop() ?? ''
   if(!['nfo','jpg','jpeg','png','webp','srt','vtt','ass','ssa'].includes(ext))return false
@@ -53,4 +53,5 @@ export function sharedCompanion(name: string, videos: Set<string>): boolean {
   if(['srt','vtt','ass','ssa'].includes(ext))for(let at=base.indexOf('.');at>=0;at=base.indexOf('.',at+1))owners+=Number(videos.has(base.slice(0,at)))
   return owners!==1
 }
-export const stateName = (state: string) => ({ draft:'预览中',running:'执行中',stopping:'正在停止',completed:'已结束',cancelled:'已停止',paused:'已暂停',interrupted:'已中断',pending:'待执行',processing:'处理中',done:'已完成',kept:'保留已有',skipped:'未选择',needs_user:'待处理',needs_verification:'待核实',uploading:'上传中' } as Record<string,string>)[state] ?? state
+export const stateName = (state: string) => ({ draft:'检查中',running:'执行中',stopping:'正在停止',completed:'已结束',cancelled:'已停止',paused:'已暂停',interrupted:'已中断',pending:'等待处理',processing:'处理中',done:'已完成',kept:'保留已有',skipped:'未更新',needs_user:'已跳过',needs_verification:'待核实',uploading:'写入中' } as Record<string,string>)[state] ?? state
+export const resultReason = (reason: string) => reason.replaceAll('请选择影视资料候选', '未找到唯一匹配的资料').replaceAll('请重新预览', '请重新刮削').replaceAll('重新扫描并预览', '重新刮削').replaceAll('预览会话', '刮削任务')

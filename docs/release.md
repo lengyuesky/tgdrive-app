@@ -14,9 +14,11 @@
   - `apps/reader-1.1.2.tgapp`
   - `apps/cinema-1.5.1.tgapp`
   - `apps/fntv-0.1.4.tgapp`
-  - `apps/media-scraper-0.1.0.tgapp`
+  - `apps/media-scraper-0.1.1.tgapp`
 
-本轮增加影视刮削，最低宿主为 0.3.10；Cinema 1.5.1 读取 NFO 并调整同番号播放。原四款均随包嵌入新增共享 SDK，因此同时提升修订号。后续验收修复使阅读馆再升为 1.1.2，防止纯图片 EPUB 在解码和缓存回收期间页数收缩、提前跳章。源码、五包、catalog 和摘要随 main 统一交付；本次门禁、准确宿主提交及实际客户端结果见[刮削验收记录](media-scraper-validation.md)。日常服务未部署，历史发布记录继续按当时版本保留。
+影视刮削 0.1.1 将主流程简化为选择目录、点击开始，自动处理全部分页和子目录；不确定项目直接跳过，关闭页面停止。更新仅涉及影视刮削应用，最低宿主继续为 0.3.10，其他四款包保持原版本和摘要。本次准确宿主提交、门禁和一键流程验收见 [0.1.1 验收记录](media-scraper-simple-validation.md)。
+
+此前影视刮削 0.1.0 与 Cinema 1.5.1 加入 NFO 消费和同番号播放适配，原四款包因嵌入新增 SDK 同步提升修订号；阅读馆随后升为 1.1.2，修复纯图片 EPUB 在解码和缓存回收期间页数收缩、提前跳章。历史结果见 [0.1.0 刮削验收记录](media-scraper-validation.md)。
 
 飞牛影视服务 `0.1.1` 加入公开目录，最低宿主为 `0.3.6`，提供独立影视账号、电影和电视剧媒体库、目录授权及服务启停。升级本地候选 `0.1.0` 时保留业务数据和运行状态，已有客户端需重新登录。此前公共 SDK 已加入可选飞牛服务接口；原三款插件因此各提升一个修订版本，避免覆盖同版本摘要，最低宿主、页面及数据格式保留。包、目录及摘要在同一提交中发布；构建与实际宿主集成见 [0.1.1 发布记录](fntv-0.1.1-release.md)。
 
@@ -29,7 +31,7 @@
 ```
 <sha256>  apps/cinema-1.5.1.tgapp
 <sha256>  apps/fntv-0.1.4.tgapp
-<sha256>  apps/media-scraper-0.1.0.tgapp
+<sha256>  apps/media-scraper-0.1.1.tgapp
 <sha256>  apps/reader-1.1.2.tgapp
 <sha256>  apps/shorts-1.5.1.tgapp
 <sha256>  catalog.json

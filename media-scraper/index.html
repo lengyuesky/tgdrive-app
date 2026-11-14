@@ -3,19 +3,30 @@
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><title>影视刮削</title><script src="./tgdrive-sdk.js" defer></script><script type="module" src="./main.ts"></script></head>
 <body>
 <main id="app" hidden>
-  <header class="topbar"><button id="exit" class="quiet" type="button">‹ 返回网盘</button><div><h1>影视刮削</h1><p>选择目录，预览后手动整理与刮削</p></div><span class="manual-badge">手动执行</span></header>
-  <nav class="tabs" aria-label="刮削导航"><button data-tab="scrape" class="active">目录刮削</button><button data-tab="history">操作记录</button><button data-tab="connection">后端连接</button></nav>
+  <header class="topbar"><button id="exit" class="quiet" type="button">‹ 返回网盘</button><div><h1>影视刮削</h1><p>选好目录，一键补齐影视资料</p></div></header>
+  <nav class="tabs" aria-label="刮削导航"><button data-tab="scrape" class="active">目录刮削</button><button data-tab="history">操作记录</button><button data-tab="connection">设置</button></nav>
   <section id="scrape-view">
-    <div class="panel directory-panel"><div><h2>刮削目录</h2><output id="directory">尚未选择</output></div><div class="actions"><button id="choose" class="primary" type="button">选择目录</button><button id="scan" type="button" disabled>重新扫描</button><button id="authorize" class="quiet" type="button">目录授权</button></div></div>
-    <p class="hint">包含子目录中的视频。保留视频原名，散放视频整理到当前父目录下的番号文件夹；同名不同后缀的视频按组处理。</p>
-    <div class="selection-bar"><label><input id="select-page" type="checkbox"/>选择本页各组</label><label><input id="refresh-mode" type="checkbox"/>主动重新刮削</label><span id="selected-count"></span><button id="preview" class="primary" disabled>预览整理与刮削</button></div>
-    <div id="refresh-options" class="refresh-options" hidden><label><input id="update-nfo" type="checkbox" checked/>更新 NFO（整份替换手工编辑内容）</label><label><input id="update-poster" type="checkbox" checked/>更新海报</label></div>
-    <p id="scan-status" role="status"></p><div id="videos" class="video-list"></div>
-    <div class="pagination"><button id="previous" disabled>上一页</button><span id="page-label"></span><button id="next-page" disabled>下一页</button></div>
-    <section id="preview-panel" class="panel" hidden><div class="section-heading"><div><h2>操作预览</h2><p>核对目标位置、配套文件与资料来源后再执行</p></div><button id="discard-preview" class="quiet">关闭预览</button></div><p id="preview-status" role="status"></p><div id="plans" class="plan-list"></div><div class="actions execution-actions"><button id="execute" class="primary" disabled>确认整理并刮削</button><button id="cancel" disabled>停止后续操作</button></div><p id="execution-status" role="status"></p></section>
+    <section class="panel directory-panel">
+      <h2>刮削目录</h2>
+      <div class="directory-picker"><output id="directory">请选择目录</output><button id="choose" type="button">选择目录</button></div>
+      <p class="hint">包含所有子目录。已有资料默认保留，无法确定的项目自动跳过。</p>
+      <div class="actions"><button id="start" class="primary start-button" type="button" disabled>开始刮削</button><button id="cancel" type="button" hidden>停止刮削</button></div>
+      <p class="page-note">请保持页面打开，关闭页面即停止。</p>
+    </section>
+    <section id="progress-panel" class="panel" hidden>
+      <p id="execution-status" class="run-status" role="status" aria-live="polite"></p>
+      <p id="current-file" class="file-path"></p>
+      <progress id="progress" aria-label="刮削进度" max="1" value="0"></progress><p id="progress-label" class="hint"></p>
+      <div class="counts"><div><strong id="total-count">0</strong><span>视频</span></div><div><strong id="done-count">0</strong><span>成功</span></div><div><strong id="skipped-count">0</strong><span>跳过</span></div><div><strong id="failed-count">0</strong><span>失败</span></div></div>
+      <button id="retry-run" class="quiet" type="button" hidden>重试未完成项</button>
+    </section>
+    <section id="results-panel" hidden><h2 class="results-heading">本次结果</h2><div id="results" class="result-list"></div><button id="more-results" class="more" hidden>显示更多结果</button></section>
   </section>
-  <section id="history-view" hidden><div class="section-heading"><div><h2>操作记录</h2><p>保留 30 天，完成结果可核实；继续操作会重新预览</p></div><button id="reload-history">刷新记录</button></div><p id="history-status" role="status"></p><div id="history" class="history-list"></div><button id="more-history" hidden>更多记录</button><section id="record-panel" class="panel" hidden><h3>批次详情</h3><p id="record-status" role="status"></p><div id="record-items"></div><div class="actions"><button id="verify-record">核实中断结果</button><button id="continue-record" class="primary">继续未完成项</button></div></section></section>
-  <section id="connection-view" hidden><section id="connection-form" class="panel connection-panel" aria-label="后端连接配置"><h2>MetaTube 后端</h2><label for="backend-url">后端地址</label><input id="backend-url" type="url" required autocomplete="off" spellcheck="false" placeholder="https://metatube-server.hf.space/"/><label for="backend-token">Token（可选）</label><input id="backend-token" type="password" autocomplete="new-password" placeholder="留空保留已保存的 Token"/><p id="token-status" class="hint"></p><label class="check"><input id="clear-token" type="checkbox"/>清除已保存的 Token</label><p class="hint">Token 只显示配置状态；更换地址或从备份、旧版本恢复后需重新填写。</p><div class="actions"><button id="save-connection" class="primary" type="button">保存连接</button><button id="check-connection" type="button">检查已保存的连接</button></div><p id="connection-status" role="status"></p><div id="providers" class="provider-list"></div></section></section>
+  <section id="history-view" hidden><div class="section-heading"><div><h2>操作记录</h2><p>保留最近 30 天的刮削结果</p></div><button id="reload-history">刷新记录</button></div><p id="history-status" role="status"></p><div id="history" class="history-list"></div><button id="more-history" class="more" hidden>更多记录</button><section id="record-panel" class="panel" hidden><h3>刮削结果</h3><p id="record-status" role="status"></p><div id="record-items"></div><button id="continue-record" class="primary">重试未完成项</button></section></section>
+  <section id="connection-view" hidden>
+    <section id="connection-form" class="panel connection-panel" aria-label="后端连接配置"><h2>MetaTube 后端</h2><label for="backend-url">后端地址</label><input id="backend-url" type="url" required autocomplete="off" spellcheck="false" placeholder="https://metatube-server.hf.space/"/><label for="backend-token">Token（可选）</label><input id="backend-token" type="password" autocomplete="new-password" placeholder="留空保留已保存的 Token"/><p id="token-status" class="hint"></p><label class="check"><input id="clear-token" type="checkbox"/>清除已保存的 Token</label><div class="actions"><button id="save-connection" class="primary" type="button">保存连接</button><button id="check-connection" type="button">检查连接</button></div><p id="connection-status" role="status"></p><div id="providers" class="provider-list"></div></section>
+    <section class="panel options-panel"><h2>刮削选项</h2><p class="hint">散放视频按番号整理到当前目录下的文件夹，保留视频原名；明确关联的字幕随视频移动。</p><label class="check"><input id="refresh-mode" type="checkbox"/>重新获取并覆盖已有资料</label><div id="refresh-options" class="refresh-options" hidden><label><input id="update-nfo" type="checkbox" checked/>更新 NFO（整份替换，包括手工编辑内容）</label><label><input id="update-poster" type="checkbox" checked/>更新海报</label></div><button id="authorize" class="quiet" type="button">管理目录授权</button></section>
+  </section>
   <div id="message" class="message" role="status" hidden></div>
 </main>
 <div id="boot" class="boot"><p id="boot-status" role="status">正在打开影视刮削…</p><button id="boot-retry" hidden>重试</button></div>

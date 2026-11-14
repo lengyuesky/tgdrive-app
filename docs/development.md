@@ -123,7 +123,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chromium npm run test:comics
 - **`cinema/`**：深色模式影院，内建本地媒体库缓存索引与 MKV 容器流式解封装（MSE 喂流）。
 - **`fntv/`**：飞牛影视服务管理页，通过受限 `fntv.service` 能力设置独立账号、媒体库和启停。`0.1.2` 起的封面状态及后台补图要求宿主 `0.3.7`，`0.1.3` 管理页跟随主站深浅色并在手机沉浸，缺图沿用刷新媒体库重试。验收范围见 [0.1.2 记录](fntv-0.1.2-local-validation.md)。
 - **`reader/`**：统一阅读馆入口与共用基础库，抽象了 Range 字节调度器、虚拟 DOM 视口渲染器、触摸手势判断与进度同步。
-- **`media-scraper/`**：手动影视刮削页，使用宿主 0.3.10 的固定 `scraper.service`。只有页面显式调用才推进下一步骤；记录供核实和重新预览，恢复记录仅供查看。用法见[插件说明](../media-scraper/README.md)。
+- **`media-scraper/`**：手动影视刮削页，使用宿主 0.3.10 的固定 `scraper.service`。点击开始后由页面读完所有分页并连续推进步骤，不确定项目跳过；关闭页面停止，重试前自动核实中断结果，恢复记录仅供查看。用法见[插件说明](../media-scraper/README.md)。
 
 ## 运行跨库 E2E 集成测试
 
@@ -147,7 +147,7 @@ TGDRIVE_HOST_DIR=/path/to/tgdrive npm run test:e2e
 
 `TGDRIVE_APP_CATALOG_DIR` 默认指向本仓库的 `apps/` 目录，亦可指定自定义包目录，但仍需包含五个当前版本的包。检查只确认构建产物存在，不代替完整集成测试。正式更新前须由维护者记录实际验证宿主的完整 Git SHA 到 `compatibility.json`；拆分起点 SHA 不代表拆分后集成已经通过；dirty 工作区需记录真实 base SHA 和实际验证状态。
 
-`media-scraper.spec.ts` 使用本机 MetaTube 模拟源及合成视频覆盖预览、整组移动、长 NFO、取消、关页、故障重试和恢复记录。用户指定公共后端的实际链路需显式启用：
+`media-scraper.spec.ts` 使用本机 MetaTube 模拟源及合成视频覆盖一键目录处理、超过 100 条视频的递归分页、不确定项跳过、整组移动、长 NFO、取消、关页、故障重试和恢复记录。用户指定公共后端的实际链路需显式启用：
 
 ```bash
 TGDRIVE_HOST_DIR=/path/to/tgdrive TGDRIVE_SCRAPER_PUBLIC_BACKEND=1 npm run test:e2e -- tests/browser/media-scraper.spec.ts
