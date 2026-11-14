@@ -19,12 +19,12 @@ export async function verifyFixtureBuilds(hostDir, catalogDir) {
   if (!frontend?.isFile() || frontend.size === 0) {
     throw new Error(`未找到宿主前端构建产物：${hostFrontendDist}，请先在宿主 frontend 目录执行 npm run build`)
   }
-  for (const id of ['shorts', 'reader', 'cinema', 'fntv']) {
+  for (const id of ['shorts', 'reader', 'cinema', 'fntv', 'media-scraper']) {
     const manifest = JSON.parse(await readFile(resolve(root, id, 'app.json'), 'utf8'))
     const filename = `${manifest.id}-${manifest.version}.tgapp`
     const packageFile = await lstat(resolve(catalogDir, filename)).catch(() => null)
     if (!packageFile?.isFile() || packageFile.size === 0) {
-      throw new Error(`未找到当前插件包 ${filename}：请先在插件仓库执行 npm run build；自定义 TGDRIVE_APP_CATALOG_DIR 需包含四个当前版本的非空普通包文件`)
+      throw new Error(`未找到当前插件包 ${filename}：请先在插件仓库执行 npm run build；自定义 TGDRIVE_APP_CATALOG_DIR 需包含五个当前版本的非空普通包文件`)
     }
   }
 }

@@ -7,8 +7,7 @@ import { build } from 'vite'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-export async function buildFntv(destination) {
-  const output = resolve(root, '.build/fntv')
+export async function buildFntv(destination, output = resolve(root, '.build/fntv')) {
   await build({ configFile: false, root: resolve(root, 'fntv'), base: './', publicDir: false,
     build: { outDir: output, emptyOutDir: true, target: 'es2022', sourcemap: false } })
   for (const name of ['app.json', 'icon.svg']) await copyFile(resolve(root, 'fntv', name), resolve(output, name))

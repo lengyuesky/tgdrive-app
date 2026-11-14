@@ -5,7 +5,7 @@ import { join } from 'node:path'
 /** 独立阅读馆浏览器自动化套件：无宿主无网络、真实Vite构建与多视口覆盖。 */
 export default defineConfig({
   testDir: '.',
-  testMatch: 'readers.spec.ts',
+  testMatch: ['readers.spec.ts', 'flow-images.spec.ts'],
   workers: 1,
   retries: 0,
   timeout: 60_000,

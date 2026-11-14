@@ -21,6 +21,7 @@
     "books/**/*.ts",
     "cinema/**/*.ts",
     "fntv/**/*.ts",
+    "media-scraper/**/*.ts",
     "comics/**/*.ts",
     "reader/**/*.ts",
     "sdk/**/*.ts",

@@ -27,12 +27,12 @@
 - **直链分发 URL**：
   - 索引：`https://raw.githubusercontent.com/<repository>/main/catalog.json`
   - 插件包：`https://raw.githubusercontent.com/<repository>/main/apps/<id>-<version>.tgapp`
-- **单版本最新限制**：每个应用 ID 最多保留一条最新记录，`apps/` 仅保留四款官方应用的最新包。
+- **单版本最新限制**：每个应用 ID 最多保留一条最新记录，`apps/` 仅保留五款官方应用的最新包；影视刮削的首次分发要求宿主 0.3.10。
 - **同版本不可篡改与升级保护**：同一应用相同版本不允许更换摘要或清单；新版本允许替换旧版本，不允许同 ID 版本倒退。
 
 ## 阅读馆合并入口
 
-自 reader 1.0.0 起，books/comics 保留解析器源码与历史测试，不再是官方独立安装包。当前官方分发 shorts、reader、cinema、fntv。阅读馆最低宿主 0.3.3，飞牛影视服务 0.1.1 最低宿主 0.3.6；新 ID 的替换、数据迁移和旧版保留边界见 [阅读馆说明](reader.md)。旧应用 ID 的历史数据不因目录移除自动改名，也不能通过批量替换字符串伪装迁移。
+自 reader 1.0.0 起，books/comics 保留解析器源码与历史测试，不再是官方独立安装包。当前分发 shorts、reader、cinema、fntv、media-scraper。阅读馆最低宿主 0.3.3，飞牛影视服务 0.1.2 起最低宿主 0.3.7，影视刮削最低宿主 0.3.10；新 ID 的替换、数据迁移和旧版保留边界见 [阅读馆说明](reader.md)。旧应用 ID 的历史数据不因目录移除自动改名，也不能通过批量替换字符串伪装迁移。
 
 ## 拆分时的历史基线
 

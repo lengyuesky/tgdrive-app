@@ -559,24 +559,29 @@ describe('build.mjs 与独立分发输出行为', () => {
   it('TGDRIVE_APP_BUILD_OUTPUT 指定独立输出分发目录时生成完整分发产物并通过校验', async () => {
     const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
     temporary.push(output)
+    await mkdir(`${root}/.build/cinema`, { recursive: true })
+    const shared = await mkdtemp(`${root}/.build/cinema/isolation-marker-`)
+    temporary.push(shared)
+    await writeFile(`${shared}/marker.txt`, '共享中间目录不得被完整构建清空')
     await run(process.execPath, [`${root}/build.mjs`], {
       env: { ...process.env, TGDRIVE_APP_BUILD_OUTPUT: output },
     })
     const catalog = await readCatalog(`${output}/catalog.json`)
+    expect(await readFile(`${shared}/marker.txt`, 'utf8')).toBe('共享中间目录不得被完整构建清空')
     expect(catalog.schema_version).toBe(2)
-    expect(catalog.entries).toHaveLength(4)
+    expect(catalog.entries).toHaveLength(5)
     const packages = await collectPackages(`${output}/apps`)
-    expect(packages).toHaveLength(4)
-    expect(packages.map(pkg => pkg.manifest.id)).toEqual(['cinema', 'fntv', 'reader', 'shorts'])
+    expect(packages).toHaveLength(5)
+    expect(packages.map(pkg => pkg.manifest.id)).toEqual(['cinema', 'fntv', 'media-scraper', 'reader', 'shorts'])
     const fntv = packages.find(pkg => pkg.manifest.id === 'fntv')!
-    expect(fntv.manifest).toMatchObject({ version: '0.1.3', min_host_version: '0.3.7', permissions: ['files.read', 'media.read', 'fntv.service'] })
+    expect(fntv.manifest).toMatchObject({ version: '0.1.4', min_host_version: '0.3.7', permissions: ['files.read', 'media.read', 'fntv.service'] })
     const fntvPage = extractFileFromZip(fntv.buffer, 'index.html')!.toString('utf8')
     expect(fntvPage).toContain('飞牛影视服务')
     const fntvScript = fntvPage.match(/src="\.\/([^" ]+\.js)"[^>]*><\/script>/)?.[1]
     expect(fntvScript).toBeTruthy()
     expect(extractFileFromZip(fntv.buffer, fntvScript!)?.length).toBeGreaterThan(0)
     const reader = packages.find(pkg => pkg.manifest.id === 'reader')!
-    expect(reader.manifest).toMatchObject({ version: '1.1.0', min_host_version: '0.3.3' })
+    expect(reader.manifest).toMatchObject({ version: '1.1.2', min_host_version: '0.3.3' })
     // 同一归档必须同时携带两类阅读器资源，不能依赖退役包或外部 CDN。
     for (const path of ['licenses/zip-js.txt', 'licenses/dompurify.txt', 'licenses/pdfjs.txt', 'licenses/core-js.txt', 'licenses/NOTICE.txt', 'cmaps/LICENSE', 'cmaps/Adobe-GB1-UCS2.bcmap', 'standard_fonts/LICENSE_FOXIT', 'standard_fonts/FoxitSerif.pfb']) {
       expect(extractFileFromZip(reader.buffer, path)?.length, path).toBeGreaterThan(0)
@@ -625,7 +630,7 @@ describe('build.mjs 与独立分发输出行为', () => {
     expect(await readFile(`${output}/apps/marker.txt`, 'utf8')).toBe(markerContent)
   }, 20_000)
 
-  it('构建成功后移除退役 books/comics 索引与包，仅保留官方最新四包', async () => {
+  it('构建成功后移除退役 books/comics 索引与包，仅保留官方最新五包', async () => {
     const output = await mkdtemp(`${tmpdir()}/tgdrive-dist-output-`)
     temporary.push(output)
     await mkdir(`${output}/apps`, { recursive: true })
@@ -639,8 +644,8 @@ describe('build.mjs 与独立分发输出行为', () => {
     })
 
     const packages = await collectPackages(`${output}/apps`)
-    expect(packages).toHaveLength(4)
-    expect(packages.map(p => p.filename)).toEqual(await Promise.all(['cinema', 'fntv', 'reader', 'shorts'].map(currentPackage)))
-    expect((await readCatalog(`${output}/catalog.json`)).entries.map(entry => entry.manifest.id)).toEqual(['cinema', 'fntv', 'reader', 'shorts'])
+    expect(packages).toHaveLength(5)
+    expect(packages.map(p => p.filename)).toEqual(await Promise.all(['cinema', 'fntv', 'media-scraper', 'reader', 'shorts'].map(currentPackage)))
+    expect((await readCatalog(`${output}/catalog.json`)).entries.map(entry => entry.manifest.id)).toEqual(['cinema', 'fntv', 'media-scraper', 'reader', 'shorts'])
   }, 20_000)
 })

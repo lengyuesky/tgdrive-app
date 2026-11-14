@@ -6,7 +6,7 @@
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.5.0",
+        "version": "1.5.1",
         "api_version": 2,
         "min_host_version": "0.3.0",
         "description": "你的私人影院。自建命名媒体库并绑定文件夹，进入后才加载视频；支持收藏、续播、文本字幕和客户端 MKV 流式转封装，不使用服务器转码。",
@@ -35,7 +35,7 @@
             "ogv"
           ],
           "directories": false,
-          "changelog": "iPhone 主屏幕界面改版：手机打开即沉浸，配色跟随主站深浅色；全屏海报墙与底部四标签，详情页大背景图、播放主按钮与图标操作行；iOS 优先使用原生视频全屏。保留现有媒体库、播放、字幕、收藏和观看进度。",
+          "changelog": "读取同目录 NFO 的标题、简介和年份，统一专属与共用海报优先级；电影与同番号版本保持独立播放，分段视频手动切换。",
           "formats": [
             "浏览器支持的视频",
             "MKV 客户端解封装",
@@ -53,15 +53,15 @@
           "data_schema": 1
         }
       },
-      "sha256": "428d42e85dc552b58bb467a33406b6364fc23481fe253b2ef9d8649678d1a7bb",
-      "size": 173940,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.5.0.tgapp"
+      "sha256": "50c805b2352b448f01389218650d1f6c62aecaeb2afb27a80eb2c82ac8a5e79d",
+      "size": 175788,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/cinema-1.5.1.tgapp"
     },
     {
       "manifest": {
         "id": "fntv",
         "name": "飞牛影视服务",
-        "version": "0.1.3",
+        "version": "0.1.4",
         "api_version": 2,
         "min_host_version": "0.3.7",
         "description": "通过独立影视账号，让飞牛影视客户端浏览和播放已授权的网盘媒体库。安装后需配置账号、创建媒体库并主动启动。",
@@ -77,7 +77,7 @@
         "integration": {
           "file_types": [],
           "directories": false,
-          "changelog": "管理页界面改版：配色跟随主站深浅色，手机沉浸并自带返回网盘；服务状态与启停置顶，并提示启动前还缺哪些步骤；连接地址可一键复制；账号、媒体库和封面改为分组列表。服务能力不变，更新保留账号、媒体库、观看记录和运行状态。",
+          "changelog": "共用 SDK 兼容更新；宿主 0.3.10 可读取影视刮削生成的完整 NFO 和统一海报。",
           "formats": [
             "网盘视频",
             "同目录 NFO 和海报",
@@ -97,15 +97,71 @@
           "data_schema": 1
         }
       },
-      "sha256": "b796788a6b55e50ac506d67152d3d022bddbdef49d5d7bb540cf62669ac69380",
-      "size": 16159,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/fntv-0.1.3.tgapp"
+      "sha256": "8bd43585e989897766916406e9805cf704ab3120ef10db78f3794d98559643f1",
+      "size": 16386,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/fntv-0.1.4.tgapp"
+    },
+    {
+      "manifest": {
+        "id": "media-scraper",
+        "name": "影视刮削",
+        "version": "0.1.0",
+        "api_version": 2,
+        "min_host_version": "0.3.10",
+        "description": "手动整理指定网盘目录中的番号视频，通过 MetaTube 写入 NFO 与海报，供影视应用和飞牛影视读取。执行前预览，关闭页面停止后续操作。",
+        "author": "tgdrive",
+        "entry": "index.html",
+        "icon": "icon.svg",
+        "permissions": [
+          "files.read",
+          "media.read",
+          "scraper.service"
+        ],
+        "settings": [
+          {
+            "key": "backend_url",
+            "label": "MetaTube 后端",
+            "description": "保存的后端地址；Token 在应用连接页单独填写。",
+            "type": "string",
+            "default": "https://metatube-server.hf.space/"
+          }
+        ],
+        "integration": {
+          "file_types": [],
+          "directories": true,
+          "changelog": "首版手动影视刮削：递归扫描、候选确认、番号目录整理、NFO 和 JPEG 海报补齐及覆盖预览，保留操作结果供手动核实和继续。",
+          "formats": [
+            "MetaTube 番号影片",
+            "NFO",
+            "2:3 JPEG 海报",
+            "文本字幕同行"
+          ],
+          "limitations": [
+            "只执行用户确认的手动操作；关闭页面停止后续步骤，保留已完成结果。",
+            "首期不自动翻译，不适配普通电影或电视剧联网资料源。",
+            "MetaTube 来源可用性取决于所配置后端；飞牛兼容服务首期合计索引上限为 3000 条视频。",
+            "Token 不进入数据库备份或应用恢复快照，恢复后需重新填写。"
+          ],
+          "homepage": "https://github.com/lengyuesky/tgdrive-app",
+          "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+          "screenshots": [
+            "screenshots/desktop-preview.png",
+            "screenshots/mobile-directory.png",
+            "screenshots/mobile-preview.png",
+            "screenshots/mobile-record.png"
+          ],
+          "data_schema": 1
+        }
+      },
+      "sha256": "496c5e1d671a5fb2e67a5f80213204bd24991463b67877b80605571b8c72f563",
+      "size": 407367,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/media-scraper-0.1.0.tgapp"
     },
     {
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.1.0",
+        "version": "1.1.2",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -126,7 +182,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "iPhone 主屏幕界面改版：手机打开即沉浸并自带返回网盘；正文跟手翻页、左右边缘留给系统返回手势；工具栏改为图标与可拖动进度条，排版分两级、四种主题；长条漫自动连续滚动；书库去掉抽屉，改为顶部筛选标签。升级保留书库、分组、阅读进度、书签及自定义偏好。",
+          "changelog": "修复纯图片 EPUB 在图片解码和缓存回收期间页数变化、提前跳章的问题，横竖屏保留稳定的图片尺寸。延续手机沉浸书库、跟手翻页及图标工具栏，升级保留书库、分组、阅读进度、书签及自定义偏好。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -150,15 +206,15 @@
           "data_schema": 1
         }
       },
-      "sha256": "bd271f2a475a56b8d16a660f566486597b70e540684ca6103aa7ca8bae344de7",
-      "size": 2406503,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.1.0.tgapp"
+      "sha256": "6f720c4ea849424ae69628e63710c830e44331eda02e45267c98be4412416b1e",
+      "size": 2406915,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.1.2.tgapp"
     },
     {
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "1.5.0",
+        "version": "1.5.1",
         "api_version": 2,
         "min_host_version": "0.3.1",
         "description": "随机播放网盘文件夹里的视频，支持滑动切换、进度拖动、收藏和下载。",
@@ -219,9 +275,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "8b9e7f09ca5e851aac10e8b58c4002bef2e212719ef0b991e61286e913f5ef19",
-      "size": 132783,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.5.0.tgapp"
+      "sha256": "1d021b455acdef18130d4073bdc160b77338782d59183dac69fb5d3b616e57fd",
+      "size": 133151,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/shorts-1.5.1.tgapp"
     }
   ]
 }

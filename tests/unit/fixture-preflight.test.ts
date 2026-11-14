@@ -9,7 +9,7 @@ import { fixtureCatalogDir, verifyFixtureBuilds } from '../browser/fixture-prefl
 const root = resolve(import.meta.dirname, '../..')
 const run = promisify(execFile)
 const temporary: string[] = []
-const ids = ['shorts', 'reader', 'cinema', 'fntv']
+const ids = ['shorts', 'reader', 'cinema', 'fntv', 'media-scraper']
 
 async function fixture() {
   const directory = await mkdtemp(`${tmpdir()}/tgdrive-preflight-test-`)
@@ -38,7 +38,7 @@ async function fixture() {
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
 describe('浏览器夹具构建前置检查（不启动宿主）', () => {
-  it('显式合成宿主与四个当前真实包通过，支持自定义目录', async () => {
+  it('显式合成宿主与五个当前真实包通过，支持自定义目录', async () => {
     const { hostDir, catalogDir } = await fixture()
     await expect(verifyFixtureBuilds(hostDir, catalogDir)).resolves.toBeUndefined()
   })

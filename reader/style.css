@@ -124,6 +124,8 @@ h1 { font-size:23px; margin:0; } .brand p { margin:4px 0 0; color:var(--muted); 
 .flow-pages { position:relative; overflow:hidden; margin:0 auto; direction:ltr; }
 .flow-content.is-paginated { width:100%; height:100%; margin:0; padding:0; column-fill:auto; column-gap:24px; overflow:visible; }
 .flow-content.is-paginated img { max-height:var(--page-height); max-width:100%; width:auto !important; height:auto; object-fit:contain; break-inside:avoid; margin:0 auto; }
+/* 已知尺寸的图片在解码等待时也保留真实占位，避免页数短暂收缩导致提前跳章。 */
+.flow-content.is-paginated img[data-resource][width] { --picture-display-width:min(var(--picture-width),var(--page-width),calc(var(--page-height) * var(--picture-ratio))); width:var(--picture-display-width) !important; height:calc(var(--picture-display-width) / var(--picture-ratio)); }
 .flow-content.is-paginated img[data-resource]:not([src]) { min-height:min(180px,var(--page-height)); }
 /* 未知尺寸图片先保留一页，避免快速翻页越过还没解码的末尾图片。 */
 .flow-content.is-paginated img[data-resource]:not([width]) { width:100% !important; height:var(--page-height); min-height:var(--page-height); }

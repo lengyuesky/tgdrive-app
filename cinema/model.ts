@@ -1,4 +1,5 @@
 import type { FileEntry, Ref } from '../sdk/types'
+import { foldName, inferNumber } from '../media-scraper/model'
 
 export const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'mov', 'webm', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'ts', 'mts', 'm2ts', '3gp']
 export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp']
@@ -13,6 +14,10 @@ export function episode(name: string): [number, number] | null {
   if (se) return [Number(se[1]), Number(se[2])]
   const ep = /(?:\bE|第\s*)(\d{1,4})(?:\s*[集话話]|\b)/i.exec(name)
   return ep ? [0, Number(ep[1])] : null
+}
+export function isNumberedMovie(file: FileEntry, description?: { kind: string; number?: string }): boolean {
+  if(description?.kind==='movie' && description.number)return true
+  return !['episodedetails','tvshow'].includes(description?.kind ?? '') && !episode(file.name) && !!inferNumber(file)
 }
 export function naturalOrder(a: FileEntry, b: FileEntry) {
   const x = episode(a.name), y = episode(b.name)
@@ -44,8 +49,10 @@ export function validProgress(value: unknown): value is CinemaProgress {
 }
 export const sameContent = (a: Ref, b: Ref) => a.id === b.id && a.content_version === b.content_version
 export function coverCandidates(video: FileEntry, files: FileEntry[], wide = false): FileEntry[] {
-  const names = wide ? ['fanart', 'backdrop', stem(video.name), 'poster', 'cover'] : [stem(video.name), 'poster', 'cover']
-  return names.flatMap(name => files.filter(f => !f.is_dir && IMAGE_EXTENSIONS.includes(extension(f.name)) && stem(f.name).toLowerCase() === name.toLowerCase()).sort((a, b) => IMAGE_EXTENSIONS.indexOf(extension(a.name)) - IMAGE_EXTENSIONS.indexOf(extension(b.name))))
+  const base = stem(video.name), names = [`${base}-poster.jpg`, `${base}-poster.jpeg`, ...['jpg','jpeg','png','webp'].map(ext => `${base}.${ext}`), ...['poster','folder','cover'].flatMap(name => ['jpg','jpeg','png','webp'].map(ext => `${name}.${ext}`))]
+  const posters = names.flatMap(name => files.filter(file => !file.is_dir && foldName(file.name) === foldName(name)))
+  if (!wide) return posters
+  return ['fanart','backdrop'].flatMap(name => files.filter(file => !file.is_dir && IMAGE_EXTENSIONS.includes(extension(file.name)) && stem(file.name).toLowerCase() === name)).concat(posters)
 }
 export function subtitleFiles(video: FileEntry, files: FileEntry[]) {
   const base = stem(video.name).toLowerCase()

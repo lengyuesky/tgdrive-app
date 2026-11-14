@@ -50,7 +50,7 @@
       drainReads()
     })
   }
-  const readMethods = new Set(['library.page', 'files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats', 'fntv.config.get', 'fntv.service.status'])
+  const readMethods = new Set(['library.page', 'files.search', 'files.searchPage', 'files.list', 'files.stat', 'files.readRange', 'files.readRanges', 'assets.read', 'storage.get', 'storage.list', 'settings.get', 'media.url', 'covers.get', 'covers.stats', 'fntv.config.get', 'fntv.service.status', 'scraper.config.get', 'scraper.providers', 'scraper.search', 'scraper.poster', 'scraper.records', 'scraper.record'])
   let resolveReady
   let rejectReady
   let cancelPaint
@@ -155,7 +155,7 @@
       if (closed || !port) { reject(new Error('应用已经关闭')); return }
       if (signal?.aborted) { reject(new DOMException('读取已取消', 'AbortError')); return }
       const abort = () => cancel(new DOMException('读取已取消', 'AbortError'))
-      const timeout = setTimeout(() => cancel(new Error('应用请求超时，请重试')), method.startsWith('ui.') ? 300_000 : 30_000)
+      const timeout = setTimeout(() => cancel(new Error(method === 'scraper.next' ? '刮削请求中断，请核实操作记录后继续' : '应用请求超时，请重试')), method.startsWith('ui.') ? 300_000 : method === 'scraper.next' ? 150_000 : method.startsWith('scraper.') ? 90_000 : 30_000)
       const cleanup = () => { clearTimeout(timeout); signal?.removeEventListener('abort', abort) }
       pending.set(id, { resolve, reject, cleanup })
       signal?.addEventListener('abort', abort, { once: true })
@@ -197,6 +197,22 @@
       start: () => request('fntv.service.start'),
       stop: () => request('fntv.service.stop'),
       refresh: () => request('fntv.index.refresh'),
+    }),
+    scraper: Object.freeze({
+      config: (options) => request('scraper.config.get', {}, options),
+      configure: (backend_url, token) => request('scraper.config.set', { backend_url, ...(token === undefined ? {} : { token }) }),
+      providers: (options) => request('scraper.providers', {}, options).then(value => value.providers),
+      search: (number, options) => request('scraper.search', { number }, options).then(value => value.candidates),
+      poster: (candidate, options) => request('scraper.poster', candidate, options).then(value => value.data),
+      create: ({ id, path, content_version }) => request('scraper.batch.create', { id, path, content_version }),
+      preview: (input, options) => request('scraper.preview', input, options),
+      begin: (batch) => request('scraper.batch.begin', batch),
+      next: (batch, options) => request('scraper.next', batch, options),
+      heartbeat: (batch) => request('scraper.heartbeat', batch),
+      stop: (batch) => request('scraper.stop', batch),
+      records: (params = {}, options) => request('scraper.records', params, options),
+      record: (params, options) => request('scraper.record', params, options),
+      verify: (id) => request('scraper.verify', { id }),
     }),
     files: Object.freeze({
       search: (params = {}, options) => request('files.search', params, options),

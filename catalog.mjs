@@ -19,7 +19,7 @@ export const VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]
 const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
 const MAX_SEMVER_COMPONENT = (1n << 64n) - 1n
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u
-const PERMISSIONS = ['files.read', 'media.read', 'favorites.write', 'fntv.service']
+const PERMISSIONS = ['files.read', 'media.read', 'favorites.write', 'fntv.service', 'scraper.service']
 const MANIFEST_FIELDS = ['id', 'name', 'version', 'api_version', 'min_host_version', 'description', 'author', 'entry', 'icon', 'permissions', 'settings', 'integration']
 
 function matches(pattern, value) {
@@ -109,6 +109,11 @@ export function validateManifest(manifest) {
     throw new Error('飞牛服务能力仅供 fntv 应用使用，需要 API v2、主程序 0.3.5 以及文件和媒体读取权限')
   }
   if (!Array.isArray(manifest.settings) || manifest.settings.length > 24) throw new Error('settings 必须为最多 24 项的数组')
+  if (manifest.permissions.includes('scraper.service') && (manifest.id !== 'media-scraper' || manifest.api_version !== 2
+    || compareStableVersions(manifest.min_host_version, '0.3.10') < 0
+    || !manifest.permissions.includes('files.read') || !manifest.permissions.includes('media.read'))) {
+    throw new Error('影视刮削能力仅供 media-scraper 应用使用，需要 API v2、宿主 0.3.10 以及文件和媒体读取权限')
+  }
   const keys = new Set()
   for (const field of manifest.settings) {
     validateObject(field, 'setting', ['key', 'label', 'description', 'type', 'default'], ['key', 'label', 'type', 'default'])

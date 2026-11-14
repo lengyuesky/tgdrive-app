@@ -273,6 +273,24 @@ SDK 收到宿主明确的 `rate_limited` 错误时，对文件读取、存储读
 
 每个插件页面共用最多四个在途只读 RPC 槽位；后台请求最多占两个槽位，预留前台容量。封面缓存读取、统计和缩略图票据默认为后台，其他读取默认为前台。`CallOptions` 可指定 `priority: 'foreground' | 'background'`；`media.url(ref, kind, options)` 同样支持优先级与取消信号。短视频下一条播放地址预取使用后台优先级。
 
-队列优先发送前台请求，每连续发送八个前台请求后，如有后台空槽则给予一个后台请求机会。最多等待 128 项，每项最多排队 30 秒；容量耗尽返回 `sdk_queue_full`，排队超时返回可显示的错误，不自动重试。取消排队任务不会发出 RPC，页面关闭会拒绝全部等待者。在途请求超时仍是 30 秒，退避等待不占用槽位。
+队列优先发送前台请求，每连续发送八个前台请求后，如有后台空槽则给予一个后台请求机会。最多等待 128 项，每项最多排队 30 秒；容量耗尽返回 `sdk_queue_full`，排队超时返回可显示的错误，不自动重试。取消排队任务不会发出 RPC，页面关闭会拒绝全部等待者。普通在途请求超时为 30 秒，刮削接口的独立期限见下节；退避等待不占用槽位。
 
 写入、界面交互和生命周期不进入只读队列，避免保存进度或关闭页面被正文读取阻塞。混合读写批量信封不排队、不自动重放。此策略不改变宿主限流或权限规则，也不调度票据 URL 的直接 `fetch`。暂不合并相同 RPC，避免改变读取时序和独立取消语义。
+
+## 手动影视刮削
+
+`drive.scraper` 仅供固定 `media-scraper` 应用在宿主 0.3.10 或更高版本中使用。先等待 `drive.ready` 并确认 `drive.can('scraper.service')`；清单需声明 API v2、`files.read`、`media.read` 和 `scraper.service`。目录授权包含受预览约束的整理和资料写入，没有通用网盘写 API。
+
+| SDK 方法 | 宿主方法 | 行为 |
+| --- | --- | --- |
+| `config()` / `configure(url, token?)` | `scraper.config.get/set` | 回读 URL、Token 配置状态；不返回 Token。省略 Token 保留绑定，空字符串清除；更换地址后旧绑定不生效 |
+| `providers()` / `search(number)` / `poster(candidate)` | `scraper.providers/search/poster` | 调用已保存后端；搜索返回候选的 provider、ID、番号和标题，主图返回有界 JPEG data URL |
+| `create(root)` / `preview(input)` | `scraper.batch.create/preview` | root、视频引用均含 ID、内容版本与路径；返回预览、覆盖目标、同行文件和是否可执行 |
+| `begin(batch)` / `next(batch)` | `scraper.batch.begin/next` | 同时仅一个写入批次；每次 next 显式推进一个步骤，不自动重放或续跑 |
+| `heartbeat(batch)` / `stop(batch)` | `scraper.heartbeat/stop` | 心跳维护 45 秒页面租约；stop 只在宿主终态确认后返回 stopped=true |
+| `records(params)` / `record(params)` | `scraper.records/record` | 分页读取 30 天记录及分步骤结果；read_only 表示恢复所得记录仅供查看 |
+| `verify(id)` | `scraper.verify` | 核实普通中断的在途提交并释放已确认未完成上传，随后重新预览；恢复记录拒绝此操作 |
+
+`ScraperHandle` 含 `id` 和 `owner`。预览引用、后端或候选变化后需创建新预览。`refresh` 表示主动重刮，`update_nfo`、`update_poster` 分别控制资料更新，`shared_ids` 是用户明确选择的同行共用文件。记录的 owner 不可用作自动恢复凭据。
+
+刮削读取接口进入只读队列，但全部刮削方法不能放进 `rpc.batch`。SDK 刮削请求期限为 90 秒，`scraper.next` 为 150 秒；宿主单个 MetaTube HTTP 请求总期限仍为 40 秒。写入与普通网络错误不自动重放。关闭页面或 `task.cancel` 时应调用 stop；若尚未 stopped，显示正在停止并等待记录核实。宿主任务条的 ID 只接受 1–40 个小写字母、数字和短横线，不能直接使用含大写字母的批次随机 ID。

@@ -35,9 +35,49 @@ export interface FntvService {
   stop(): Promise<{ ok: true; running: false }>
   refresh(): Promise<FntvStatus['index']>
 }
+export interface ScraperReference extends Ref { path: string }
+export interface ScraperHandle { id: string; owner: string }
+export interface ScraperCandidate { provider: string; id: string; number: string; title: string }
+export interface ScraperConfig { backend_url: string; token_configured: boolean }
+export interface ScraperSnapshot extends ScraperReference { name: string; size?: number; parent_id?: number | null; is_dir?: boolean }
+export interface ScraperArtifact { action: 'keep' | 'create' | 'replace'; name: string; existing: ScraperSnapshot | null }
+export interface ScraperPreview {
+  id: string; ready: boolean; needs_candidate: boolean; files: ScraperSnapshot[]; error?: string
+  target_path?: string; moving?: ScraperSnapshot[]; nfo?: ScraperArtifact; poster?: ScraperArtifact; candidate?: ScraperCandidate | null
+}
+export interface ScraperPrepare {
+  batch: ScraperHandle; files: ScraperReference[]; number: string; candidate?: ScraperCandidate | null
+  refresh?: boolean; update_nfo?: boolean; update_poster?: boolean; shared_ids?: number[]
+}
+export interface ScraperStep { state: string; file?: ScraperSnapshot | null; upload_id?: string | null }
+export interface ScraperResult { organize: ScraperStep; nfo: ScraperStep; poster: ScraperStep; reason: string }
+export interface ScraperHistory { id: string; root_path: string; status: string; message: string; read_only: boolean; created_at: number; updated_at: number; total: number; completed: number }
+export interface ScraperRecord {
+  id: string; root_id: number; root_path: string; status: string; message: string; read_only: boolean
+  items: { id: string; position: number; files: ScraperSnapshot[]; result: ScraperResult; status: string; number?: string | null; target_path?: string | null }[]
+  has_more: boolean; next_after: number | null
+}
+/** 只供固定刮削应用使用；每个 next 显式执行一个步骤，不会后台自动续跑。 */
+export interface ScraperService {
+  config(options?: CallOptions): Promise<ScraperConfig>
+  configure(backend_url: string, token?: string): Promise<ScraperConfig>
+  providers(options?: CallOptions): Promise<string[]>
+  search(number: string, options?: CallOptions): Promise<ScraperCandidate[]>
+  poster(candidate: ScraperCandidate, options?: CallOptions): Promise<string>
+  create(root: ScraperReference): Promise<ScraperHandle>
+  preview(input: ScraperPrepare, options?: CallOptions): Promise<ScraperPreview>
+  begin(batch: ScraperHandle): Promise<{ ok: true }>
+  next(batch: ScraperHandle, options?: CallOptions): Promise<{ done: boolean; paused?: boolean; item_id?: string; status?: string; result?: ScraperResult }>
+  heartbeat(batch: ScraperHandle): Promise<{ ok: true }>
+  stop(batch: ScraperHandle): Promise<{ stopped: boolean; status: string }>
+  records(params?: { cursor?: string; limit?: number }, options?: CallOptions): Promise<{ records: ScraperHistory[]; has_more: boolean; next_cursor: string | null }>
+  record(params: { id: string; after?: number }, options?: CallOptions): Promise<ScraperRecord>
+  verify(id: string): Promise<ScraperRecord>
+}
 export interface Drive {
   /** 固定影视服务能力；只有获授权的 fntv 插件可以使用。 */
   fntv?: FntvService
+  scraper?: ScraperService
   /** 宿主维护的阅读文件索引；使用前探测 library.page。 */
   library?: { page(query: HostLibraryQuery, options?: CallOptions): Promise<HostLibraryPage> }
   ready: Promise<ReadyContext>

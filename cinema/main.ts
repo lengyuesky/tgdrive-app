@@ -4,9 +4,10 @@ import './style.css'
 import './libraries.css'
 import { icon as sharedIcon, type IconName } from '../ui/icons'
 import type { FileEntry, RecordValue } from '../sdk/types'
-import { VIDEO_EXTENSIONS, extension, isVideo, naturalOrder, parentPath, preferences, sizeText, subtitleFiles, timeText, title, validProgress, type CinemaFavorite, type CinemaPreferences, type CinemaProgress } from './model'
+import { VIDEO_EXTENSIONS, extension, isVideo, isNumberedMovie, naturalOrder, parentPath, preferences, sizeText, subtitleFiles, timeText, title, validProgress, type CinemaFavorite, type CinemaPreferences, type CinemaProgress } from './model'
 import { ReadScheduler, RangeFile, isAbort } from './io'
 import { Library, ArtLoader } from './library'
+import { Descriptions } from './metadata'
 import { ProgressStore } from './storage'
 import { newLibraryId, LibrariesStore, LibraryAccess, requireDirectory, withinDirectory, type CinemaLibrary, type LibrariesSnapshot, type SavedVideo, filesChangeAffectsLibraries } from './libraries'
 import { LibraryManager } from './libraries-ui'
@@ -57,6 +58,7 @@ function report(error: unknown) { if (!isAbort(error)) toast(error instanceof Er
 function handle(task: unknown) { void Promise.resolve(task).catch(report) }
 function on(id: string, event: string, callback: (event: Event) => unknown) { $(id).addEventListener(event, event => { try { handle(callback(event)) } catch (error) { report(error) } }) }
 const scheduler = new ReadScheduler(), library = new Library(drive)
+const descriptions = new Descriptions(drive)
 const librariesStore = new LibrariesStore(drive), access = new LibraryAccess(drive, scheduler)
 let pageController = new AbortController(), detailController = new AbortController(), playController = new AbortController()
 let art: ArtLoader | undefined, detailArt: ArtLoader | undefined
@@ -71,6 +73,7 @@ let episodes: FileEntry[] = [], episodesComplete = true, episodePage = 0
 let pref = preferences(null), prefRecord: RecordValue<CinemaPreferences> | null = null, prefSaving = Promise.resolve()
 let favoriteRecord: RecordValue<CinemaFavorite> | null = null
 let session: PlaybackSession | undefined, store: ProgressStore | undefined, playing: FileEntry | undefined, queue: FileEntry[] = []
+let numberedMovie = false
 let playGeneration = 0, startIntent = 0, restored = false, duration = 0, subtitleTracks: SubtitleTrack[] = [], subtitleController = new AbortController()
 let captionWindowAt = -Infinity, captionLoading = false, selectedSubtitle = '', restoredAudio: number | undefined
 let subtitleExplicit = false, failedPlayback = false
@@ -81,6 +84,9 @@ const sleep = new SleepTimer(() => { cancelNext(); video.pause(); persist(true);
 let seriesSaving = Promise.resolve()
 let closingPlayback = Promise.resolve()
 const detail = $<HTMLDialogElement>('detail'), player = $('player'), moreMenu = $<HTMLDialogElement>('more-menu')
+const overview = element('p', 'detail-overview')
+overview.id = 'detail-overview'; overview.hidden = true
+detail.querySelector('.detail-tools')!.after(overview)
 function closeMore() { if (moreMenu.open) moreMenu.close() }
 // 详情顶部背景：海报解码完成后按小尺寸绘制到画布再模糊放大，不重新请求图片。
 const detailBackdrop = $('detail-backdrop')
@@ -129,6 +135,15 @@ function poster(file: FileEntry, removable?: () => unknown, progress?: CinemaPro
   button.title = file.path; button.setAttribute('aria-label', `${file.is_dir ? '打开目录' : '查看影视'}：${file.name}`)
   button.onclick = () => handle(file.is_dir ? browseDirectory(file.path) : openDetail(file))
   card.append(button)
+  if (!file.is_dir) {
+    const signal = pageController.signal
+    void descriptions.load(file, signal).then(info => {
+      if (signal.aborted || !card.isConnected || !info) return
+      const label = button.querySelector('h3')
+      if (info.title && label) label.textContent = info.title
+      if (info.year) button.querySelector('p')!.textContent = `${info.year} · ${extension(file.name).toUpperCase()} · ${sizeText(file.size)}`
+    }).catch(() => {})
+  }
   if (!file.is_dir) art?.observe(image, file)
   if (progress) { const bar = element('div', 'progress-track'), fill = element('i'); fill.style.width = `${Math.min(100, progress.seconds / Math.max(1, progress.duration) * 100)}%`; bar.append(fill); card.append(bar) }
   if (removable) { const remove = element('button', 'poster-remove', '移除'); remove.setAttribute('aria-label', `移除记录：${file.name}`); remove.onclick = () => handle(removable()); card.append(remove) }
@@ -265,6 +280,12 @@ async function homeSections(root: CinemaLibrary, signal: AbortSignal) {
   heroFile = progress[0]?.file ?? currentFiles.find(isVideo)
   if (heroFile) {
     text('hero-title', title(heroFile.name)); text('hero-meta', `${extension(heroFile.name).toUpperCase()}  /  ${sizeText(heroFile.size)}  /  ${root.name}`)
+    const hero = heroFile
+    void descriptions.load(hero, signal).then(info => {
+      if (signal.aborted || heroFile?.id !== hero.id || !info) return
+      if (info.title) text('hero-title', info.title)
+      if (info.year) text('hero-meta', `${info.year}  /  ${extension(hero.name).toUpperCase()}  /  ${root.name}`)
+    }).catch(() => {})
     show('hero', true); art?.observe($('hero').querySelector('.hero-art') as HTMLElement, heroFile, true)
   }
 }
@@ -287,6 +308,7 @@ async function openDetail(file: FileEntry) {
   if (!detail.open) detail.showModal()
   text('detail-title', title(file.name)); text('detail-meta', `${extension(file.name).toUpperCase()} · ${sizeText(file.size)}`); text('detail-path', file.path)
   text('detail-progress', ''); text('detail-status', '正在整理同目录合集…'); text('episode-count', ''); show('detail-retry', false)
+  text('detail-overview', ''); show('detail-overview', false)
   $('detail-play').querySelector('span:last-child')!.textContent = '播放'
   $('episodes').replaceChildren(); $('detail-poster').replaceChildren(); show('episodes-prev', false); show('episodes-next', false)
   const image = element('div', 'poster-art'); image.style.setProperty('--hue', String(230 + file.id * 37 % 100)); image.append(element('span', 'poster-initial', title(file.name).slice(0, 4)))
@@ -298,6 +320,11 @@ async function openDetail(file: FileEntry) {
     text('detail-title', title(current.name)); text('detail-meta', `${extension(current.name).toUpperCase()} · ${sizeText(current.size)}`); text('detail-path', current.path)
     library.setScope(root.directoryPath)
     detailArt = new ArtLoader(drive, library, scheduler, signal); detailArt.observe(image, current)
+    const description = await descriptions.load(current, signal)
+    signal.throwIfAborted()
+    if (description?.title) text('detail-title', description.title)
+    if (description?.year) text('detail-meta', `${description.year} · ${extension(current.name).toUpperCase()} · ${sizeText(current.size)}`)
+    if (description?.overview) { text('detail-overview', description.overview); show('detail-overview', true) }
     for (const id of ['detail-play', 'detail-restart', 'detail-download']) $<HTMLButtonElement>(id).disabled = false
     const [progress, favorite] = await Promise.all([drive.storage.get<CinemaProgress>(`progress:${current.id}`, { signal }), drive.storage.get<CinemaFavorite>(`favorite:${current.id}`, { signal })])
     signal.throwIfAborted(); favoriteRecord = favorite; updateFavorite()
@@ -343,7 +370,7 @@ function applyPreferences() {
   video.playbackRate = pref.speed; video.style.objectFit = pref.fit; video.style.setProperty('--subtitle-size', `${pref.subtitleSize}px`)
   $<HTMLSelectElement>('speed').value = String(pref.speed); $<HTMLSelectElement>('fit').value = pref.fit
   $<HTMLInputElement>('subtitle-size').value = String(pref.subtitleSize); $<HTMLInputElement>('subtitle-offset').value = String(pref.subtitleOffset)
-  $<HTMLSelectElement>('encoding').value = pref.encoding; $<HTMLInputElement>('autoplay').checked = pref.autoplay; captions.shift(pref.subtitleOffset)
+  $<HTMLSelectElement>('encoding').value = pref.encoding; $<HTMLInputElement>('autoplay').checked = !numberedMovie && pref.autoplay; $<HTMLInputElement>('autoplay').disabled = numberedMovie; captions.shift(pref.subtitleOffset)
 }
 function savePreferences() {
   applyPreferences()
@@ -384,6 +411,7 @@ async function startPlayback(file: FileEntry, restart = false, suppliedQueue?: F
   const active = ++playGeneration
   playController = new AbortController(); const signal = playController.signal
   playing = file; playingLibraryId = requiredId; playingRoot = null; queue = previousQueue; restored = false; duration = 0; selectedSubtitle = ''; restoredAudio = undefined; subtitleTracks = []; subtitleExplicit = false; failedPlayback = false
+  numberedMovie = false
   closeDetail(); art?.clear(); pageController.abort(); showPlayer(true); player.focus()
   text('playing-title', title(file.name)); text('play-mode', '正在准备播放…'); text('play-message', '正在读取视频信息…'); show('play-message', true)
   show('big-play', false); show('play-options', false); syncStatus('', false); text('current-time', '0:00'); text('duration', '0:00'); $<HTMLInputElement>('seek').value = '0'
@@ -397,6 +425,10 @@ async function startPlayback(file: FileEntry, restart = false, suppliedQueue?: F
     await immersive(); signal.throwIfAborted()
     const { file: current, library: root } = await scopedVideo(file, signal, requiredId)
     signal.throwIfAborted(); playing = current; playingRoot = root; playingLibraryId = root.id; text('playing-title', title(current.name))
+    const description = await descriptions.load(current, signal)
+    signal.throwIfAborted()
+    numberedMovie = isNumberedMovie(current,description)
+    if (description?.title) text('playing-title', description.title)
     library.setScope(root.directoryPath)
     const retainQueue = providedQueue?.every(item => parentPath(item.path) === parentPath(current.path) && withinDirectory(item.path, root.directoryPath))
     queue = retainQueue ? providedQueue! : [current]
@@ -415,7 +447,8 @@ async function startPlayback(file: FileEntry, restart = false, suppliedQueue?: F
       signal.throwIfAborted()
       series = seriesOptions(record?.value); seriesRecord = record; seriesKey = key
       $<HTMLInputElement>('skip-intro').value = String(series.intro); $<HTMLInputElement>('skip-outro').value = String(series.outro)
-      $<HTMLFieldSetElement>('series-options').disabled = false; text('series-status', '0 表示不跳过；设置适用于同文件夹内的视频')
+      $<HTMLFieldSetElement>('series-options').disabled = numberedMovie; text('series-status', numberedMovie ? '同番号版本与分段独立播放，请手动切换视频。' : '0 表示不跳过；设置适用于同文件夹内的视频')
+      if (numberedMovie) series = seriesOptions(null)
     } catch (error) { signal.throwIfAborted(); text('series-status', '设置读取失败，重新打开影片可重试') }
     const target = !restart && progress && !progress.completed ? progress.seconds : 0
     const sessionStore = store
@@ -521,7 +554,7 @@ function ended() {
   if (sleep.check(true)) return
   persist(true)
   cancelNext()
-  if (!pref.autoplay || queue.findIndex(f => f.id === playing?.id) >= queue.length - 1) return
+  if (numberedMovie || !pref.autoplay || queue.findIndex(f => f.id === playing?.id) >= queue.length - 1) return
   let remaining = 5; show('next-countdown', true); text('countdown-text', `${remaining} 秒后播放下一集`)
   nextTimer = setInterval(() => { remaining--; text('countdown-text', `${remaining} 秒后播放下一集`); if (!remaining) { cancelNext(); handle(goEpisode(1)) } }, 1000)
 }

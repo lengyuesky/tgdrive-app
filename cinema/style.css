@@ -309,3 +309,5 @@ dialog::backdrop { background: var(--tg-overlay); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+/* NFO 简介作为完整文本显示，长内容随详情滚动。 */
+.detail-overview{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75;padding:0 26px;margin:18px 0}

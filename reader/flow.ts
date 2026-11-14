@@ -274,6 +274,7 @@ export abstract class FlowReader implements ReaderView {
       this.article.style.maxWidth = 'none'
       this.article.style.paddingBottom = '0px'
       this.article.style.columnWidth = `${this.pager.clientWidth}px`
+      this.article.style.setProperty('--page-width', `${this.pager.clientWidth}px`)
       this.article.style.setProperty('--page-height', `${size.height}px`)
       // 超过单页的不可分割表格行需要保留页内滚动，不能被阅读视口裁掉。
       for (const table of this.article.querySelectorAll('table')) {

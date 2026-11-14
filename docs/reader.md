@@ -1,6 +1,6 @@
 # 统一阅读馆
 
-当前分发阅读馆为 `reader 1.1.0`，要求宿主 `0.3.3`。官方分发 `shorts`、`reader`、`cinema`、`fntv` 四款。书库由用户手动命名并一库绑定一个目录，在对应书库内浏览 TXT、EPUB、PDF、CBZ、ZIP 和图片目录。`books/`、`comics/` 的底层解析器源码和回归保留，独立官方分发入口退役。
+当前阅读馆为 `reader 1.1.2`，要求宿主 `0.3.3`。本仓库维护 `shorts`、`reader`、`cinema`、`fntv`、`media-scraper` 五款分发插件。1.1.1 同步新增刮削接口的共享 SDK；1.1.2 修复纯图片 EPUB 在解码和缓存回收期间图片尺寸塌缩、页数变化并提前跳章的问题，数据格式沿用 1.1.0。书库由用户手动命名并一库绑定一个目录，在对应书库内浏览 TXT、EPUB、PDF、CBZ、ZIP 和图片目录。`books/`、`comics/` 的底层解析器源码和回归保留，独立官方分发入口退役。
 
 1.0.5 同步公共 SDK 的可选飞牛服务接口，阅读页面及资源延续 1.0.4，升级保留书库、分组、进度、书签和自定义偏好。本次集成与目录校验见 [公开目录发布记录](fntv-0.1.1-release.md)。
 
@@ -63,9 +63,9 @@
 
 ## 构建与验证
 
-`build.mjs` 构建 shorts、reader、cinema、fntv。reader 包同时携带 ZIP、DOMPurify、PDF worker、cmaps、standard_fonts，以及 ZIP/DOMPurify/PDF.js/core-js 和字体许可、NOTICE。不得依赖旧 books/comics 安装包或远程 CDN。SDK 改动若改变其他插件归档摘要，必须按同版本不可变规则检查并协调升版。
+`build.mjs` 构建 shorts、reader、cinema、fntv、media-scraper。reader 包同时携带 ZIP、DOMPurify、PDF worker、cmaps、standard_fonts，以及 ZIP/DOMPurify/PDF.js/core-js 和字体许可、NOTICE。不得依赖旧 books/comics 安装包或远程 CDN。SDK 改动若改变其他插件归档摘要，必须按同版本不可变规则检查并协调升版。
 
-`npm test -- tests/unit` 验证四款分发、reader 清单版本、资源许可、退役包清理和同版本防篡改；所有分发构建使用合成临时输出，不依赖根目录已有 reader 包。`npm run test:readers` 使用真实 reader 入口与内存 Drive，保留书/漫内容夹具，新增 390/1280 两视口混合阅读切换。`npm run test:comics` 继续直接回归底层漫画几何与滚动。
+`npm test -- tests/unit` 验证五款分发、reader 清单版本、资源许可、退役包清理和同版本防篡改；所有分发构建使用合成临时输出，不依赖根目录已有 reader 包。`npm run test:readers` 使用真实 reader 入口与内存 Drive，覆盖书／漫内容与多视口切换；新增真实图片请求暂停的横竖屏回归，核对解码等待、完成与回收时的尺寸和页数。`npm run test:comics` 继续直接回归底层漫画几何与滚动。
 
 跨库用例位于 `tests/browser/`，通过 reader 应用 ID 验证同库全部格式、移动阅读、来源、全库索引和平台集成。仅用显式 `TGDRIVE_HOST_DIR` 指向获授权宿主，使用临时数据库、内存 Telegram 与合成媒体；同一时刻只能有一个服务占用 4187。Cargo 默认复用该宿主的 target 目录。截图只写测试产物，最终源码截图由维护者独立生成。
 

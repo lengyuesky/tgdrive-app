@@ -1,0 +1,24 @@
+{
+  "id": "media-scraper",
+  "name": "影视刮削",
+  "version": "0.1.0",
+  "api_version": 2,
+  "min_host_version": "0.3.10",
+  "description": "手动整理指定网盘目录中的番号视频，通过 MetaTube 写入 NFO 与海报，供影视应用和飞牛影视读取。执行前预览，关闭页面停止后续操作。",
+  "author": "tgdrive",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "permissions": ["files.read", "media.read", "scraper.service"],
+  "settings": [{"key":"backend_url","label":"MetaTube 后端","description":"保存的后端地址；Token 在应用连接页单独填写。","type":"string","default":"https://metatube-server.hf.space/"}],
+  "integration": {
+    "file_types": [],
+    "directories": true,
+    "changelog": "首版手动影视刮削：递归扫描、候选确认、番号目录整理、NFO 和 JPEG 海报补齐及覆盖预览，保留操作结果供手动核实和继续。",
+    "formats": ["MetaTube 番号影片", "NFO", "2:3 JPEG 海报", "文本字幕同行"],
+    "limitations": ["只执行用户确认的手动操作；关闭页面停止后续步骤，保留已完成结果。", "首期不自动翻译，不适配普通电影或电视剧联网资料源。", "MetaTube 来源可用性取决于所配置后端；飞牛兼容服务首期合计索引上限为 3000 条视频。", "Token 不进入数据库备份或应用恢复快照，恢复后需重新填写。"],
+    "homepage": "https://github.com/lengyuesky/tgdrive-app",
+    "support": "https://github.com/lengyuesky/tgdrive-app/issues",
+    "screenshots": ["screenshots/desktop-preview.png", "screenshots/mobile-directory.png", "screenshots/mobile-preview.png", "screenshots/mobile-record.png"],
+    "data_schema": 1
+  }
+}

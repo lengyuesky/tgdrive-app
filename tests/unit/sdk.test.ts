@@ -41,6 +41,40 @@ function boot(visibility: DocumentVisibilityState = 'visible') {
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
 
+describe('手动刮削 SDK 的写入和关闭契约', () => {
+  it('执行步骤被拒绝后不会盲目自动重放，目录引用只传身份和路径', async () => {
+    const app = boot('hidden')
+    Object.assign(app.context, { capabilities: ['scraper.service'] })
+    app.connect(); await app.drive.ready
+    const create = app.drive.scraper!.create({ id: 7, path: '/电影', content_version: 'a'.repeat(64), size: 999 } as any)
+    await vi.advanceTimersByTimeAsync(0)
+    const first = app.port.postMessage.mock.calls.at(-1)![0]
+    expect(first.params).toEqual({ id: 7, path: '/电影', content_version: 'a'.repeat(64) })
+    const handle = { id: 'batch', owner: 'owner' }
+    app.port.onmessage!({ data: { type: 'response', id: first.id, result: handle } })
+    await create
+    const next = app.drive.scraper!.next(handle)
+    const rejected = expect(next).rejects.toMatchObject({ code: 'rate_limited' })
+    await vi.advanceTimersByTimeAsync(0)
+    const executing = app.port.postMessage.mock.calls.at(-1)![0]
+    app.port.onmessage!({ data: { type: 'response', id: executing.id, error: '请稍后重试', code: 'rate_limited' } })
+    await rejected; await vi.advanceTimersByTimeAsync(10_000)
+    expect(app.port.postMessage.mock.calls.filter(call => call[0].method === 'scraper.next')).toHaveLength(1)
+  })
+  it('关闭握手先等待应用提交停止请求，再确认页面关闭', async () => {
+    const app = boot('hidden'); app.connect(); await app.drive.ready
+    app.drive.on('beforeClose', () => app.drive.scraper!.stop({ id: 'batch', owner: 'owner' }))
+    app.port.onmessage!({ data: { type: 'closing', id: 77 } })
+    await vi.advanceTimersByTimeAsync(0)
+    const stop = app.port.postMessage.mock.calls.at(-1)![0]
+    expect(stop.method).toBe('scraper.stop')
+    expect(app.port.postMessage.mock.calls.some(call => call[0].type === 'closed')).toBe(false)
+    app.port.onmessage!({ data: { type: 'response', id: stop.id, result: { stopped: false, status: 'stopping' } } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'closed', id: 77 })
+  })
+})
+
 describe('页面 SDK 的可交互就绪时序', () => {
   it('文件定位只发送稳定引用，迁移成功后才提交数据版本', async () => {
     const app = boot('hidden')

@@ -93,6 +93,8 @@ export class PictureWindow {
         image.width = result.width; image.height = result.height
         image.style.width = `${result.width}px`; image.style.minHeight = '0'
         image.style.aspectRatio = `${result.width} / ${result.height}`
+        image.style.setProperty('--picture-width', `${result.width}px`)
+        image.style.setProperty('--picture-ratio', String(result.width / result.height))
       })
       this.refresh()
       if (!this.desired.has(image)) return

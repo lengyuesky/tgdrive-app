@@ -95,7 +95,12 @@ test('收藏历史只显示当前范围，旧详情不能播放或下载移出�
   await expect(frame.getByRole('button', { name: '查看影视：流光.webm', exact: true })).toBeVisible()
   await frame.locator('.sidebar [data-nav="favorites"]').click()
   await expect(frame.locator('#items .poster-card')).toHaveCount(1)
-  expect(audit.enumerations()).toEqual([])
+  // NFO 关联会分页读取当前影片所在目录，不能扫描其他目录或搜索全库。
+  for (const call of audit.enumerations()) {
+    expect(call.method).toBe('files.list')
+    expect(call.params.path).toBe('/测试影视/原生示例')
+    expect(call.params.limit).toBeLessThanOrEqual(200)
+  }
   const thumbnails = () => audit.calls.filter(call => call.method === 'media.url' && call.params.kind === 'thumbnail' && call.params.id === ids.inside).length
   const before = thumbnails()
   await frame.getByRole('button', { name: '查看影视：流光.webm', exact: true }).click()

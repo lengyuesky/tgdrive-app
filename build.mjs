@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { spawn } from 'node:child_process'
 import { build } from 'vite'
 import { buildFntv } from './tools/build-fntv.mjs'
+import { buildScraper } from './tools/build-scraper.mjs'
 import {
   mergeCatalogs, collectPackages, formatSha256Sums, sha256Hex,
   serializeCatalog, DEFAULT_REPOSITORY, readCatalog, verifyCatalogPackages,
@@ -15,7 +16,7 @@ import {
 
 const root = dirname(fileURLToPath(import.meta.url))
 const modules = resolve(root, 'node_modules')
-const officialApps = ['shorts', 'reader', 'cinema', 'fntv']
+const officialApps = ['shorts', 'reader', 'cinema', 'fntv', 'media-scraper']
 
 async function pack(source, destination) {
   await new Promise((resolvePromise, rejectPromise) => {
@@ -34,8 +35,7 @@ async function buildShorts(stagingDir, destination) {
   await pack(output, destination)
 }
 
-async function buildReader(name, destination) {
-  const output = `${root}/.build/${name}`
+async function buildReader(name, destination, output) {
   await build({
     configFile: false,
     root: `${root}/${name}`,
@@ -114,14 +114,15 @@ async function buildAll() {
   try {
     await buildShorts(stagingDir, stagingAppsDir)
     for (const name of ['reader', 'cinema']) {
-      await buildReader(name, stagingAppsDir)
+      await buildReader(name, stagingAppsDir, resolve(stagingDir, 'compiled', name))
     }
-    await buildFntv(stagingAppsDir)
+    await buildFntv(stagingAppsDir, resolve(stagingDir, 'compiled', 'fntv'))
+    await buildScraper(stagingAppsDir, resolve(stagingDir, 'compiled', 'media-scraper'))
 
     // 2. 收集并校验 staging 产物完整性与源 app.json 一致性
     const packages = await collectPackages(stagingAppsDir)
     if (packages.length !== officialApps.length || new Set(packages.map(p => p.manifest.id)).size !== officialApps.length) {
-      throw new Error(`构建产物必须恰好包含四个官方插件包（预期 ${officialApps.join(', ')}）`)
+      throw new Error(`构建产物必须恰好包含 ${officialApps.length} 个官方插件包（预期 ${officialApps.join(', ')}）`)
     }
     for (const pkg of packages) {
       const sourceManifest = JSON.parse(await readFile(`${root}/${pkg.manifest.id}/app.json`, 'utf8'))
@@ -167,7 +168,7 @@ async function buildAll() {
     // 6. 验证完全通过后，转入已授权的目标输出目录
     await mkdir(targetAppsDir, { recursive: true })
 
-    // apps/ 仅保留四款应用的最新包：旧 books/comics 入口退役，解析器源码仍由 reader 引用。
+    // apps/ 仅保留官方应用的最新包：旧 books/comics 入口退役，解析器源码仍由 reader 引用。
     const currentFilenames = new Set(packages.map(p => p.filename))
     const existingTargetFiles = await readdir(targetAppsDir, { withFileTypes: true })
     for (const item of existingTargetFiles) {

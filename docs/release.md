@@ -9,25 +9,29 @@
 根目录及包目录资产规范如下：
 - `catalog.json`：根目录索引清单，schema_version 为 `2`。
 - `SHA256SUMS`：全资产校验清单，列出 `catalog.json` 及带 `apps/` 路径的最新插件包摘要。
-- `apps/`：包目录，**仅保留每个官方应用的最新版本包**（当前共四包）：
-  - `apps/shorts-1.5.0.tgapp`
-  - `apps/reader-1.1.0.tgapp`
-  - `apps/cinema-1.5.0.tgapp`
-  - `apps/fntv-0.1.3.tgapp`
+- `apps/`：包目录，**仅保留每个应用的最新版本包**（当前五包）：
+  - `apps/shorts-1.5.1.tgapp`
+  - `apps/reader-1.1.2.tgapp`
+  - `apps/cinema-1.5.1.tgapp`
+  - `apps/fntv-0.1.4.tgapp`
+  - `apps/media-scraper-0.1.0.tgapp`
+
+本轮增加影视刮削，最低宿主为 0.3.10；Cinema 1.5.1 读取 NFO 并调整同番号播放。原四款均随包嵌入新增共享 SDK，因此同时提升修订号。后续验收修复使阅读馆再升为 1.1.2，防止纯图片 EPUB 在解码和缓存回收期间页数收缩、提前跳章。源码、五包、catalog 和摘要随 main 统一交付；本次门禁、准确宿主提交及实际客户端结果见[刮削验收记录](media-scraper-validation.md)。日常服务未部署，历史发布记录继续按当时版本保留。
 
 飞牛影视服务 `0.1.1` 加入公开目录，最低宿主为 `0.3.6`，提供独立影视账号、电影和电视剧媒体库、目录授权及服务启停。升级本地候选 `0.1.0` 时保留业务数据和运行状态，已有客户端需重新登录。此前公共 SDK 已加入可选飞牛服务接口；原三款插件因此各提升一个修订版本，避免覆盖同版本摘要，最低宿主、页面及数据格式保留。包、目录及摘要在同一提交中发布；构建与实际宿主集成见 [0.1.1 发布记录](fntv-0.1.1-release.md)。
 
 飞牛 `0.1.2` 要求宿主 `0.3.7`，加入无海报视频后台补图、管理页封面状态及现有刷新入口的缺图重试。此次其他三款插件包字节保持一致；FNTV 包、目录及摘要在同一提交中更新。飞牛 `0.1.3` 只改管理页界面（跟随主站深浅色、手机沉浸、状态置顶与复制地址），服务能力、最低宿主和数据不变。指定官方客户端画面与已提交宿主的完整集成证据见 [0.1.2 验收记录](fntv-0.1.2-local-validation.md)。
 
-根目录分发阅读馆为 reader 1.1.0、影视 1.5.0、短视频 1.5.0，完成 iPhone 主屏幕界面改版（见各应用说明），数据格式与最低宿主不变；阅读馆随包携带三张新版截图（home、mobile-library、mobile-reading），旧抽屉截图 mobile-sidebar 已移除。阅读馆继续保留 1.0.4 的 iOS 漫画滚动修复：高度变化完全被占位补偿吸收后不回写旧滚动坐标，换窗及图片尺寸修改前先保护滚动范围，保留原生惯性与有界预读。升级保留书库、分组、阅读进度、书签和自定义偏好。滚动修复的历史验收见 [1.0.4 发布验收记录](reader-1.0.4-release.md)。手动目录书库、紧凑筛选、漫画默认适宽和首次替换旧 books/comics 的确认边界保留。
+此前分发的 reader 1.1.0、影视 1.5.0、短视频 1.5.0 完成 iPhone 主屏幕界面改版（见各应用说明），数据格式与最低宿主不变；阅读馆随包携带三张新版截图（home、mobile-library、mobile-reading），旧抽屉截图 mobile-sidebar 已移除。本轮版本延续这些页面与资源。阅读馆继续保留 1.0.4 的 iOS 漫画滚动修复：高度变化完全被占位补偿吸收后不回写旧滚动坐标，换窗及图片尺寸修改前先保护滚动范围，保留原生惯性与有界预读。升级保留书库、分组、阅读进度、书签和自定义偏好。滚动修复的历史验收见 [1.0.4 发布验收记录](reader-1.0.4-release.md)。手动目录书库、紧凑筛选、漫画默认适宽和首次替换旧 books/comics 的确认边界保留。
 
 所有包的完整 manifest 必须与对应源码 `app.json` 一致。`SHA256SUMS` 包含：
 
 ```
-<sha256>  apps/cinema-1.5.0.tgapp
-<sha256>  apps/fntv-0.1.3.tgapp
-<sha256>  apps/reader-1.1.0.tgapp
-<sha256>  apps/shorts-1.5.0.tgapp
+<sha256>  apps/cinema-1.5.1.tgapp
+<sha256>  apps/fntv-0.1.4.tgapp
+<sha256>  apps/media-scraper-0.1.0.tgapp
+<sha256>  apps/reader-1.1.2.tgapp
+<sha256>  apps/shorts-1.5.1.tgapp
 <sha256>  catalog.json
 ```
 
@@ -51,7 +55,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "1.1.0",
+        "version": "1.1.2",
         "api_version": 2,
         "min_host_version": "0.3.3",
         "description": "在同一个书库阅读图书与漫画，支持继续阅读、想读、收藏、作品分组与跨设备阅读进度。",
@@ -72,7 +76,7 @@
             "zip"
           ],
           "directories": true,
-          "changelog": "iPhone 主屏幕界面改版：手机打开即沉浸并自带返回网盘；正文跟手翻页、左右边缘留给系统返回手势；工具栏改为图标与可拖动进度条，排版分两级、四种主题；长条漫自动连续滚动；书库去掉抽屉，改为顶部筛选标签。升级保留书库、分组、阅读进度、书签及自定义偏好。",
+          "changelog": "修复纯图片 EPUB 在图片解码和缓存回收期间页数变化、提前跳章的问题，横竖屏保留稳定的图片尺寸。延续手机沉浸书库、跟手翻页及图标工具栏，升级保留书库、分组、阅读进度、书签及自定义偏好。",
           "formats": [
             "TXT",
             "EPUB 2/3",
@@ -98,7 +102,7 @@
       },
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 1024,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.1.0.tgapp"
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/reader-1.1.2.tgapp"
     }
   ]
 }
