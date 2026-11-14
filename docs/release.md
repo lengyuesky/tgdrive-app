@@ -14,9 +14,9 @@
   - `apps/reader-1.1.2.tgapp`
   - `apps/cinema-1.5.1.tgapp`
   - `apps/fntv-0.1.4.tgapp`
-  - `apps/media-scraper-0.1.1.tgapp`
+  - `apps/media-scraper-0.1.2.tgapp`
 
-影视刮削 0.1.1 将主流程简化为选择目录、点击开始，自动处理全部分页和子目录；不确定项目直接跳过，关闭页面停止。更新仅涉及影视刮削应用，最低宿主继续为 0.3.10，其他四款包保持原版本和摘要。本次准确宿主提交、门禁和一键流程验收见 [0.1.1 验收记录](media-scraper-simple-validation.md)。
+影视刮削 0.1.2 修复同番号的多个资料源被错误当成无法匹配：按后端顺序采用可用详情，来源失败时自动尝试下一个，同号分段复用结果。目录一键执行和关闭页面停止继续保留。最低宿主为 0.3.10，其他四款包保持原版本和摘要。本次准确宿主提交、门禁及 SONE-614 实例验收见 [0.1.2 验收记录](media-scraper-0.1.2-validation.md)。
 
 此前影视刮削 0.1.0 与 Cinema 1.5.1 加入 NFO 消费和同番号播放适配，原四款包因嵌入新增 SDK 同步提升修订号；阅读馆随后升为 1.1.2，修复纯图片 EPUB 在解码和缓存回收期间页数收缩、提前跳章。历史结果见 [0.1.0 刮削验收记录](media-scraper-validation.md)。
 
@@ -31,7 +31,7 @@
 ```
 <sha256>  apps/cinema-1.5.1.tgapp
 <sha256>  apps/fntv-0.1.4.tgapp
-<sha256>  apps/media-scraper-0.1.1.tgapp
+<sha256>  apps/media-scraper-0.1.2.tgapp
 <sha256>  apps/reader-1.1.2.tgapp
 <sha256>  apps/shorts-1.5.1.tgapp
 <sha256>  catalog.json

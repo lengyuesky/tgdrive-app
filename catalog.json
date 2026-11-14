@@ -105,7 +105,7 @@
       "manifest": {
         "id": "media-scraper",
         "name": "影视刮削",
-        "version": "0.1.1",
+        "version": "0.1.2",
         "api_version": 2,
         "min_host_version": "0.3.10",
         "description": "选择网盘目录后一键刮削所有子目录中的番号视频，自动补齐 NFO 与海报。不确定的项目直接跳过，关闭页面停止。",
@@ -129,7 +129,7 @@
         "integration": {
           "file_types": [],
           "directories": true,
-          "changelog": "简化为选择目录后点击开始：自动读取全部分页并连续刮削，不再选片、预览或确认候选；不确定项直接跳过，关闭页面停止，未完成项可一键重试。",
+          "changelog": "修复同一番号有多个资料源时被错误跳过：按后端顺序自动采用可用详情，失败时尝试下一同号来源，同番号分段复用结果。保留目录一键刮削、关闭页面停止和未完成项重试。",
           "formats": [
             "MetaTube 番号影片",
             "NFO",
@@ -138,7 +138,7 @@
           ],
           "limitations": [
             "手动点击开始后在当前页面连续执行；关闭页面停止，保留已完成结果，重开不会自行续跑。",
-            "无法唯一识别番号、多个精确来源或文件归属不确定时直接跳过。",
+            "无法识别影片番号、没有同号匹配或文件归属不确定时跳过；同号多来源自动尝试，来源全部不可用时显示失败原因。",
             "首期不自动翻译，不适配普通电影或电视剧联网资料源。",
             "MetaTube 来源可用性取决于所配置后端；飞牛兼容服务首期合计索引上限为 3000 条视频。",
             "Token 不进入数据库备份或应用恢复快照，恢复后需重新填写。"
@@ -154,9 +154,9 @@
           "data_schema": 1
         }
       },
-      "sha256": "639ddf5dffb037d81f75b119c33db668cc40a55cd7411cfc32da40af63019d34",
-      "size": 208467,
-      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/media-scraper-0.1.1.tgapp"
+      "sha256": "cbfba459550c58f832aec77050f46f8e1c1b210c804682978888e5b4d4bd48eb",
+      "size": 209002,
+      "url": "https://raw.githubusercontent.com/lengyuesky/tgdrive-app/main/apps/media-scraper-0.1.2.tgapp"
     },
     {
       "manifest": {

@@ -27,9 +27,15 @@ export function inferNumber(file: FileEntry): string {
   const directory = numbers(parent(file.path).split('/').pop() ?? '')
   return directory.length === 1 ? directory[0] : ''
 }
-export function uniqueExact(candidates: ScraperCandidate[], number: string): ScraperCandidate | undefined {
-  const exact = new Map(candidates.filter(c => normalizedNumber(c.number) === normalizedNumber(number)).map(c => [`${c.provider}\0${c.id}`, c]))
-  return exact.size === 1 ? exact.values().next().value : undefined
+/** 同一番号可以有多个资料源；保持后端顺序，依次尝试，不把来源数量当作作品歧义。 */
+export function exactCandidates(candidates: ScraperCandidate[], number: string): ScraperCandidate[] {
+  const expected = normalizedNumber(number), seen = new Set<string>()
+  return candidates.filter(candidate => {
+    if (!expected || !candidate.provider.trim() || !candidate.id.trim() || normalizedNumber(candidate.number) !== expected) return false
+    const key = `${candidate.provider}\0${candidate.id}`
+    if (seen.has(key)) return false
+    seen.add(key); return true
+  })
 }
 export const reference = ({ id, path, content_version }: FileEntry): ScraperReference => ({ id, path, content_version })
 export interface Group { key: string; files: FileEntry[]; number: string }
@@ -54,4 +60,4 @@ export function sharedCompanion(name: string, videos: Set<string>): boolean {
   return owners!==1
 }
 export const stateName = (state: string) => ({ draft:'检查中',running:'执行中',stopping:'正在停止',completed:'已结束',cancelled:'已停止',paused:'已暂停',interrupted:'已中断',pending:'等待处理',processing:'处理中',done:'已完成',kept:'保留已有',skipped:'未更新',needs_user:'已跳过',needs_verification:'待核实',uploading:'写入中' } as Record<string,string>)[state] ?? state
-export const resultReason = (reason: string) => reason.replaceAll('请选择影视资料候选', '未找到唯一匹配的资料').replaceAll('请重新预览', '请重新刮削').replaceAll('重新扫描并预览', '重新刮削').replaceAll('预览会话', '刮削任务')
+export const resultReason = (reason: string) => reason.replaceAll('请选择影视资料候选', '未取得匹配的资料').replaceAll('请重新预览', '请重新刮削').replaceAll('重新扫描并预览', '重新刮削').replaceAll('预览会话', '刮削任务')

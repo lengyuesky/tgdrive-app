@@ -1,5 +1,5 @@
 import type { Drive, FileEntry, ScraperCandidate, ScraperHandle, ScraperPreview, ScraperRecord } from '../sdk/types'
-import { VIDEO_EXTENSIONS, groups, normalizedNumber, reference, resultReason, sharedCompanion, foldName, stem, uniqueExact, type Group } from './model'
+import { VIDEO_EXTENSIONS, groups, normalizedNumber, reference, resultReason, sharedCompanion, foldName, stem, exactCandidates, type Group } from './model'
 
 export type ItemState = 'waiting' | 'checking' | 'ready' | 'running' | 'done' | 'skipped' | 'failed' | 'stopped'
 export interface RunItem { group: Group; state: ItemState; reason: string; plan?: ScraperPreview; candidate?: ScraperCandidate }
@@ -42,6 +42,7 @@ export class DirectoryScrape {
   private heartbeat?: ReturnType<typeof setInterval>
   private active = false
   private sources = new Map<string, Promise<ScraperCandidate[]>>()
+  private sourceChoices = new Map<string, ScraperCandidate>()
   private readonly scrape
 
   constructor(private drive: Drive, private changed: () => void) {
@@ -58,6 +59,7 @@ export class DirectoryScrape {
   private check() { this.controller.signal.throwIfAborted() }
   private async create(root: FileEntry) {
     this.check()
+    this.sourceChoices.clear()
     this.mutation = this.scrape.create(reference(root)).then(batch => { this.batch = batch; this.recordIds.push(batch.id) })
     try { await this.mutation } finally { this.mutation = undefined }
     this.check()
@@ -129,16 +131,38 @@ export class DirectoryScrape {
     item.plan = await request(); this.check()
     if (item.plan.needs_candidate) {
       const key = normalizedNumber(group.number)
-      let source = this.sources.get(key)
-      if (!source) { source = this.scrape.search(group.number, { signal }); this.sources.set(key, source) }
-      let candidates: ScraperCandidate[]
-      try { candidates = await source } catch (error) { this.sources.delete(key); throw error }
-      this.check()
-      const candidate = uniqueExact(candidates, group.number)
-      if (!candidate) {
-        item.state = 'skipped'; item.reason = candidates.length ? '未找到唯一的番号精确匹配' : '未找到匹配资料'; return
+      const chosen = this.sourceChoices.get(key)
+      let candidates = chosen ? [chosen] : undefined
+      if (!candidates) {
+        let source = this.sources.get(key)
+        if (!source) { source = this.scrape.search(group.number, { signal }); this.sources.set(key, source) }
+        try { candidates = exactCandidates(await source, group.number) } catch (error) { this.sources.delete(key); throw error }
+        this.check()
       }
-      item.candidate = candidate; item.plan = await request(candidate); this.check()
+      if (!candidates.length) {
+        item.state = 'skipped'; item.reason = `未找到 ${group.number} 的匹配资料`; return
+      }
+      const errors: string[] = []
+      for (const candidate of candidates) {
+        this.check()
+        try {
+          const plan = await request(candidate); this.check()
+          if (plan.ready) {
+            item.candidate = candidate; item.plan = plan
+            // 宿主按批次保存该来源详情；同号后续分段复用，避免一次任务混用多个来源。
+            this.sourceChoices.set(key, candidate)
+            item.state = 'ready'; item.reason = ''; return
+          }
+          errors.push(`${candidate.provider}：${resultReason(plan.error ?? '未返回可用资料')}`)
+        } catch (error) {
+          this.check()
+          const failure = error as Error & { code?: string; status?: number }
+          if (failure.status === 401 || failure.status === 403 || failure.code === 'app_changed') throw error
+          errors.push(`${candidate.provider}：${resultReason(error instanceof Error ? error.message : String(error))}`)
+        }
+      }
+      // 来源失败不等于番号不明确。抛出后由外层重建可执行批次，排除本组旧计划。
+      throw new Error(`${group.number} 的匹配来源暂不可用（${errors.join('；')}）`)
     }
     item.state = item.plan.ready ? 'ready' : 'skipped'
     item.reason = item.plan.ready ? '' : resultReason(item.plan.error ?? '无法确定该视频的资料或文件归属')

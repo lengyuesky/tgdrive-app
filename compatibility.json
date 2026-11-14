@@ -18,21 +18,21 @@
     "host_ref_kind": "verified_commit",
     "host_base_tree": "2126bbd8ade7a130053303890a79d850098261b2",
     "worktree_dirty": false,
-    "plugin_base_ref": "972c46f773c74615c287d97d1212e8581b9085be",
+    "plugin_base_ref": "59daeb6e690e9d2ff8e5ef2b59fb593e0d8351d1",
     "plugin_worktree_dirty": true,
     "target_apps": {
       "cinema": "1.5.1",
       "fntv": "0.1.4",
-      "media-scraper": "0.1.1",
+      "media-scraper": "0.1.2",
       "reader": "1.1.2",
       "shorts": "1.5.1"
     },
     "validation_status": "passed_commit",
     "validation_date": "2026-11-14",
-    "validation_report": "docs/media-scraper-simple-validation.md",
-    "validation_note": "在干净宿主 0.3.11 提交及本次根目录五包上完成 81 项完整本机 E2E，零失败、零跳过、无重试通过项；包含一键处理 105 个视频的递归分页与不确定项跳过、关闭页面停止、取消后自动核实并手动重试、资料补缺、恢复记录、指定公共 MetaTube 后端、Cinema 页面与 FNTV 协议读取，以及阅读馆 1.0.1–1.0.5 的真实旧包升级。插件五步门禁依序退出 0，66 个测试文件、686 项单测通过。影视刮削更新为 0.1.1，源清单、包内清单、四张新版截图及目录摘要一致，其他四个应用包及清单条目与上一版一致。plugin_base_ref 与 plugin_worktree_dirty 记录验收启动时的插件状态。本轮未改变宿主执行逻辑，未重跑宿主全量 Rust 或官方飞牛原生界面验收；未操作真实 Telegram 附件、生产服务或真机。",
+    "validation_report": "docs/media-scraper-0.1.2-validation.md",
+    "validation_note": "在干净宿主 0.3.11 提交与本次根目录五包上完成 82 项完整本机 E2E，零失败、零跳过、无重试通过项。包含 SONE-614 标准目录经指定公共 MetaTube 的真实同号多来源检索及 NFO/海报写入、同号首来源不可用后的自动回退、一键全目录分页、关闭页面停止与自动核实后手动重试、Cinema 页面和 FNTV 协议消费，以及阅读馆真实历史包升级。五步分发门禁按顺序退出 0，66 个测试文件、694 项单测通过。旧代码对新增关键回归有 7 项失败，修复后刮削模型及执行器 33 项通过。影视刮削升级为 0.1.2，源清单、包内清单、截图及目录摘要一致；其他四包和清单条目与上一版一致。插件基线和 dirty 字段记录验收启动时状态；本轮未修改宿主执行逻辑，未重跑官方飞牛原生界面、宿主全量 Rust、真机或真实 Telegram 附件写入。",
     "host_tree": "2126bbd8ade7a130053303890a79d850098261b2",
     "host_base_ref": "b69ca6923d098af3683c0c23affa312e5167b9be",
-    "plugin_catalog_sha256": "fe1bc00e87e67583c0ab531732c104cf6082f79f536cafe9912ca27ba9af2382"
+    "plugin_catalog_sha256": "62ee7d224a00af4f23dbd41ea2bfda64a223aa1f819a7f4cc60b0f1126eb5218"
   }
 }

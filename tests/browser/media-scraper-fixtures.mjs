@@ -22,4 +22,8 @@ export async function seedMediaScraper(root) {
   await copyFile(mp4, `${large}/ZZZ-789.mp4`)
   await copyFile(mp4, `${large}/子目录/ABC-123.mp4`)
   await copyFile(mkv, `${large}/子目录/ABC-123.mkv`)
+  // 复现用户给出的标准路径，视频内容仍来自合成色块素材。
+  const standard = `${root}/视频/AV/SONE-614`
+  await mkdir(standard, { recursive: true })
+  await copyFile(mp4, `${standard}/SONE-614.mp4`)
 }

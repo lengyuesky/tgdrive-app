@@ -197,26 +197,31 @@ test('选择目录后一次开始完成全部视频，Cinema 与飞牛读取完�
 
 test('一键处理超过一页的整个目录，不确定项跳过且子目录视频完成', async ({ page }) => {
   const root = '/刮削验证/完整目录', searched: unknown[] = []
-  // 两个精确来源都不能代替用户作出选择；直接跳过，继续真实沙箱中的其他文件。
+  const sources: string[] = []
+  // 同一影片有两个资料源时依次尝试，前一来源详情不符不应跳过整部影片。
   await page.route(`**/api/apps/${appId}/rpc`, async route => {
     const body = route.request().postDataJSON()
-    if (body?.method === 'scraper.search' && body.params.number === 'ZZZ-789') {
-      await route.fulfill({ json: { candidates: ['A', 'B'].map(provider => ({ provider, id: 'synthetic', number: 'ZZZ-789', title: '多来源合成影片' })) } })
+    if (body?.method === 'scraper.search' && body.params.number === 'ABC-123') {
+      await route.fulfill({ json: { candidates: ['Unavailable', 'Fixture'].map(provider => ({ provider, id: 'abc123', number: 'ABC-123', title: '多来源合成影片' })) } })
     } else await route.continue()
   })
   page.on('request', request => {
-    if (request.url().endsWith(`/api/apps/${appId}/rpc`) && request.postDataJSON()?.method === 'files.searchPage') searched.push(request.postDataJSON().params)
+    if (!request.url().endsWith(`/api/apps/${appId}/rpc`)) return
+    const body = request.postDataJSON()
+    if (body?.method === 'files.searchPage') searched.push(body.params)
+    if (body?.method === 'scraper.preview' && body.params.candidate) sources.push(body.params.candidate.provider)
   })
   const frame = await open(page, root)
   expect(searched).toHaveLength(0)
   await startRun(page)
   await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 2，跳过 103，失败 0。', { timeout: 60_000 })
   expect(searched.length).toBeGreaterThanOrEqual(2)
+  expect(sources).toEqual(['Unavailable', 'Fixture'])
   await expect(frame.locator('#total-count')).toHaveText('105')
   await expect(frame.locator('#more-results')).toBeVisible()
   await frame.locator('#more-results').click()
   await expect(frame.locator('#results .result-row')).toHaveCount(104)
-  await expect(frame.locator('#results .result-row').filter({ hasText: 'ZZZ-789.mp4' })).toContainText('未找到唯一的番号精确匹配')
+  await expect(frame.locator('#results .result-row').filter({ hasText: 'ZZZ-789.mp4' })).toContainText('未找到 ZZZ-789 的匹配资料')
   for (const name of ['ABC-123.mp4', 'ABC-123.mkv', 'ABC-123.nfo', 'ABC-123.jpg']) {
     expect((await rpc<FileEntry>(page, 'files.stat', { path: `${root}/子目录/ABC-123/${name}` })).is_dir).toBe(false)
   }
@@ -299,6 +304,31 @@ test('指定公共 MetaTube 后端经真实沙箱写入合成视频的配套资�
   expect(jpg.size).toBeGreaterThan(0)
   expect(jpg.size).toBeLessThanOrEqual(2 * 1024 * 1024)
   await info.attach('公共服务写入结果', { body: JSON.stringify({ backend: 'https://metatube-server.hf.space/', record, nfo, jpg }, null, 2), contentType: 'application/json' })
+})
+
+test('SONE-614 同号多来源通过公共后端成功写入标准目录', async ({ page }, info) => {
+  test.skip(process.env.TGDRIVE_SCRAPER_PUBLIC_BACKEND !== '1', '需显式启用指定公共服务的网络验收')
+  test.setTimeout(180_000)
+  const root = '/视频/AV/SONE-614'
+  const frame = await open(page, root, true)
+  const candidates = await rpc<{ candidates: { provider: string; id: string; number: string }[] }>(page, 'scraper.search', { number: 'SONE-614' })
+  expect(candidates.candidates.filter(candidate => candidate.number === 'SONE-614').length).toBeGreaterThan(0)
+  const original = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/SONE-614.mp4` })
+  const batch = await startRun(page)
+  await expect(frame.locator('#execution-status')).toHaveText('刮削完成：成功 1，跳过 0，失败 0。', { timeout: 120_000 })
+  const record = await rpc<ScraperRecord>(page, 'scraper.record', { id: batch.id })
+  expect(record.status).toBe('completed')
+  expect(record.items).toHaveLength(1)
+  expect(record.items[0]).toMatchObject({ number: 'SONE-614', target_path: root, status: 'done', result: { nfo: { state: 'done' }, poster: { state: 'done' } } })
+  const video = await rpc<FileEntry>(page, 'files.stat', { id: original.id })
+  expect(video.path).toBe(original.path); expect(video.content_version).toBe(original.content_version)
+  const nfo = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/SONE-614.nfo` })
+  const poster = await rpc<FileEntry>(page, 'files.stat', { path: `${root}/SONE-614.jpg` })
+  expect(nfo.size).toBeGreaterThan(0); expect(nfo.size).toBeLessThanOrEqual(1024 * 1024)
+  expect(poster.size).toBeGreaterThan(0); expect(poster.size).toBeLessThanOrEqual(2 * 1024 * 1024)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: info.outputPath('sone-614-completed.png'), fullPage: true })
+  await info.attach('SONE-614 实际刮削结果', { body: JSON.stringify({ backend: 'https://metatube-server.hf.space/', candidates: candidates.candidates.map(({ provider, id, number }) => ({ provider, id, number })), record, nfo, poster }, null, 2), contentType: 'application/json' })
 })
 
 test('备份恢复后的未完成记录仅供查看，手动重新开始才创建新任务', async ({ page }) => {

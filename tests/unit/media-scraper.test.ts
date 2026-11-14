@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { numbers, groups, inferNumber, uniqueExact, sharedCompanion } from '../../media-scraper/model'
+import { numbers, groups, inferNumber, exactCandidates, sharedCompanion } from '../../media-scraper/model'
 import { Descriptions, parseNfo, NFO_LIMIT } from '../../cinema/metadata'
 import { coverCandidates, isNumberedMovie } from '../../cinema/model'
 import { validateManifest } from '../../catalog.mjs'
@@ -18,19 +18,22 @@ describe('番号识别、自动匹配与共用文件范围', () => {
     expect(numbers('S01E03.1080p.H265.mkv')).toEqual([])
     expect(inferNumber(file('未知.mkv',2,'/待整理/ABC-123/未知.mkv'))).toBe('ABC-123')
     expect(inferNumber(file('ABC-123-DEF-456.mp4'))).toBe('')
+    expect(inferNumber(file('SONE-614.mp4',2,'/视频/AV/SONE-614/SONE-614.mp4'))).toBe('SONE-614')
   })
   it('同目录同基本名的扩展名版本分成同一组，分段保留独立组', () => {
     const result = groups([file('ABC-123.mp4'),file('ABC-123.mkv',3),file('ABC-123-CD1.mp4',4)])
     expect(result.map(group=>group.files.length)).toEqual([2,1])
     expect(result[0].files.map(file=>file.id)).toEqual([2,3])
   })
-  it('采用唯一精确候选，忽略模糊结果；多个精确来源直接跳过', () => {
+  it('同番号多来源保持后端顺序，去重并过滤不匹配结果', () => {
     const one = {provider:'A',id:'a1',number:'ABC-123',title:'影片'}
-    expect(uniqueExact([one],'abc123')).toEqual(one)
-    expect(uniqueExact([one,{...one,provider:'B'}],'ABC-123')).toBeUndefined()
-    expect(uniqueExact([{...one,number:'ABC-124'}],'ABC-123')).toBeUndefined()
-    expect(uniqueExact([one,{...one,id:'other',number:'ABC-124'}],'ABC-123')).toEqual(one)
-    expect(uniqueExact([one,one],'ABC-123')).toEqual(one)
+    const another = {...one,provider:'B'}
+    expect(exactCandidates([one],'abc123')).toEqual([one])
+    expect(exactCandidates([another,one,another],'ABC-123')).toEqual([another,one])
+    expect(exactCandidates([{...one,number:'ABC-124'}],'ABC-123')).toEqual([])
+    expect(exactCandidates([one,{...one,id:'other',number:'ABC-124'}],'ABC-123')).toEqual([one])
+    expect(exactCandidates([one,one],'ABC-123')).toEqual([one])
+    expect(exactCandidates([{...one,provider:' '},{...one,id:''}],'ABC-123')).toEqual([])
   })
   it('字幕语言后缀和海报别名同时匹配多个视频时列为共用文件', () => {
     const videos=new Set(['abc-123','abc-123.zh','abc-123-poster'])

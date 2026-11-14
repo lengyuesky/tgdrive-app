@@ -66,15 +66,108 @@ describe('目录一键刮削', () => {
     expect(job.counts).toEqual({ total: 101, done: 101, skipped: 0, failed: 0, processed: 101 })
     expect(job.phase).toBe('completed')
   })
-  it('不确定的番号、多个精确候选和空结果直接跳过，后续视频照常完成', async () => {
+  it('同番号多个资料源自动采用，不能识别或无匹配的项目才跳过', async () => {
     const host = fixture([file(2, '没有番号.mp4'), file(3, 'ABC-123.mp4'), file(4, 'DEF-456.mp4'), file(5, 'XYZ-789.mp4')])
     host.api.search.mockImplementation(async number => number === 'ABC-123' ? [candidate(number), { ...candidate(number), provider: 'Another' }] : number === 'DEF-456' ? [] : [candidate(number), candidate('OTHER-100')])
     const job = new DirectoryScrape(host.drive, () => {})
     await job.start(root, options)
-    expect(host.writes).toEqual([5])
-    expect(job.counts).toMatchObject({ done: 1, skipped: 3, failed: 0 })
+    expect(host.writes).toEqual([3, 5])
+    expect(job.counts).toMatchObject({ done: 2, skipped: 2, failed: 0 })
     expect(host.api.search).not.toHaveBeenCalledWith('', expect.anything())
-    expect(host.api.preview.mock.calls.filter(([input]) => input.candidate).map(([input]) => input.files[0].id)).toEqual([5])
+    expect(host.api.preview.mock.calls.filter(([input]) => input.candidate).map(([input]) => input.files[0].id)).toEqual([3, 5])
+  })
+  it('SONE-614 标准目录的 FANZA 和 JAV321 同号结果可以正常刮削', async () => {
+    const video = file(2, 'SONE-614.mp4', '/视频/AV/SONE-614/SONE-614.mp4')
+    const directory = { ...root, path: '/视频/AV/SONE-614', name: 'SONE-614' }
+    const host = fixture([video])
+    const matches = ['FANZA', 'JAV321'].map(provider => ({ provider, id: 'sone00614', number: 'SONE-614', title: '同一影片' }))
+    host.api.search.mockResolvedValue(matches)
+    const job = new DirectoryScrape(host.drive, () => {})
+    await job.start(directory, options)
+    expect(host.writes).toEqual([video.id])
+    expect(job.counts).toMatchObject({ done: 1, skipped: 0, failed: 0 })
+    expect(host.api.preview.mock.calls.find(([input]) => input.candidate)?.[0].candidate).toEqual(matches[0])
+  })
+  it.each(['异常', '404', '番号不符'])('第一来源%s后尝试第二个同号来源，同一影片分段复用成功来源', async failure => {
+    const host = fixture([file(2, 'SONE-614.mp4'), file(3, 'SONE-614-CD1.mp4')])
+    const matches = ['FANZA', 'JAV321'].map(provider => ({ provider, id: 'sone00614', number: 'SONE-614', title: '同一影片' }))
+    host.api.search.mockResolvedValue(matches)
+    const preview = host.api.preview.getMockImplementation()!
+    host.api.preview.mockImplementation(async input => {
+      if (input.candidate?.provider === 'FANZA') {
+        if (failure === '异常') throw new Error('接口返回 HTTP 503')
+        return { id: `item-${input.files[0].id}`, ready: false, needs_candidate: false, files: [], error: failure === '404' ? '文件不存在' : '选定候选的番号与本组不一致' }
+      }
+      return preview(input)
+    })
+    const job = new DirectoryScrape(host.drive, () => {})
+    await job.start(root, options)
+    expect(host.writes).toEqual([2, 3])
+    expect(job.counts).toMatchObject({ done: 2, skipped: 0, failed: 0 })
+    expect(host.api.preview.mock.calls.filter(([input]) => input.candidate).map(([input]) => [input.files[0].id, input.candidate!.provider])).toEqual([[2, 'FANZA'], [2, 'JAV321'], [3, 'JAV321']])
+    expect(host.api.search).toHaveBeenCalledOnce()
+  })
+  it('全部精确来源不可用时记录来源失败，后续影片仍能完成', async () => {
+    const host = fixture([file(2, 'SONE-614.mp4'), file(3, 'ABC-123.mp4')])
+    host.api.search.mockImplementation(async number => number === 'SONE-614' ? ['FANZA', 'JAV321'].map(provider => ({ ...candidate(number), provider })) : [candidate(number)])
+    const preview = host.api.preview.getMockImplementation()!
+    host.api.preview.mockImplementation(async input => {
+      if (input.candidate && input.number === 'SONE-614') throw new Error('连接失败')
+      return preview(input)
+    })
+    const job = new DirectoryScrape(host.drive, () => {})
+    await job.start(root, options)
+    expect(host.writes).toEqual([3]); expect(job.counts).toMatchObject({ done: 1, failed: 1, skipped: 0 })
+    expect(job.items[0].reason).toContain('FANZA'); expect(job.items[0].reason).toContain('JAV321')
+  })
+  it('重建批次时重新选定可用来源，所有同号分段统一使用新来源', async () => {
+    const host = fixture([file(2, 'SONE-614.mp4'), file(3, 'SONE-614-CD1.mp4'), file(4, 'ABC-123.mp4')])
+    host.api.search.mockImplementation(async number => {
+      if (number === 'ABC-123') throw new Error('此作品查询失败')
+      return ['FANZA', 'JAV321'].map(provider => ({ ...candidate(number), provider }))
+    })
+    const preview = host.api.preview.getMockImplementation()!
+    host.api.preview.mockImplementation(async input => {
+      if (input.batch.id === 'batch-1' && input.candidate?.provider === 'FANZA') throw new Error('首轮来源暂不可用')
+      return preview(input)
+    })
+    const job = new DirectoryScrape(host.drive, () => {})
+    await job.start(root, options)
+    expect(host.writes).toEqual([2, 3])
+    expect(host.api.begin).toHaveBeenCalledExactlyOnceWith({ id: 'batch-2', owner: 'owner' })
+    const selected = host.api.preview.mock.calls.filter(([input]) => !!input.candidate).map(([input]) => [input.batch.id, input.files[0].id, input.candidate!.provider])
+    expect(selected).toEqual([
+      ['batch-1', 2, 'FANZA'], ['batch-1', 2, 'JAV321'], ['batch-1', 3, 'JAV321'],
+      ['batch-2', 2, 'FANZA'], ['batch-2', 3, 'FANZA'],
+    ])
+    expect(job.counts).toMatchObject({ done: 2, failed: 1, skipped: 0 })
+  })
+  it('候选预览已保存但响应丢失时，放弃旧批次后不能误执行该项目', async () => {
+    const host = fixture([file(2, 'SONE-614.mp4'), file(3, 'ABC-123.mp4')])
+    host.api.search.mockImplementation(async number => number === 'SONE-614' ? ['FANZA', 'JAV321'].map(provider => ({ ...candidate(number), provider })) : [candidate(number)])
+    const preview = host.api.preview.getMockImplementation()!
+    host.api.preview.mockImplementation(async input => {
+      const result = await preview(input)
+      if (input.candidate && input.number === 'SONE-614') throw new Error('保存候选后响应中断')
+      return result
+    })
+    const job = new DirectoryScrape(host.drive, () => {})
+    await job.start(root, options)
+    expect(host.writes).toEqual([3])
+    expect(host.api.stop).toHaveBeenCalledExactlyOnceWith({ id: 'batch-1', owner: 'owner' })
+    expect(host.api.begin).toHaveBeenCalledExactlyOnceWith({ id: 'batch-2', owner: 'owner' })
+    expect(job.counts).toMatchObject({ done: 1, failed: 1, skipped: 0 })
+  })
+  it('尝试第一来源期间停止，迟到的错误不能触发下一来源', async () => {
+    const host = fixture([file(2, 'SONE-614.mp4')]), response = deferred<ScraperPreview>()
+    host.api.search.mockResolvedValue(['FANZA', 'JAV321'].map(provider => ({ ...candidate('SONE-614'), provider })))
+    const preview = host.api.preview.getMockImplementation()!
+    host.api.preview.mockImplementation(input => input.candidate ? response.promise : preview(input))
+    const job = new DirectoryScrape(host.drive, () => {}), work = job.start(root, options)
+    await vi.waitFor(() => expect(host.api.preview.mock.calls.some(([input]) => !!input.candidate)).toBe(true))
+    await job.stop(); response.resolve({ id: 'item-2', ready: false, needs_candidate: false, files: [], error: '来源不可用' }); await work
+    expect(host.api.preview.mock.calls.filter(([input]) => !!input.candidate)).toHaveLength(1)
+    expect(host.api.begin).not.toHaveBeenCalled(); expect(job.phase).toBe('stopped')
   })
   it('全部不确定时正常结束，不启动写入批次', async () => {
     const host = fixture([file(2, '未知.mp4')]), job = new DirectoryScrape(host.drive, () => {})
