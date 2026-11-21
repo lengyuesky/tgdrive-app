@@ -1,7 +1,7 @@
 {
   "id": "cinema",
   "name": "影视",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "contract": { "major": 1, "minor": 0 },
   "description": "自建电影库和电视剧库，共用网页与飞牛客户端的收藏、已看标记和观看进度。网页支持文本字幕与 MKV 流式转封装；飞牛兼容服务须先配置独立连接账号，再由主人主动启动。",
   "author": "tgdrive",

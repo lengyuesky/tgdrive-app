@@ -63,6 +63,10 @@ impl Database {
             let retain_running = old_generation == generation || !old_generation.is_empty() && upgraded;
             // 普通重启保留主动启用状态；同版本重新安装、恢复或停用后重启必须重新启动服务。
             tx.execute("UPDATE settings SET generation=?1,app_version=?2,running=running AND ?3 WHERE id=1",params![generation,version,retain_running]).app()?;
+            // 文件变更游标绑定安装 generation；升级保留业务数据，但必须从新 checkpoint 核对索引。
+            if old_generation != generation {
+                tx.execute("UPDATE settings SET scope_revision='',change_cursor=NULL WHERE id=1", []).app()?;
+            }
             tx.commit().app()
         })
     }

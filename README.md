@@ -17,7 +17,7 @@
 |---|---|---|
 | `reader` | [阅读馆 2.0.0](docs/reader.md) | 纯页面，通用索引发现书籍与直属图片目录，KV 条件保存阅读数据 |
 | `shorts` | [短视频 2.0.0](docs/shorts.md) | 纯页面，授权范围内随机抽样，KV 设置与应用收藏 |
-| `cinema` | 影视 | 页面与原生后端，合并飞牛影视兼容服务 |
+| `cinema` | [影视](docs/cinema-installation.md) | 页面与原生后端，合并飞牛影视兼容服务 |
 | `media-scraper` | 影视刮削 | 页面与原生后端，自行联网获取资料 |
 
 旧管线已移除。阅读馆、短视频、影视和影视刮削的页面均已接入根目录类型检查与单测，Rust 工作区检查应用后端。阅读馆与短视频使用 `tools-v1/build-pages.mjs <reader|shorts|all> <仓库外的新目录>` 编译、打包和校验；带后端的影视与影视刮削分别使用 `tools-v1/build-cinema.mjs` 和 `tools-v1/build-media-scraper.mjs`，页面随包携带，只构建 `linux-amd64` 与 `linux-arm64`。飞牛兼容服务已合并到影视，不保留独立 `fntv` 发布入口。

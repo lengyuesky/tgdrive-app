@@ -355,7 +355,7 @@ impl Application {
             return;
         }
         let index = self.clone();
-        jobs.push(tokio::spawn(async move { loop { if index.shutdown.is_cancelled() { break; } let _ = index.synchronize(false).await; let _ = covers::schedule(&index, false); let _ = index.flush_revocations().await; for lease in index.service.expired() { let _ = index.host.revoke_read_lease(lease).await; } tokio::select! { _ = index.shutdown.cancelled() => break, _ = index.index_wake.notified() => {}, _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {} } } }));
+        jobs.push(tokio::spawn(async move { loop { if index.shutdown.is_cancelled() { break; } let _ = index::synchronize_read(&index).await; let _ = covers::schedule(&index, false); let _ = index.flush_revocations().await; for lease in index.service.expired() { let _ = index.host.revoke_read_lease(lease).await; } tokio::select! { _ = index.shutdown.cancelled() => break, _ = index.index_wake.notified() => {}, _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {} } } }));
         let cover = self.clone();
         jobs.push(tokio::spawn(async move { loop { if cover.shutdown.is_cancelled() { break; } let active = cover.db.settings().is_ok_and(|s| s.running) || cover.owner_active.load(std::sync::atomic::Ordering::Acquire) > model::now(); if active && matches!(covers::process_next(&cover).await, Ok(true)) { continue; } tokio::select! { _ = cover.shutdown.cancelled() => break, _ = cover.cover_wake.notified() => {}, _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {} } } }));
         let events = self.clone();

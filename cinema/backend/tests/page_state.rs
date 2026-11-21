@@ -166,3 +166,34 @@ async fn concurrent_owner_reads_share_one_slow_index_check_instead_of_rejecting_
     assert!(responses.iter().all(|response| response.status() == 200));
     assert_eq!(calls.load(Ordering::Relaxed) - before, 1);
 }
+
+#[tokio::test]
+async fn startup_index_and_owner_read_share_the_same_check_without_a_busy_error() {
+    let (mut app, host) = memory(vec![root()]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    app.host = Arc::new(SlowScope {
+        host,
+        calls: calls.clone(),
+    });
+    let app = Arc::new(app);
+    app.start_jobs();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while calls.load(Ordering::Relaxed) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let response = wire(
+        &app,
+        true,
+        "POST",
+        "/owner/storage/get",
+        None,
+        json!({"key":"preferences"}),
+        &[],
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    app.shutdown().await;
+}

@@ -13,7 +13,7 @@ pub(crate) type ReadSynchronization =
     tokio::sync::watch::Receiver<Option<std::result::Result<(), std::sync::Arc<Error>>>>;
 
 pub async fn synchronize_read(app: &std::sync::Arc<Application>) -> Result<()> {
-    // 只合并同一次影视索引核对，不排队或重放 HTTP 业务请求。后台重扫正占用索引时仍明确报忙。
+    // 常规后台与页面共享同一次索引核对，不排队或重放 HTTP 业务请求；手动重扫仍明确报忙。
     let mut receiver = {
         let mut current = app.read_sync.lock().await;
         if current
@@ -81,7 +81,11 @@ async fn synchronize_locked(app: &Application, manual: bool) -> Result<()> {
     let mut rebuild =
         manual || settings.scope_revision != scope.revision || settings.change_cursor.is_none();
     let mut affected = HashSet::new();
-    let mut cursor = settings.change_cursor.clone();
+    let mut cursor = if rebuild {
+        None
+    } else {
+        settings.change_cursor.clone()
+    };
     if !matches!(scope.scope, DirectoryScope::None) {
         loop {
             let page = match app
@@ -94,12 +98,14 @@ async fn synchronize_locked(app: &Application, manual: bool) -> Result<()> {
             {
                 Ok(page) => page,
                 Err(e)
-                    if matches!(
-                        e.code(),
-                        error_code::SCOPE_CHANGED
-                            | error_code::CURSOR_EXPIRED
-                            | error_code::INVALID_CURSOR
-                    ) =>
+                    if cursor.is_some()
+                        && matches!(
+                            e.code(),
+                            error_code::SCOPE_CHANGED
+                                | error_code::CURSOR_EXPIRED
+                                | error_code::INVALID_CURSOR
+                                | error_code::APP_CHANGED
+                        ) =>
                 {
                     rebuild = true;
                     cursor = None;
