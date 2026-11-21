@@ -4,5 +4,248 @@
     "minor": 0
   },
   "repository": "lengyuesky/tgdrive-app",
-  "entries": []
+  "entries": [
+    {
+      "manifest": {
+        "id": "cinema",
+        "name": "影视",
+        "version": "1.0.0",
+        "contract": {
+          "major": 1,
+          "minor": 0
+        },
+        "description": "自建电影库和电视剧库，共用网页与飞牛客户端的收藏、已看标记和观看进度。网页支持文本字幕与 MKV 流式转封装；飞牛兼容服务须先配置独立连接账号，再由主人主动启动。",
+        "author": "tgdrive",
+        "files": {
+          "read": true,
+          "write": false
+        },
+        "page": {
+          "entry": "page/index.html"
+        },
+        "backend": {
+          "entry": "backend/app",
+          "run_mode": "resident",
+          "external_service": true,
+          "resources": {
+            "memory_bytes": "536870912",
+            "cache_bytes": "1073741824",
+            "database_bytes": "536870912",
+            "cpu_millis": 1000,
+            "pids": 64
+          }
+        },
+        "icon": "assets/icon.svg",
+        "required_capabilities": [
+          "backend.proxy",
+          "backend.external",
+          "files.local_url",
+          "read_leases"
+        ],
+        "open_with": {
+          "extensions": [
+            "mp4",
+            "m4v",
+            "mov",
+            "webm",
+            "ogv",
+            "mkv",
+            "avi",
+            "wmv",
+            "flv",
+            "ts",
+            "mts",
+            "m2ts",
+            "3gp"
+          ],
+          "directories": false
+        }
+      },
+      "packages": {
+        "linux-amd64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.0/cinema-1.0.0-linux-amd64.tgapp",
+          "sha256": "4364cc2e0a2dbe1ab14e78a588e2b6db044671ba82d3a3334a9c22759411cfea",
+          "size": "4707061"
+        },
+        "linux-arm64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.0/cinema-1.0.0-linux-arm64.tgapp",
+          "sha256": "e8bd7dc89ce4f8e652eaf439d00ff8092dada2497c69fa1f85f9ae8c0cb90772",
+          "size": "4617226"
+        }
+      }
+    },
+    {
+      "manifest": {
+        "id": "media-scraper",
+        "name": "影视刮削",
+        "version": "1.0.0",
+        "contract": {
+          "major": 1,
+          "minor": 0
+        },
+        "description": "选择授权目录后，由应用后端整理番号视频并补齐 NFO、2:3 JPEG 海报与可用演员资料；关页面不停，重启不自动续跑。",
+        "author": "tgdrive",
+        "files": {
+          "read": true,
+          "write": true
+        },
+        "page": {
+          "entry": "page/index.html"
+        },
+        "backend": {
+          "entry": "backend/app",
+          "run_mode": "on_demand",
+          "external_service": false,
+          "resources": {}
+        },
+        "icon": "assets/icon.svg",
+        "required_capabilities": [
+          "backend.proxy",
+          "backend.keepalive",
+          "files.mutate",
+          "files.upload"
+        ],
+        "open_with": {
+          "extensions": [],
+          "directories": true
+        }
+      },
+      "packages": {
+        "linux-amd64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.0/media-scraper-1.0.0-linux-amd64.tgapp",
+          "sha256": "99730a245d2c427368a8a437550a3d4102550eec3c9423cc33285ae305025325",
+          "size": "5499002"
+        },
+        "linux-arm64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.0/media-scraper-1.0.0-linux-arm64.tgapp",
+          "sha256": "e85864f58aa8ecdc6df58811ee0288755de5483416fd585d5934316b9fa18d72",
+          "size": "5323741"
+        }
+      }
+    },
+    {
+      "manifest": {
+        "id": "reader",
+        "name": "阅读馆",
+        "version": "2.0.0",
+        "contract": {
+          "major": 1,
+          "minor": 0
+        },
+        "description": "在命名书库阅读文字、EPUB、PDF、漫画归档与图片目录，支持作品分组、书签和跨页面阅读进度。",
+        "author": "tgdrive",
+        "files": {
+          "read": true,
+          "write": false
+        },
+        "page": {
+          "entry": "page/index.html"
+        },
+        "icon": "assets/icon.svg",
+        "required_capabilities": [
+          "runtime.info",
+          "session.refresh",
+          "scope.read",
+          "files.stat",
+          "files.list",
+          "files.query",
+          "files.directories_with_files",
+          "files.changes",
+          "files.bytes",
+          "files.media_url",
+          "kv.cas",
+          "cache.objects",
+          "events.sse",
+          "ui.set_immersive",
+          "ui.set_title",
+          "ui.pick_directory",
+          "ui.request_scope",
+          "ui.task",
+          "ui.close",
+          "ui.theme_changed"
+        ],
+        "open_with": {
+          "extensions": [
+            "txt",
+            "epub",
+            "pdf",
+            "cbz",
+            "zip"
+          ],
+          "directories": true
+        }
+      },
+      "packages": {
+        "web": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/reader-v2.0.0/reader-2.0.0.tgapp",
+          "sha256": "6878370f2bebcc977fa1267693fadb178e55c36638c0b73dd58efe9170ca4f48",
+          "size": "2326405"
+        }
+      }
+    },
+    {
+      "manifest": {
+        "id": "shorts",
+        "name": "短视频",
+        "version": "2.0.0",
+        "contract": {
+          "major": 1,
+          "minor": 0
+        },
+        "description": "在授权目录内随机抽样播放视频，支持滑动切换、进度拖动、应用收藏、取材设置和下载。",
+        "author": "tgdrive",
+        "files": {
+          "read": true,
+          "write": false
+        },
+        "page": {
+          "entry": "page/index.html"
+        },
+        "icon": "assets/icon.svg",
+        "required_capabilities": [
+          "runtime.info",
+          "session.refresh",
+          "scope.read",
+          "files.stat",
+          "files.random",
+          "files.changes",
+          "files.media_url",
+          "kv.cas",
+          "events.sse",
+          "ui.set_immersive",
+          "ui.set_title",
+          "ui.pick_directory",
+          "ui.request_scope",
+          "ui.task",
+          "ui.close",
+          "ui.theme_changed"
+        ],
+        "open_with": {
+          "extensions": [
+            "mp4",
+            "mov",
+            "m4v",
+            "mkv",
+            "webm",
+            "avi",
+            "wmv",
+            "flv",
+            "ts",
+            "mts",
+            "m2ts",
+            "3gp",
+            "ogv"
+          ],
+          "directories": false
+        }
+      },
+      "packages": {
+        "web": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/shorts-v2.0.0/shorts-2.0.0.tgapp",
+          "sha256": "33e850eff665915dd7652a2dd7ebf7f2ee8fad1c796f181fd896d73b0b52c6ac",
+          "size": "35164"
+        }
+      }
+    }
+  ]
 }
