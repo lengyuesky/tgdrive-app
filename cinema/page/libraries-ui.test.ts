@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { PageUi } from '@tgdrive/page-sdk'
 import type { LibraryDraft } from './client'
 import { LibrariesStore, LibraryAccess } from './libraries'
 import { LibraryManager } from './libraries-ui'
@@ -21,10 +22,10 @@ async function setup(libraries = [movie]) {
     }
     return json(null)
   })
-  const ui = { pickDirectory: vi.fn(async () => result.host.stat({ by: 'id', id: '1' })), requestScope: vi.fn(async () => null) }
+  const ui = { pickDirectory: vi.fn<PageUi['pickDirectory']>(async () => result.host.stat({ by: 'id', id: '1' })), requestScope: vi.fn<PageUi['requestScope']>(async () => null) }
   const changed = vi.fn(async () => {}), message = vi.fn(), confirm = vi.fn(async () => false)
   const manager = new LibraryManager(ui, new LibrariesStore(result.cinema), new LibraryAccess(result.cinema), changed, message, confirm)
-  return { manager, state, saves, ui, changed, confirm, dialog, name: document.getElementById('library-name') as HTMLInputElement, kind: document.getElementById('library-kind') as HTMLSelectElement, save: document.getElementById('library-save') as HTMLButtonElement, status: document.getElementById('library-edit-status')! }
+  return { manager, state, saves, ui, changed, confirm, dialog, host: result.host, name: document.getElementById('library-name') as HTMLInputElement, kind: document.getElementById('library-kind') as HTMLSelectElement, save: document.getElementById('library-save') as HTMLButtonElement, status: document.getElementById('library-edit-status')! }
 }
 afterEach(() => document.body.replaceChildren())
 
@@ -64,5 +65,35 @@ describe('媒体库设置表单', () => {
     test.save.click(); await test.manager.flush(); expect(test.confirm).toHaveBeenCalledOnce(); expect(test.saves).toHaveLength(0); expect(test.dialog.open).toBe(true)
     test.confirm.mockResolvedValue(true); test.save.click(); await test.manager.flush()
     expect(test.state.config.libraries[0]).toMatchObject({ name: '全盘', root_id: '1', path: '/' })
+  })
+  it('未授权的新媒体库先让宿主接管选择和授权，返回后保留草稿并能保存', async () => {
+    const test = await setup([]), selected = await test.host.stat({ by: 'id', id: '2' })
+    await test.host.setScope({ mode: 'none' })
+    await test.manager.edit(); test.name.value = '珍藏电视剧'; test.kind.value = 'tv'
+    test.ui.pickDirectory.mockImplementation(async () => { expect(test.dialog.open).toBe(false); return selected })
+    test.ui.requestScope.mockImplementation(async () => {
+      expect(test.dialog.open).toBe(false)
+      return await test.host.setScope({ mode: 'selected', directories: [{ directory_id: selected.id, access: 'read_only' }] })
+    })
+    document.getElementById('library-pick')!.click()
+    await vi.waitFor(() => expect(test.dialog.open).toBe(true))
+    expect(test.ui.pickDirectory).toHaveBeenCalledWith({}, expect.anything())
+    expect(test.ui.requestScope).toHaveBeenCalledOnce()
+    expect(test.name.value).toBe('珍藏电视剧'); expect(test.kind.value).toBe('tv')
+    expect((document.getElementById('library-path') as HTMLOutputElement).value).toBe('/影视')
+    test.save.click(); await test.manager.flush()
+    expect(test.state.config.libraries[0]).toMatchObject({ name: '珍藏电视剧', kind: 'tv', root_id: '2' })
+    expect(test.dialog.open).toBe(false)
+    expect((await test.host.scope()).roots.map(root => root.directory_id)).toEqual(['2'])
+  })
+  it('取消宿主授权会回到原表单，名称和类型保留且没有保存或扩大权限', async () => {
+    const test = await setup([]), selected = await test.host.stat({ by: 'id', id: '2' })
+    await test.host.setScope({ mode: 'none' })
+    await test.manager.edit(); test.name.value = '稍后添加'; test.kind.value = 'tv'
+    test.ui.pickDirectory.mockResolvedValue(selected)
+    document.getElementById('library-pick')!.click()
+    await vi.waitFor(() => expect(test.status.textContent).toContain('尚未授予'))
+    expect(test.dialog.open).toBe(true); expect(test.name.value).toBe('稍后添加'); expect(test.kind.value).toBe('tv')
+    expect(test.saves).toEqual([]); expect((await test.host.scope()).scope).toEqual({ mode: 'none' })
   })
 })

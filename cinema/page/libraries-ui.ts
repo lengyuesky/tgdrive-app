@@ -2,7 +2,7 @@ import type { PageUi } from '@tgdrive/page-sdk'
 import { isAbort } from './io'
 import { LibrariesStore, LibraryAccess, newLibraryId, parseLibraries, type CinemaLibrary, type LibrariesSnapshot } from './libraries'
 
-/** 编辑命名媒体库；选择目录与授予只读范围是两个明确的主人操作。 */
+/** 编辑命名媒体库；宿主选择和授权期间保留草稿，并让宿主窗口接管交互。 */
 export class LibraryManager {
   private dialog = document.getElementById('library-edit-dialog') as HTMLDialogElement
   private fields = document.getElementById('library-fields') as HTMLFieldSetElement
@@ -18,6 +18,7 @@ export class LibraryManager {
   private id = ''
   private binding: Pick<CinemaLibrary, 'root_id' | 'path' | 'authorized'> | null = null
   private writing = false
+  private choosing = false
   private pending?: Promise<void>
   constructor(private ui: Pick<PageUi, 'pickDirectory' | 'requestScope'>, private store: LibrariesStore, private access: LibraryAccess,
     private changed: (snapshot: LibrariesSnapshot) => Promise<void>, private message: (text: string) => void, private confirm: (title: string, description: string) => Promise<boolean>) {
@@ -31,7 +32,7 @@ export class LibraryManager {
   private busy(active: boolean) { this.fields.disabled = active; this.saveButton.disabled = active; this.cancelButton.disabled = this.writing }
   private close() { if (this.writing) return; this.controller.abort(); this.dialog.close() }
   async edit(library?: CinemaLibrary) {
-    if (this.pending) return
+    if (this.pending || this.choosing) return
     this.controller.abort(); this.controller = new AbortController()
     const signal = this.controller.signal
     this.editingId = library?.id ?? null; this.id = library?.id ?? newLibraryId(); this.snapshot = null; this.binding = null
@@ -48,24 +49,34 @@ export class LibraryManager {
     } catch (error) { if (!signal.aborted) this.status.textContent = `${(error as Error).message}；请取消后重试。` }
   }
   private async pick() {
+    if (this.choosing) return
+    this.choosing = true
     const signal = this.controller.signal
+    const reopen = this.dialog.open
+    if (reopen) this.dialog.close()
     this.busy(true); this.status.textContent = ''
     try {
-      const node = await this.ui.pickDirectory({ initial_id: this.binding?.root_id }, { signal })
+      const node = await this.ui.pickDirectory(this.binding ? { initial_id: this.binding.root_id } : {}, { signal })
       signal.throwIfAborted()
       if (node) {
         let binding: Pick<CinemaLibrary, 'root_id' | 'path' | 'authorized'>
         try { binding = await this.access.directory({ by: 'id', id: node.id }, signal) }
         catch (error) {
           if (!['scope_denied', 'not_found'].includes((error as { code?: string }).code ?? '')) throw error
-          const scope = await this.ui.requestScope({ reason: `请给影视授予所选媒体库目录的只读访问权限。选择目录不会自动授权。`, preferred_access: 'read_only' }, { signal })
+          const scope = await this.ui.requestScope({ reason: '允许影视读取刚选择的文件夹及其子文件夹，用于浏览和播放媒体库。', preferred_access: 'read_only' }, { signal })
           if (!scope) throw new Error('尚未授予目录访问权限，媒体库未保存')
           binding = await this.access.directory({ by: 'id', id: node.id }, signal)
         }
         this.binding = binding; this.path.value = binding.path ?? ''
       }
     } catch (error) { if (!signal.aborted) this.status.textContent = (error as Error).message }
-    finally { if (!signal.aborted) this.busy(false) }
+    finally {
+      this.choosing = false
+      if (!signal.aborted) {
+        this.busy(false)
+        if (reopen && !this.dialog.open) { this.dialog.showModal(); this.name.focus() }
+      }
+    }
   }
   private async save() {
     if (!this.snapshot || !this.binding) { this.status.textContent = '请先选择文件夹'; return }

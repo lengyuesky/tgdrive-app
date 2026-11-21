@@ -1,6 +1,6 @@
 {
   "name": "@tgdrive/page-sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "type": "module",
   "description": "应用页面的类型化宿主客户端和界面通道，无运行时依赖",

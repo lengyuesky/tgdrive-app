@@ -109,6 +109,31 @@ describe('有界调度与 Range', () => {
 })
 
 describe('界面消息与事件流', () => {
+  it('新建媒体库省略初始目录时仍能打开选择器，消息中的可选 undefined 字段按 JSON 省略', async () => {
+    const { app, messages, response } = fixture(vi.fn(async () => json(node)) as unknown as typeof fetch)
+    const pick = app.ui.pickDirectory({ initial_id: undefined })
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ request: { method: 'ui.pick_directory', params: {} } })
+    const sent = (messages[0] as Extract<UiMessage, { type: 'request' }>).request
+    expect('params' in sent && Object.hasOwn(sent.params, 'initial_id')).toBe(false)
+    response((messages[0] as Extract<UiMessage, { type: 'request' }>).id, { type: 'directory', directory: null } as never)
+    expect(await pick).toBeNull()
+  })
+  it('可选背景和任务总数允许 undefined，必需字段缺失仍在发送前拒绝', async () => {
+    const { app, messages, response } = fixture(vi.fn(async () => json(node)) as unknown as typeof fetch)
+    const immersive = app.ui.setImmersive({ active: false, background: undefined })
+    response((messages[0] as Extract<UiMessage, { type: 'request' }>).id)
+    await immersive
+    const task = app.ui.task({ id: 'task', title: '整理', completed: 1, total: undefined, state: 'running', cancellable: false })
+    response((messages[1] as Extract<UiMessage, { type: 'request' }>).id)
+    await task
+    expect(messages.map(message => (message as Extract<UiMessage, { type: 'request' }>).request)).toEqual([
+      { method: 'ui.set_immersive', params: { active: false } },
+      { method: 'ui.task', params: { id: 'task', title: '整理', completed: 1, state: 'running', cancellable: false } },
+    ])
+    await expect(app.ui.requestScope({ reason: '读取影视', preferred_access: undefined } as never)).rejects.toThrow('界面请求参数格式无效')
+    expect(messages).toHaveLength(2)
+  })
   it('界面通道同时验证父窗口、宿主源和 nonce，支持选择与取消通知', async () => {
     const { app, messages, response, target } = fixture(vi.fn(async () => json(node)) as unknown as typeof fetch)
     const notice = vi.fn(); app.ui.onNotice(notice)

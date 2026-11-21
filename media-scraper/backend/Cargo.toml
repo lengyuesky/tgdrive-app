@@ -1,6 +1,6 @@
 [package]
 name = "tgdrive-media-scraper"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 rust-version = "1.89"
 license.workspace = true

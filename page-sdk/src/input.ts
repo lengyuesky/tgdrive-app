@@ -1,7 +1,8 @@
 import { LIMITS } from '../../contract/types/contract.js'
 import type { UiRequest } from '../../contract/types/contract.js'
 import { SdkError } from './error.js'
-import { wireValue } from './wire.js'
+import { stringifyJson } from './json.js'
+import { wireObject } from './wire.js'
 
 /** 线上边界来自生成常量；浏览器只作同一契约的无状态输入检查，授权仍由宿主判定。 */
 export function validNodeId(value: string): boolean {
@@ -14,8 +15,10 @@ export function byteCount(value: string): bigint {
 function opaque(value: string, maximum: number): boolean { return /^[A-Za-z0-9_-]+$/.test(value) && value.length <= maximum }
 function text(value: string, maximum: number): boolean { return Boolean(value.trim()) && !/\p{Cc}/u.test(value) && new TextEncoder().encode(value).length <= maximum }
 function progress(value: number): boolean { return Number.isInteger(value) && value >= 0 && value <= LIMITS.MAX_TASK_PROGRESS }
-export function validateUiRequest(request: UiRequest): void {
-  wireValue('UiRequest', request)
+export function validateUiRequest(request: UiRequest): UiRequest {
+  // 界面消息与 HTTP 使用同一种 JSON 形状，可选 undefined 字段在发送前省略。
+  try { request = wireObject('UiRequest', stringifyJson(request)) }
+  catch { throw new SdkError('界面请求参数格式无效') }
   let valid = true
   switch (request.method) {
     case 'ui.set_immersive': {
@@ -35,4 +38,5 @@ export function validateUiRequest(request: UiRequest): void {
     case 'ui.close': break
   }
   if (!valid) throw new SdkError('界面请求超出契约输入边界')
+  return request
 }

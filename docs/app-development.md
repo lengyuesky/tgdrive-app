@@ -37,10 +37,10 @@ NOTICE
 
 ## 2. 页面 SDK 是普通锁定依赖
 
-源码依赖 `@tgdrive/page-sdk` 的确定版本，随页面一起编译。当前仓库使用 npm workspace 和根 package-lock.json 锁定 1.0.0；独立应用也应提交自己的锁文件。不能在运行时加载 CDN，也不由打包器注入 SDK 或宿主源码。
+源码依赖 `@tgdrive/page-sdk` 的确定版本，随页面一起编译。当前仓库使用 npm workspace 和根 package-lock.json 锁定 1.0.1；独立应用也应提交自己的锁文件。不能在运行时加载 CDN，也不由打包器注入 SDK 或宿主源码。
 
 ```json
-{ "dependencies": { "@tgdrive/page-sdk": "1.0.0" } }
+{ "dependencies": { "@tgdrive/page-sdk": "1.0.1" } }
 ```
 
 ```ts
@@ -72,7 +72,9 @@ SDK 从地址片段读取 PageBootstrap，立即清除片段。令牌不出现�
 | 小对象缓存 | cachePut、cacheGet、cacheDelete、cacheLookup |
 | 流与后端 | events、backend |
 
-`app.ui` 覆盖 setImmersive、setTitle、pickDirectory、requestScope、task、close、closedAck，并提供 onNotice、beforeClose。目录选择不授予目录权限。所有消息核对父窗口、宿主源与 nonce；消息不携带 HTTP、文件字节或会话续签。
+`app.ui` 覆盖 setImmersive、setTitle、pickDirectory、requestScope、task、close、closedAck，并提供 onNotice、beforeClose。目录选择不授予目录权限。可选字段传入 `undefined` 时，SDK 按 JSON 规则在发送前省略；输入错误明确标为界面请求参数错误。所有消息核对父窗口、宿主源与 nonce；消息不携带 HTTP、文件字节或会话续签。
+
+页面自己的原生模态表单在调用宿主目录选择或授权窗口时，应暂时关闭并保留草稿，等待宿主返回后恢复。影视的媒体库编辑器覆盖了选择、授权取消、恢复草稿和保存，避免 iframe 表单与宿主窗口同时争抢焦点。宿主可预填本次刚选目录，但仍须主人确认授权，不能把选择动作当成授权。
 
 ```ts
 app.ui.beforeClose(async signal => {

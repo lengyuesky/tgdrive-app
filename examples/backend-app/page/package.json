@@ -4,5 +4,5 @@
   "license": "MIT",
   "private": true,
   "type": "module",
-  "dependencies": { "@tgdrive/page-sdk": "1.0.0" }
+  "dependencies": { "@tgdrive/page-sdk": "1.0.1" }
 }

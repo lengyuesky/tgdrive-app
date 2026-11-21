@@ -37,7 +37,7 @@ export class PageUi {
   async request(request: C.UiRequest, options: RequestOptions = {}): Promise<C.UiValue> {
     if (this.closed) throw new SdkError('界面通道已关闭')
     options.signal?.throwIfAborted()
-    validateUiRequest(request)
+    request = validateUiRequest(request)
     if (this.pending.size >= LIMITS.MAX_UI_REQUESTS) throw new SdkError('待应答界面请求已达上限')
     const dialog = ['ui.pick_directory', 'ui.request_scope'].includes(request.method)
     if (dialog && this.dialog) throw new SdkError('同一时间只能打开一个目录或授权窗口')

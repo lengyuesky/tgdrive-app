@@ -1,7 +1,7 @@
 {
   "id": "reader",
   "name": "阅读馆",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "contract": { "major": 1, "minor": 0 },
   "description": "在命名书库阅读文字、EPUB、PDF、漫画归档与图片目录，支持作品分组、书签和跨页面阅读进度。",
   "author": "tgdrive",
