@@ -89,9 +89,11 @@ describe('后台任务的页面观察与用户命令', () => {
     const before = test.fake.requests.length
     await vi.advanceTimersByTimeAsync(1500)
     await vi.waitFor(() => expect(test.fake.requests.length).toBeGreaterThan(before))
+    // 先等正在轮询的旧快照应用完，下一次刷新才读取后端刚结束的状态。
+    await test.page.refresh(false)
     const current = test.fake.runs.get(test.fake.activeId!)!
     test.fake.runs.set(current.id, { ...current, state: 'completed', message: '刮削已完成', counts: { total: 1, processed: 1, done: 1, failed: 0, skipped: 0 } }); test.fake.activeId = null
-    await test.page.refresh(false); await vi.waitFor(() => expect(test.page.activeRun).toBeNull())
+    await test.page.refresh(false); expect(test.page.activeRun).toBeNull()
     const count = test.fake.requests.length; await vi.advanceTimersByTimeAsync(10000)
     expect(test.fake.requests).toHaveLength(count)
     expect(test.ui.task).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'completed', completed: 1, total: 1, cancellable: false }), expect.anything())

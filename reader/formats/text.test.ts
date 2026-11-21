@@ -100,9 +100,11 @@ describe('TXT 渐进首屏与正文搜索', () => {
     expect(before).toContain('第1章'); expect(reader.navigationState().atEnd).toBe(false)
     expect(reader.navigationState().layoutNotice).toContain('加载后续')
     gate.resolve()
-    await vi.waitFor(() => expect(reader.navigationState().layoutNotice).toBeUndefined())
+    // 等待同一后台解码任务完成，CI 的真实分块读取不能用默认一秒轮询代替。
+    const navigation = await reader.loadNavigation()
+    expect(reader.navigationState().layoutNotice).toBeUndefined()
     expect(reader.current().offset).toBe(location.offset); expect(viewport.textContent).toBe(before)
-    expect(reader.navigation.some(item => item.label === '第2章 终点')).toBe(true)
+    expect(navigation.some(item => item.label === '第2章 终点')).toBe(true)
   })
   it('搜索跨章节返回真实字符位置，跳转和高亮不更改正文', async () => {
     const text = '第1章 起点\n中文 [a+b] 开头\n第2章 终点\n另一个 [a+b] 结尾'
