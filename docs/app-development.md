@@ -287,6 +287,8 @@ amd64 使用 `ubuntu-24.04`；arm64 使用公开仓库可用的 `ubuntu-24.04-ar
 
 建议在仓库设置中启用不可变 Release。草稿先附齐资产再发布符合 [GitHub 官方建议](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)；草稿续跑使用有写权限的分页 Release 列表，因为 [按 tag 查询只保证返回已发布 Release](https://docs.github.com/en/rest/releases/releases)。
 
+GitHub 草稿资产可能返回 `untagged-*` 临时下载路径；发布工具只接受同仓库、同文件名的草稿路径，并通过资产 API 核验原字节，不把临时地址写入目录。正式发布后仍必须使用精确版本标签的公开 URL 无令牌下载核验。
+
 ### 历史存放位置与失败重跑
 
 `catalog.json` 和 `catalog-history.json` 均跟踪在 **main 根目录**。历史是发布者侧使用的工具状态，宿主不读取，不属于线上契约，也不嵌入安装目录；它只有公开清单、精确 URL、摘要与大小，没有令牌或签名 URL，所以公开存放不会泄露机密。与目录同一提交能可靠保留撤回版本与最高版本绑定；Actions cache 或短期 artifact 不能替代这份历史。

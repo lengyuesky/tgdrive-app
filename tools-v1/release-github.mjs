@@ -119,7 +119,19 @@ export class GitHubRemote {
     // 草稿先使用 API 读取原字节；正式发布后必须再证明无令牌的精确公开 URL 可下载。
     const tag = `${report.manifest.id}-v${report.manifest.version}`
     const initial = `https://github.com/${this.repository}/releases/download/${tag}/${report.filename}`
-    if (asset.browser_download_url !== initial) throw new Error(`${report.filename} 的 Release 下载地址不精确匹配契约`)
+    if (asset.browser_download_url !== initial) {
+      // GitHub 未发布草稿使用 untagged-* 临时地址；只核对同仓库/文件名，下载仍走资产 API。
+      let draftAlias = false
+      if (release.draft) {
+        try {
+          const url = validateDownloadUrl(asset.browser_download_url, true)
+          const prefix = `/${this.repository}/releases/download/`
+          const parts = url.pathname.slice(prefix.length).split('/')
+          draftAlias = url.pathname.startsWith(prefix) && parts.length === 2 && /^untagged-[a-f0-9]+$/.test(parts[0]) && parts[1] === report.filename
+        } catch {}
+      }
+      if (!draftAlias) throw new Error(`${report.filename} 的 Release 下载地址不精确匹配契约`)
+    }
     if (release.draft && (!Number.isSafeInteger(asset.id) || asset.id <= 0)) throw new Error('草稿资产标识非法')
     const signal = AbortSignal.timeout(LIMITS.PACKAGE_DOWNLOAD_SECONDS * 1000)
     for (let attempt = 0; attempt < 4; attempt++) {

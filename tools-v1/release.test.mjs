@@ -297,13 +297,25 @@ test('草稿 API 令牌不随重定向转发，正式包下载从首跳起完全
     const remote = new GitHubRemote(repository, source)
     const report = { manifest: { id: 'reader', version: '1.0.0' }, filename: 'reader-1.0.0.tgapp', size: String(payload.length) }
     const asset = { id: 1, browser_download_url: initial }
-    for (const draft of [true, false]) {
-      const output = resolve(directory, `headers-${draft}`); await mkdir(output)
-      await remote.download({ draft }, asset, report, output)
+    const draftUrl = 'https://github.com/example/apps/releases/download/untagged-e729ad4fa8db90a7cc36/reader-1.0.0.tgapp'
+    for (const [index, [draft, browser_download_url]] of [[true, initial], [true, draftUrl], [false, initial]].entries()) {
+      const output = resolve(directory, `headers-${index}`); await mkdir(output)
+      await remote.download({ draft }, { ...asset, browser_download_url }, report, output)
     }
     assert.equal(requests[0].headers.Authorization, 'Bearer local-test-token')
-    assert.ok(requests.slice(1).every(request => request.headers.Authorization === undefined))
-    assert.equal(requests[2].url, initial)
+    assert.equal(requests[2].url, 'https://api.github.com/repos/example/apps/releases/assets/1')
+    assert.equal(requests[2].headers.Authorization, 'Bearer local-test-token')
+    assert.ok(requests.filter((_, index) => index !== 0 && index !== 2).every(request => request.headers.Authorization === undefined))
+    assert.equal(requests[4].url, initial)
+    for (const browser_download_url of [
+      'https://github.com/other/apps/releases/download/untagged-e729ad4fa8db90a7cc36/reader-1.0.0.tgapp',
+      'https://github.com/example/apps/releases/download/untagged-e729ad4fa8db90a7cc36/other.tgapp',
+      draftUrl + '?token=wrong',
+      draftUrl.replace('github.com', 'outside.invalid'),
+      draftUrl.replace('untagged-e729ad4fa8db90a7cc36', 'other-tag'),
+    ]) await assert.rejects(remote.download({ draft: true }, { ...asset, browser_download_url }, report, directory), /下载地址/)
+    await assert.rejects(remote.download({ draft: false }, { ...asset, browser_download_url: draftUrl }, report, directory), /下载地址/)
+    assert.equal(requests.length, 6)
   } finally {
     globalThis.fetch = previousFetch
     for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value }
