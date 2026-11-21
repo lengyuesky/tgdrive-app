@@ -1,0 +1,11 @@
+{
+  "name": "@tgdrive/test-host",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "description": "只用于 Node 自动化测试的内存宿主客户端，共用 Rust 契约语义",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@tgdrive/page-sdk": "1.0.0" },
+  "scripts": { "test": "vitest run --config vitest.config.ts", "typecheck": "tsc -p tsconfig.json" }
+}

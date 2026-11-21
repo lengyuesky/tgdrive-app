@@ -1,0 +1,16 @@
+{
+  "id": "reader",
+  "name": "阅读馆",
+  "version": "2.0.0",
+  "contract": { "major": 1, "minor": 0 },
+  "description": "在命名书库阅读文字、EPUB、PDF、漫画归档与图片目录，支持作品分组、书签和跨页面阅读进度。",
+  "author": "tgdrive",
+  "files": { "read": true, "write": false },
+  "page": { "entry": "page/index.html" },
+  "icon": "assets/icon.svg",
+  "required_capabilities": [
+    "runtime.info", "session.refresh", "scope.read", "files.stat", "files.list", "files.query", "files.directories_with_files", "files.changes", "files.bytes", "files.media_url", "kv.cas", "cache.objects", "events.sse",
+    "ui.set_immersive", "ui.set_title", "ui.pick_directory", "ui.request_scope", "ui.task", "ui.close", "ui.theme_changed"
+  ],
+  "open_with": { "extensions": ["txt", "epub", "pdf", "cbz", "zip"], "directories": true }
+}

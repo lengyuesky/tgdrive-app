@@ -1,0 +1,6 @@
+:root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; }
+body { margin: 0; background: Canvas; color: CanvasText; }
+main { max-width: 48rem; margin: auto; padding: 2rem; }
+button, input { font: inherit; padding: .5rem .8rem; margin: .25rem; }
+ul { list-style: none; padding: 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }

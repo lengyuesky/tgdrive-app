@@ -1,0 +1,22 @@
+[package]
+name = "tgdrive-backend-sdk"
+version = "1.0.0"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "应用后端的通用宿主客户端与受信任 Unix HTTP 入口"
+
+[dependencies]
+tgdrive-contract = { path = "../contract", version = "=1.0.0" }
+serde.workspace = true
+serde_json.workspace = true
+base64 = "0.22.1"
+bytes = "1.11"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+http-body-util = "0.1"
+hyper = { version = "1.11", default-features = false, features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3"

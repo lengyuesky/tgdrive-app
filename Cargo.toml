@@ -1,0 +1,18 @@
+[workspace]
+members = ["contract", "backend-sdk", "testing/backend-host", "app-tools", "examples/backend-app", "cinema/backend", "media-scraper/backend"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+semver = "1.0"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

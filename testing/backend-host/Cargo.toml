@@ -1,0 +1,23 @@
+[package]
+name = "tgdrive-test-host"
+version = "1.0.0"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "仅用于应用自动化测试的内存宿主客户端，不提供 HTTP 服务"
+
+[dependencies]
+tgdrive-backend-sdk = { path = "../../backend-sdk", version = "=1.0.0" }
+tgdrive-contract = { path = "../../contract", version = "=1.0.0" }
+serde.workspace = true
+serde_json.workspace = true
+bytes = "1.11"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+base64 = "0.22.1"
+sha2 = "0.10"
+tokio = { version = "1.54", default-features = false, features = ["rt", "macros", "sync"] }
+
+[[bin]]
+name = "tgdrive-test-worker"
+path = "src/bin/worker.rs"

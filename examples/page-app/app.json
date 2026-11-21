@@ -1,0 +1,11 @@
+{
+  "id": "example-page",
+  "name": "最小页面示例",
+  "version": "1.0.0",
+  "contract": { "major": 1, "minor": 0 },
+  "description": "分页列出授权文件，有界读取开头字节并用 CAS 保存最后选择。",
+  "author": "开发者",
+  "files": { "read": true, "write": false },
+  "page": { "entry": "page/index.html" },
+  "required_capabilities": []
+}

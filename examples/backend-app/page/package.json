@@ -1,0 +1,8 @@
+{
+  "name": "@tgdrive/example-backend-page",
+  "version": "1.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@tgdrive/page-sdk": "1.0.0" }
+}

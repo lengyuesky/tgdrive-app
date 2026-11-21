@@ -1,0 +1,51 @@
+{
+  "name": "tgdrive-app",
+  "version": "1.0.1",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "workspaces": ["page-sdk", "testing/page-host", "examples/page-app", "examples/backend-app/page", "ui", "reader", "shorts", "cinema/page", "media-scraper/page"],
+  "description": "宿主与应用契约、两个 SDK、测试替身、应用源码和确定性打包工具。",
+  "engines": {
+    "node": "22.22.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @tgdrive/page-sdk",
+    "typecheck": "npm run build --workspace @tgdrive/page-sdk && tsc --noEmit && npm run typecheck --workspaces --if-present",
+    "contract:generate": "node ./tools-v1/check-contract.mjs generate",
+    "contract:check": "node ./tools-v1/check-contract.mjs check",
+    "sdk:schema": "node ./tools-v1/generate-page-schema.mjs",
+    "sdk:schema:check": "node ./tools-v1/generate-page-schema.mjs check",
+    "sdk:check": "node ./tools-v1/check-sdk.mjs",
+    "build:examples:v1": "node ./tools-v1/build-examples.mjs",
+    "build:pages:v1": "node ./tools-v1/build-pages.mjs",
+    "build:cinema": "node ./tools-v1/build-cinema.mjs",
+    "build:media-scraper": "node ./tools-v1/build-media-scraper.mjs",
+    "build:all": "node ./tools-v1/build-all.mjs",
+    "check:all": "node ./tools-v1/check-all.mjs",
+    "catalog:packages": "node ./tools-v1/catalog-packages.mjs",
+    "release:dry-run": "node ./tools-v1/release.mjs --dry-run",
+    "test:pipeline": "node --test tools-v1/*.test.mjs",
+    "check": "npm run typecheck && npm run build",
+    "test": "npm run sdk:check && vitest run && npm run test:pipeline",
+    "test:formats": "npm run sdk:check && vitest run reader/formats",
+    "test:formats:browser": "npm run build --workspace @tgdrive/page-sdk && playwright test --config tests/standalone/formats.config.ts",
+    "test:pictures:browser": "npm run build --workspace @tgdrive/page-sdk && playwright test --config tests/standalone/readers.config.ts",
+    "test:shorts": "npm run sdk:check && vitest run shorts",
+    "test:media-scraper:browser": "node ./media-scraper/page/browser-runner.mjs",
+    "test:readers": "npm run sdk:check && vitest run reader"
+  },
+  "dependencies": {
+    "@zip.js/zip.js": "2.14.0",
+    "dompurify": "3.4.15",
+    "pdfjs-dist": "6.3.289"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.4.1",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.6"
+  }
+}

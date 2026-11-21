@@ -1,0 +1,22 @@
+[package]
+name = "tgdrive-app-tools"
+version = "1.0.0"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "第 1 版应用包的确定性打包、真实 ZIP/ELF 校验和 Release 目录工具"
+
+[dependencies]
+tgdrive-contract = { path = "../contract", version = "=1.0.0" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+crc32fast = "1.5"
+libc = "0.2"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+tempfile = "3"
+
+[[bin]]
+name = "tgapp"
+path = "src/main.rs"

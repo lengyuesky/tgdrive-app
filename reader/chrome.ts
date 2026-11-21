@@ -1,0 +1,183 @@
+/** 临时阅读状态不持久化；手机沉浸与阅读馆桌面阅读都通过公开 SDK 请求宿主腾出全屏。 */
+import type { ReaderUi } from './runtime'
+import { ReadingGestures } from './gestures'
+export const MOBILE_READING_QUERY = '(max-width: 768px), (pointer: coarse)'
+type Panel = 'preferences' | 'bookmarks' | 'navigation' | 'reader-more' | 'appearance' | 'paging'
+const PANELS: Panel[] = ['preferences', 'bookmarks', 'navigation', 'reader-more', 'appearance', 'paging']
+interface ChromeOptions {
+  immersive?: boolean; desktopControls?: boolean; ui: Pick<ReaderUi, 'setImmersive'>
+  /** 手机上书库界面也进入沉浸，由插件自己提供返回网盘入口。 */
+  shelf?: boolean
+  turn: (delta: -1 | 1) => void; paged: () => boolean; error: (error: unknown) => void
+  drag?: (dx: number) => boolean; settle?: (delta: -1 | 0 | 1) => void
+  onPanelChange?: (panel?: Panel) => void
+}
+export class ReaderChrome {
+  private media = window.matchMedia?.(MOBILE_READING_QUERY)
+  private reading = false
+  private ready = false
+  private active = false
+  private controls = true
+  private panel?: Panel
+  private previousFocus?: HTMLElement
+  private disposed = false
+  private hostState = false
+  private hostBackground?: string
+  private hostQueue = Promise.resolve()
+  private gestures: ReadingGestures
+  private removers: (() => void)[] = []
+  private get = <T extends HTMLElement = HTMLElement>(id: string) => this.root.querySelector<T>(`#${id}`)!
+  constructor(private root: HTMLElement, private options: ChromeOptions) {
+    this.gestures = new ReadingGestures(this.get('viewport'), {
+      enabled: () => (this.active || !!this.options.desktopControls) && this.ready && !this.panel,
+      paged: options.paged, controls: () => this.controls,
+      toggle: () => this.toggle(), turn: options.turn, drag: options.drag, settle: options.settle,
+    })
+    const bind = (id: string, action: () => void) => {
+      const element = this.get(id), listener = () => action()
+      element.addEventListener('click', listener); this.removers.push(() => element.removeEventListener('click', listener))
+    }
+    bind('reader-menu-toggle', () => this.reveal())
+    bind('toc-toggle', () => this.togglePanel('navigation', this.get('toc-toggle')))
+    bind('reader-more-toggle', () => this.togglePanel('reader-more', this.get('reader-more-toggle')))
+    const closeListener = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('[data-close-panel]')) {
+        this.closePanel()
+      }
+    }
+    root.addEventListener('click', closeListener)
+    this.removers.push(() => root.removeEventListener('click', closeListener))
+    bind('reader-backdrop', () => this.closePanel())
+    this.media?.addEventListener('change', this.resize)
+    window.visualViewport?.addEventListener('resize', this.visualResize)
+    document.addEventListener('keydown', this.key)
+    if (options.shelf) void this.apply()
+  }
+  private setHost(active: boolean) {
+    const color = getComputedStyle(document.body).getPropertyValue('--bg').trim()
+    const background = active && /^#[a-fA-F0-9]{6}$/.test(color) ? color : undefined
+    if ((this.hostState === active && this.hostBackground === background)) return this.hostQueue
+    this.hostState = active
+    this.hostBackground = background
+    this.hostQueue = this.hostQueue.catch(() => {}).then(async () => {
+      if (active && this.disposed) return
+      await this.options.ui.setImmersive({ active, ...(background ? { background } : {}) })
+    }).catch((error) => { if (!this.disposed) { this.hostState = false; this.options.error(error) } })
+    return this.hostQueue
+  }
+  private hostActive() { return this.reading ? this.active || !!this.options.desktopControls : !!this.options.shelf && !!this.media?.matches }
+  themeChanged() { return this.setHost(this.hostActive()) }
+  private apply() {
+    const active = (this.options.immersive ?? true) && this.reading && !!this.media?.matches
+    this.root.classList.toggle('reader-desktop', this.reading && !active && !!this.options.desktopControls)
+    // 阅读页底色与书库不同；先切换再读取 --bg，宿主安全区填色才能与正文一致。
+    document.body.classList.toggle('is-reading', this.reading)
+    if (active !== this.active) {
+      this.closePanel(false)
+      this.active = active
+      this.root.classList.toggle('immersive', active)
+      this.get(active ? 'reader-footer-actions' : 'reader-desktop-actions').append(this.get('reader-actions'))
+      for (const panel of PANELS) this.get(panel).hidden = true
+      this.controls = !active || !this.ready
+    }
+    this.render()
+    return this.setHost(this.hostActive())
+  }
+  private render() {
+    this.root.dataset.controls = this.controls ? 'visible' : 'hidden'
+    this.get('reader-backdrop').hidden = !this.active || !this.panel
+    this.get('viewport').inert = this.active && !!this.panel
+    for (const id of PANELS) {
+      const element = this.get(id), modal = this.active && this.panel === id
+      element.classList.toggle('reader-panel', this.active)
+      if (modal) { element.setAttribute('role', 'dialog'); element.setAttribute('aria-modal', 'true') }
+      else { element.removeAttribute('role'); element.removeAttribute('aria-modal') }
+    }
+    this.visualResize()
+  }
+  private resize = () => { if (!this.disposed) void this.apply() }
+  private visualResize = () => {
+    // 键盘只约束浮层，不用缩放后的尺寸重排整本正文。
+    const height = window.visualViewport?.height ?? window.innerHeight
+    this.root.style.setProperty('--panel-height', `${Math.max(120, height * .75)}px`)
+  }
+  async enter() {
+    this.closePanel(false)
+    for (const panel of PANELS) this.get(panel).hidden = true
+    this.reading = true; this.ready = false; this.controls = true
+    await this.apply()
+  }
+  opened() {
+    this.ready = true; this.controls = !this.active
+    this.render()
+    this.get('viewport').focus({ preventScroll: true })
+  }
+  async leave() {
+    this.reading = false; this.ready = false; this.closePanel(false)
+    await this.apply()
+    for (const panel of PANELS) this.get(panel).hidden = true
+  }
+  reveal() { if (this.panel) this.closePanel(false); this.controls = true; this.render() }
+  toggle() {
+    if (!this.active && !this.options.desktopControls) return
+    this.closePanel(false); this.controls = !this.controls; this.render()
+    if (!this.controls) this.get('viewport').focus({ preventScroll: true })
+  }
+  togglePanel(panel: Panel, trigger?: HTMLElement) {
+    if (this.panel === panel) { this.closePanel(); return false }
+    this.closePanel(false)
+    const activeEl = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    this.previousFocus = trigger ?? (activeEl && !activeEl.closest('[hidden]') ? activeEl : undefined)
+    this.panel = panel; this.controls = true
+    this.get(panel).hidden = false; this.render()
+    const first = this.focusable(this.get(panel))[0]
+    first?.focus({ preventScroll: true })
+    this.options.onPanelChange?.(panel)
+    return true
+  }
+  closePanel(focus = true) {
+    const prevPanel = this.panel
+    if (this.panel) this.get(this.panel).hidden = true
+    const prev = this.previousFocus
+    this.panel = undefined
+    this.get('viewport').inert = false
+    if (focus) prev?.focus({ preventScroll: true })
+    this.previousFocus = undefined
+    this.render()
+    if (prevPanel) this.options.onPanelChange?.(undefined)
+  }
+  private focusable(panel: HTMLElement) {
+    return [...panel.querySelectorAll<HTMLElement>('button,input,select,textarea,a[href],[tabindex="0"]')]
+      .filter((element) => !element.closest('[hidden]') && !element.hasAttribute('disabled') && getComputedStyle(element).display !== 'none')
+  }
+  private key = (event: KeyboardEvent) => {
+    if (!this.reading) return
+    if (event.key === 'Escape') {
+      if (this.panel) {
+        event.preventDefault()
+        this.closePanel()
+      } else if (this.active || this.options.desktopControls) {
+        event.preventDefault()
+        this.reveal()
+        this.get('back').focus({ preventScroll: true })
+      }
+    } else if ((this.active || this.options.desktopControls) && event.key === 'Tab' && !this.panel && !this.controls) {
+      event.preventDefault(); this.reveal(); this.get('back').focus({ preventScroll: true })
+    } else if (this.active && event.key === 'Tab' && this.panel) {
+      const elements = this.focusable(this.get(this.panel)), first = elements[0], last = elements.at(-1)
+      if (!first) { event.preventDefault(); return }
+      if (event.shiftKey && (document.activeElement === first || !elements.includes(document.activeElement as HTMLElement))) { event.preventDefault(); last?.focus() }
+      else if (!event.shiftKey && (document.activeElement === last || !elements.includes(document.activeElement as HTMLElement))) { event.preventDefault(); first.focus() }
+    }
+  }
+  destroy() {
+    this.disposed = true; this.reading = false
+    this.media?.removeEventListener('change', this.resize)
+    window.visualViewport?.removeEventListener('resize', this.visualResize)
+    document.removeEventListener('keydown', this.key)
+    this.gestures.destroy(); this.removers.forEach((remove) => remove())
+    this.closePanel(false); this.root.classList.remove('immersive', 'reader-desktop'); document.body.classList.remove('is-reading')
+    void this.setHost(false)
+  }
+}

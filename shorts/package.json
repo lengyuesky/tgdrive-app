@@ -1,0 +1,11 @@
+{
+  "name": "@tgdrive/shorts",
+  "version": "2.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "短视频纯页面应用",
+  "dependencies": { "@tgdrive/page-sdk": "1.0.0", "@tgdrive/ui": "1.0.0" },
+  "devDependencies": { "@tgdrive/test-host": "1.0.0" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json", "build": "node ../tools-v1/build-pages.mjs shorts" }
+}

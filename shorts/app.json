@@ -1,0 +1,16 @@
+{
+  "id": "shorts",
+  "name": "短视频",
+  "version": "2.0.0",
+  "contract": { "major": 1, "minor": 0 },
+  "description": "在授权目录内随机抽样播放视频，支持滑动切换、进度拖动、应用收藏、取材设置和下载。",
+  "author": "tgdrive",
+  "files": { "read": true, "write": false },
+  "page": { "entry": "page/index.html" },
+  "icon": "assets/icon.svg",
+  "required_capabilities": [
+    "runtime.info", "session.refresh", "scope.read", "files.stat", "files.random", "files.changes", "files.media_url", "kv.cas", "events.sse",
+    "ui.set_immersive", "ui.set_title", "ui.pick_directory", "ui.request_scope", "ui.task", "ui.close", "ui.theme_changed"
+  ],
+  "open_with": { "extensions": ["mp4", "mov", "m4v", "mkv", "webm", "avi", "wmv", "flv", "ts", "mts", "m2ts", "3gp", "ogv"], "directories": false }
+}

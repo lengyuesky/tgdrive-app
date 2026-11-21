@@ -1,0 +1,14 @@
+{
+  "id": "media-scraper",
+  "name": "影视刮削",
+  "version": "1.0.0",
+  "contract": { "major": 1, "minor": 0 },
+  "description": "选择授权目录后，由应用后端整理番号视频并补齐 NFO、2:3 JPEG 海报与可用演员资料；关页面不停，重启不自动续跑。",
+  "author": "tgdrive",
+  "icon": "assets/icon.svg",
+  "files": { "read": true, "write": true },
+  "page": { "entry": "page/index.html" },
+  "backend": { "entry": "backend/app", "run_mode": "on_demand", "external_service": false },
+  "required_capabilities": ["backend.proxy", "backend.keepalive", "files.mutate", "files.upload"],
+  "open_with": { "extensions": [], "directories": true }
+}

@@ -1,0 +1,36 @@
+[package]
+name = "tgdrive-media-scraper"
+version = "1.0.0"
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+publish = false
+
+[dependencies]
+tgdrive-backend-sdk = { path = "../../backend-sdk", version = "=1.0.0" }
+tgdrive-contract = { path = "../../contract", version = "=1.0.0" }
+serde.workspace = true
+serde_json.workspace = true
+rusqlite = { version = "0.43", features = ["bundled"] }
+rand = "0.9"
+regex = "1.12"
+sha2 = "0.10"
+roxmltree = "0.20"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+bytes = "1.11"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+http-body-util = "0.1"
+hyper = { version = "1.11", default-features = false, features = ["http1"] }
+tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[dev-dependencies]
+tgdrive-test-host = { path = "../../testing/backend-host", version = "=1.0.0" }
+tempfile = "3"
+hyper-util = { version = "0.1", features = ["tokio"] }
+tokio = { version = "1.54", features = ["net", "io-util", "test-util"] }
+
+[[bin]]
+name = "media-scraper"
+path = "src/main.rs"

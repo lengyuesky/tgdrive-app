@@ -1,0 +1,172 @@
+/*
+ * 阅读馆界面改版：统一配色、图标工具栏、底部进度与四个快捷入口、常驻章节进度与完成卡片。
+ * 在 style.css、reading.css 之后引入；手机沉浸（.immersive）为首要布局，桌面（.reader-desktop）沿用浮动工具栏。
+ * 宿主已扣除设备安全区，这里不叠加 env(safe-area-inset-*)。
+ */
+
+/* ---------- 配色：明亮/深色跟随共享规范，护眼保留原有暖色 ---------- */
+:root { font-family: var(--tg-font); }
+body:not([data-theme="sepia"]) { --bg: var(--tg-bg); --surface: var(--tg-surface); --text: var(--tg-text); --muted: var(--tg-muted); --line: var(--tg-line); }
+body:not([data-theme="sepia"]) #app[data-app="reader"] { --accent: var(--tg-accent); --soft: color-mix(in srgb, var(--tg-accent) 12%, var(--tg-surface)); }
+/* 明亮主题阅读时正文用纯白纸面；深色保持纯黑，OLED 更省电也更沉浸。 */
+body.is-reading:not([data-theme="sepia"]):not([data-theme="dark"]) { --bg: #ffffff; }
+body[data-theme="sepia"] { --tg-accent: #8a6326; --tg-surface: #faf1dc; --tg-surface-2: #eadcbd; --tg-line: #dfcfad; --tg-text: #554731; --tg-muted: #8b7550; }
+.reader { background: var(--bg); }
+
+/* ---------- 工具按钮：图标 + 文字，手机只显示图标 ---------- */
+.reader .tool-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; min-height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text); white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+.reader .tool-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); border-color: transparent; }
+.reader .tool-btn:active:not(:disabled) { background: color-mix(in srgb, var(--text) 12%, transparent); }
+.reader .tool-btn[aria-pressed="true"] { color: var(--accent); }
+.reader .tool-btn .tg-icon { width: 22px; height: 22px; }
+#bookmark-quick[aria-pressed="true"] { color: var(--accent); }
+
+/* ---------- 进度条 ---------- */
+.reader-progress-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px; width: 100%; }
+.progress-slider { position: relative; display: flex; align-items: center; min-width: 0; height: 44px; }
+.progress-slider[hidden] { display: flex !important; visibility: hidden; }
+#progress { width: 100%; height: 44px; margin: 0; padding: 0; border: 0; background: transparent; accent-color: var(--accent); -webkit-appearance: none; appearance: none; touch-action: none; }
+#progress::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text) 16%, transparent); }
+#progress::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; background: var(--surface); border: .5px solid var(--line); box-shadow: 0 1px 6px #0004; }
+#progress::-moz-range-track { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text) 16%, transparent); }
+#progress::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: var(--surface); border: .5px solid var(--line); box-shadow: 0 1px 6px #0004; }
+.progress-bubble { position: absolute; bottom: calc(100% + 6px); left: clamp(0px, calc(var(--progress, 0) * 100% - 90px), calc(100% - 180px)); width: 180px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--text) 88%, transparent); color: var(--bg); font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+
+/* ---------- 同步状态：成功时不打扰，失败时才出现 ---------- */
+#sync:not([data-state="error"]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+#sync[data-state="error"] { color: #d9534f; }
+.reader-footer-line #retry-save { display: none; }
+.reader-footer-line:has(#sync[data-state="error"]) #retry-save { display: inline-flex; }
+
+/* ---------- 面板通用：分组行、分段、开关、主题色块 ---------- */
+.pref-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; font-size: 15px; color: var(--text); }
+.pref-row > span:first-child { flex-shrink: 0; color: var(--muted); font-size: 14px; }
+.pref-row .tg-segmented { flex: 1; max-width: 280px; }
+.reader .tg-segmented > button { min-width: 0; min-height: 36px; border: 0; }
+.reader .tg-segmented > button:hover:not(:disabled) { color: var(--text); }
+.font-stepper { display: grid; grid-template-columns: 56px 48px 56px; align-items: center; border-radius: 10px; background: var(--tg-surface-2); padding: 2px; }
+.font-stepper > button { min-height: 36px; min-width: 0; border: 0; border-radius: 8px; background: transparent; font-weight: 600; }
+.font-stepper > button[data-font-step="-1"] { font-size: 13px; }
+.font-stepper > button[data-font-step="1"] { font-size: 18px; }
+.font-stepper output { text-align: center; font-variant-numeric: tabular-nums; font-size: 15px; }
+.tg-switch { position: relative; width: 51px; min-width: 51px; height: 31px; min-height: 31px; padding: 0; border: 0; border-radius: 16px; background: color-mix(in srgb, var(--text) 18%, transparent); transition: background .2s; }
+.tg-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px #0003; transition: transform .2s var(--tg-ease); }
+.tg-switch[aria-checked="true"] { background: #34c759; }
+.tg-switch[aria-checked="true"]::after { transform: translateX(20px); }
+.reader .tg-switch:hover:not(:disabled) { border-color: transparent; }
+.theme-swatches { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.theme-swatch { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; padding: 6px 0; border: 0; background: transparent; font-size: 12px; color: var(--muted); }
+.theme-swatch .swatch { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; border: 1px solid var(--line); font: 600 18px/1 Georgia, "Songti SC", serif; }
+.theme-swatch[aria-pressed="true"] { color: var(--text); font-weight: 600; }
+.theme-swatch[aria-pressed="true"] .swatch { outline: 2.5px solid var(--accent); outline-offset: 2px; }
+.swatch-system { background: linear-gradient(135deg, #fff 50%, #1c1c1e 50%); color: #8a8a8e; }
+.swatch-light { background: #fff; color: #1c1c1e; }
+.swatch-sepia { background: #f4ebd6; color: #554731; }
+.swatch-dark { background: #1c1c1e; color: #f2f2f7; }
+.panel-hint { margin: 4px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.pref-advanced-toggle { width: 100%; min-height: 44px; border: 0; border-radius: 10px; background: var(--tg-surface-2); color: var(--accent); }
+.pref-advanced-toggle::after { content: " ›"; }
+.pref-advanced-toggle[aria-expanded="true"]::after { content: " ⌄"; }
+
+/* 格式相关项：文字只显示文字类，漫画只显示漫画类，PDF 只显示画面适应。 */
+#reader:not([data-format-kind="text"]) :is(.paging-text, .flow-quick) { display: none; }
+#reader:not([data-format-kind="comic"]) .paging-comic { display: none; }
+#reader[data-format-kind="text"] .paging-fit { display: none; }
+@media (orientation: portrait) and (max-width: 767px) { .wide-only { display: none; } }
+
+/* ---------- 常驻章节与进度 ---------- */
+.reading-meta { display: none; }
+#app:is(.immersive, .reader-desktop)[data-controls="hidden"] #reader[data-status-line="true"] .reading-meta { display: block; }
+.reading-meta span { position: absolute; left: 20px; right: 20px; z-index: 2; font-size: 11px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: .8; }
+#meta-chapter { top: 6px; }
+#meta-progress { bottom: 6px; text-align: center; font-variant-numeric: tabular-nums; }
+/* 漫画贴边显示，章节名省略，只在底部留一枚半透明进度。 */
+#reader[data-format-kind="comic"] #meta-chapter { display: none; }
+#reader[data-format-kind="comic"] #meta-progress { left: 50%; right: auto; transform: translateX(-50%); padding: 2px 10px; border-radius: 10px; background: #0008; color: #fff; opacity: 1; }
+
+/* ---------- 完成卡片：只在真实末端出现，不随工具栏隐藏 ----------
+ * 层级低于面板遮罩（4）：底部面板挂在工具栏（6）里，卡片若更高会盖住「更多」等面板的按钮。 */
+.reader-completion { position: absolute; left: 50%; bottom: 24px; z-index: 3; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(92%, 420px); padding: 16px; border-radius: 16px; background: var(--surface); border: .5px solid var(--line); box-shadow: 0 8px 30px #0003; }
+.reader-completion[hidden] { display: none !important; }
+.completion-title { font-size: 15px; }
+.completion-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; }
+.completion-actions button { flex: 1 1 auto; min-height: 44px; border: 0; border-radius: 12px; }
+.completion-actions .btn-primary { background: var(--accent); color: #fff; }
+.completion-actions .btn-primary:hover:not(:disabled) { color: #fff; filter: brightness(1.05); }
+/* 工具栏显示时完成卡片让出底部操作区。 */
+#app.immersive[data-controls="visible"] .reader-completion { bottom: 170px; }
+.reader-toast { bottom: 96px; z-index: 12; }
+
+/* ==================== 手机沉浸布局 ==================== */
+.immersive .reader-toolbar { display: flex; align-items: center; gap: 0; min-height: 48px; padding: 0 4px; flex-wrap: nowrap; background: transparent; border-bottom: .5px solid var(--line); box-shadow: none; isolation: isolate; }
+/* 底色放在伪元素上且不用 backdrop-filter：它会让顶栏成为 fixed 子元素的定位参照，「更多」面板会跑出屏幕；半透明底在 WebKit 上会透出正文，统一用实色。 */
+.immersive .reader-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--surface); }
+.immersive #book-title { flex: 1; min-width: 0; text-align: center; font-size: 15px; font-weight: 600; padding: 0 4px; }
+.immersive .tool-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.immersive .reader-footer { gap: 0; padding: 4px 8px 6px; background: var(--surface); border-top: .5px solid var(--line); box-shadow: none; }
+.immersive .reader-footer-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; min-height: 0; }
+.immersive .reader-footer-line:not(:has(#sync[data-state="error"])):not(:has(#retry-reader:not([hidden]))) #position:empty { display: none; }
+.immersive :is(#previous, #next) { display: none; }
+.immersive #position { font-size: 12px; color: var(--muted); -webkit-line-clamp: 1; }
+.immersive #reader-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.immersive #reader-actions .tool-btn { flex-direction: column; gap: 2px; min-height: 52px; padding: 4px 0; font-size: 11px; color: var(--text); }
+.immersive #reader-actions .tool-label { position: static; width: auto; height: auto; clip-path: none; overflow: visible; color: var(--muted); }
+.immersive #reader-actions .tool-btn[aria-expanded="true"] .tool-label { color: var(--accent); }
+/* 正文上下为常驻信息留出固定空间：只随开关变化，不随工具栏显隐重排。 */
+.immersive #reader:not([data-format-kind="comic"]) .reading-viewport { padding-top: 16px; padding-bottom: 16px; }
+.immersive #reader[data-status-line="true"]:not([data-format-kind="comic"]) .reading-viewport { padding-top: 28px; padding-bottom: 28px; }
+
+/* 底部面板：统一圆角、拖动条视觉与分组行。 */
+.immersive :is(.reader-panel, .appearance-panel, .paging-panel) { position: fixed; top: auto; bottom: 0; left: 0; right: 0; z-index: 8; width: 100%; max-height: min(75dvh, var(--panel-height, 75vh)); overflow: auto; overscroll-behavior: contain; padding: 4px 16px 20px; background: var(--surface); border: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px #0003; }
+.immersive :is(.reader-panel, .appearance-panel, .paging-panel)::before { content: ""; display: block; width: 36px; height: 5px; margin: 6px auto 6px; border-radius: 3px; background: var(--line); }
+.immersive :is(.appearance-panel, .paging-panel, .preferences) { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.immersive :is(.reader-panel, .appearance-panel, .paging-panel) .panel-heading { display: flex; position: sticky; top: -4px; align-items: center; justify-content: space-between; padding: 0 0 8px; margin: 0; background: var(--surface); z-index: 1; }
+.immersive :is(.reader-panel, .appearance-panel, .paging-panel) .panel-heading strong { font-size: 17px; }
+.immersive .panel-heading [data-close-panel] { min-height: 36px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--tg-surface-2); color: var(--text); font-size: 14px; }
+.immersive .preferences:not([data-expanded="true"]) #pref-advanced { display: none; }
+.immersive #pref-advanced { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; border-top: .5px solid var(--line); }
+.immersive .reader-more { gap: 8px; }
+.immersive .reader-more > button { display: flex; align-items: center; justify-content: flex-start; min-height: 48px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--tg-surface-2); text-align: left; }
+/* 横屏等矮屏：更多操作改四列，全部按钮一屏可见，不需要在面板内滚动。 */
+@media (max-height: 500px) {
+  .immersive .reader-more { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .immersive .reader-more > button { min-height: 44px; padding: 0 10px; }
+  .immersive .reader-more .panel-heading { padding-bottom: 4px; }
+}
+.immersive #notice { top: 56px; }
+
+/* ==================== 桌面浮动布局 ==================== */
+.reader-desktop .reader-toolbar { gap: 4px; padding: 6px 10px; }
+.reader-desktop .tool-btn { font-size: 14px; }
+.reader-desktop #bookmark-quick .tool-label { display: none; }
+#app.reader-desktop :is(.appearance-panel, .paging-panel) { position: absolute; inset: 58px 0 auto auto; width: min(380px, 45%); z-index: 8; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; background: var(--surface); border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 0 0 0 12px; box-shadow: -6px 6px 24px #0002; }
+#app.reader-desktop .pref-advanced-toggle { display: none; }
+#app.reader-desktop #pref-advanced { display: flex; flex-direction: column; gap: 20px; }
+#app.reader-desktop .reader-completion { bottom: 84px; }
+:not(.immersive):not(.reader-desktop) > .reader :is(.appearance-panel, .paging-panel) { padding: 12px 18px; display: flex; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+
+/* ==================== 书架（首页 / 书库 / 我的）手机端 ==================== */
+/* shelf.css 在本文件之后引入，这里用 #app #nav-container 提高优先级。 */
+.mobile-library-chips, .me-quick-actions { display: none; }
+.nav-icon .tg-icon { width: 20px; height: 20px; vertical-align: -4px; }
+@media (max-width: 768px), (pointer: coarse) {
+  #app #nav-container .mobile-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 0 4px 0 16px; background: var(--tg-bar-bg); border-bottom: 0; }
+  #app #nav-container .mobile-title { margin: 0; overflow: hidden; font-size: 22px; font-weight: 700; letter-spacing: .01em; text-overflow: ellipsis; white-space: nowrap; }
+  #app #nav-container #btn-mobile-search { width: 44px; min-width: 44px; padding: 0; border: 0; border-radius: 22px; background: transparent; color: var(--text); }
+  #app #nav-container .mobile-library-chips { display: flex; padding: 2px 16px 10px; background: var(--tg-bar-bg); border-bottom: .5px solid var(--line); }
+  #app #nav-container .mobile-library-chips[hidden] { display: none; }
+  #app #nav-container .mobile-header:has(+ .mobile-library-chips[hidden]) { border-bottom: .5px solid var(--line); }
+  #app #nav-container .library-chip { display: block; max-width: 62vw; min-height: 34px; overflow: hidden; border: 0; line-height: 34px; text-overflow: ellipsis; }
+  /* 书库名已由选中的筛选标签表达，「全部」即返回书库列表；手机隐藏重复的标题区，让第一行作品更早出现。 */
+  #app #ui-content .library-view-container > .library-heading { display: none; }
+  #app #nav-container .library-chip:not(.active) { background: var(--tg-surface-2); color: var(--text); }
+  #app #nav-container .mobile-bottom-nav { display: grid; height: auto; min-height: var(--tg-tabbar-h); background: var(--tg-bar-bg); border-top: .5px solid var(--line); }
+  #app #nav-container .bottom-tab { height: auto; min-height: 50px; padding: 5px 0 3px; border: 0; background: transparent; color: var(--muted); font-size: 10px; font-weight: 500; }
+  #app #nav-container .bottom-tab.active { color: var(--accent); font-weight: 600; }
+  #app #nav-container .bottom-tab .tab-icon { display: grid; place-items: center; height: 26px; font-size: 0; }
+  #app #nav-container .bottom-tab .tg-icon { width: 25px; height: 25px; }
+  #app #nav-container .bottom-tab.active .tg-icon { stroke-width: 2.2; }
+  #app .me-quick-actions { display: flex; gap: 8px; margin: 4px 0 8px; }
+  #app .me-quick-actions .tg-chip { gap: 6px; min-height: 36px; border: 0; }
+  #app .me-quick-actions .tg-icon { width: 18px; height: 18px; }
+}

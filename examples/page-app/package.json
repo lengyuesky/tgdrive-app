@@ -1,0 +1,10 @@
+{
+  "name": "@tgdrive/example-page",
+  "version": "1.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@tgdrive/page-sdk": "1.0.0" },
+  "devDependencies": { "@tgdrive/test-host": "1.0.0" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json", "test": "vitest run --config vitest.config.ts" }
+}

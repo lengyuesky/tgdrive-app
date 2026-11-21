@@ -1,0 +1,27 @@
+[package]
+name = "tgdrive-example-backend"
+version = "1.0.0"
+license.workspace = true
+edition.workspace = true
+rust-version = "1.89"
+publish = false
+
+[dependencies]
+tgdrive-backend-sdk = { path = "../../backend-sdk", version = "=1.0.0" }
+tgdrive-contract = { path = "../../contract", version = "=1.0.0" }
+serde.workspace = true
+serde_json.workspace = true
+bytes = "1.11"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+http-body-util = "0.1"
+hyper = { version = "1.11", default-features = false, features = ["http1"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
+sha2 = "0.10"
+tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+tgdrive-test-host = { path = "../../testing/backend-host", version = "=1.0.0" }
+
+[[bin]]
+name = "example-backend"
+path = "src/main.rs"

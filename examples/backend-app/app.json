@@ -1,0 +1,12 @@
+{
+  "id": "example-backend",
+  "name": "最小应用后端示例",
+  "version": "1.0.0",
+  "contract": { "major": 1, "minor": 0 },
+  "description": "主人配置文件与服务令牌，外部鉴权后返回直传控制响应，并演示条件新建目录。",
+  "author": "开发者",
+  "files": { "read": true, "write": true },
+  "page": { "entry": "page/index.html" },
+  "backend": { "entry": "backend/app", "run_mode": "resident", "external_service": true },
+  "required_capabilities": []
+}

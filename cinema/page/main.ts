@@ -1,0 +1,822 @@
+import { createPageApp } from '@tgdrive/page-sdk'
+import '@tgdrive/ui/base.css'
+import { icon as sharedIcon, type IconName } from '@tgdrive/ui/icons'
+import type { FileNode } from '@tgdrive/page-sdk/contract'
+import { seriesOptions, SleepTimer, type SeriesOptions } from './play-options'
+import './style.css'
+import './libraries.css'
+import './settings.css'
+import { CinemaClient, type CinemaRecord } from './client'
+import { VIDEO_EXTENSIONS, contentRef, extension, isVideo, isNumberedMovie, parentPath, posterHue, preferences, sizeText, timeText, title, validProgress, type CinemaFavorite, type CinemaPreferences, type CinemaProgress } from './model'
+import { RangeFile, isAbort } from './io'
+import { Library, ArtLoader } from './library'
+import { Descriptions } from './metadata'
+import { ProgressStore } from './storage'
+import { LibrariesStore, LibraryAccess, requireDirectory, withinDirectory, type CinemaLibrary, type LibrariesSnapshot, type SavedVideo } from './libraries'
+import { LibraryManager } from './libraries-ui'
+import { ServiceManager } from './settings'
+import { PlaybackSession, type PlaybackInfo } from './media'
+import { Captions, readSubtitle, type SubtitleTrack } from './subtitles'
+import { applyTheme, fullscreenOrder, ImmersiveSync, MOBILE_QUERY } from './shell'
+
+const app = createPageApp(), cinema = new CinemaClient(app.host)
+const lifetime = new AbortController()
+window.addEventListener('pagehide', () => lifetime.abort(), { once: true })
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+const show = (id: string, visible: boolean) => { $(id).hidden = !visible }
+const text = (id: string, value: string) => { $(id).textContent = value }
+const value = (id: string) => $<HTMLInputElement>(id).value
+// 通用图标取自 ui/icons；播放器专用图标在此补充，同样为 24×24 描边绘制。
+const sharedIcons = new Set<string>(['back', 'close', 'more', 'search', 'home', 'library', 'settings', 'exit', 'play', 'pause', 'heart', 'clock', 'grid', 'download', 'refresh', 'folder', 'prev', 'next'])
+const aliases: Record<string, string> = { previous: 'prev' }
+const localIcons: Record<string, string> = {
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.4"/>',
+  film: '<rect x="4" y="3.5" width="16" height="17" rx="1.5"/><path d="M4 8h16M4 16h16M8 3.5v17M16 3.5v17"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  restart: '<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4.5v4h4"/><path d="M10.5 9.5v5l4-2.5z" fill="currentColor"/>',
+  rewind: '<path d="M11 6.5 4.5 12l6.5 5.5zM19.5 6.5 13 12l6.5 5.5z" fill="currentColor"/>',
+  forward: '<path d="M13 6.5l6.5 5.5-6.5 5.5zM4.5 6.5 11 12l-6.5 5.5z" fill="currentColor"/>',
+  volume: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  pip: '<rect x="3.5" y="5" width="17" height="14" rx="1.5"/><rect x="12" y="12" width="6" height="4.5" rx="1" fill="currentColor"/>',
+  fullscreen: '<path d="M4 9V4h5M15 4h5v5M4 15v5h5M20 15v5h-5"/>',
+}
+function iconMarkup(name: string) {
+  const key = aliases[name] ?? name
+  if (sharedIcons.has(key)) return sharedIcon(key as IconName)
+  return `<svg class="tg-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${localIcons[key] ?? localIcons.film}</svg>`
+}
+function icon(name: string) {
+  // 标记来自固定图标表，不拼接外部输入。
+  const template = document.createElement('template'); template.innerHTML = iconMarkup(name)
+  return template.content.firstElementChild as SVGSVGElement
+}
+document.querySelectorAll<HTMLElement>('[data-icon]').forEach(node => node.replaceChildren(icon(node.dataset.icon!)))
+// 宿主就绪前先按系统深浅色显示启动页，就绪后以主站主题为准。
+const mobileQuery = window.matchMedia?.(MOBILE_QUERY)
+let dark = !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
+applyTheme(document.documentElement, dark)
+function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', body = '') { const node = document.createElement(tag); node.className = className; node.textContent = body; return node }
+let toastTimer: ReturnType<typeof setTimeout>
+function toast(message: string) { text('toast', message); show('toast', true); clearTimeout(toastTimer); toastTimer = setTimeout(() => show('toast', false), 5500) }
+function report(error: unknown) { if (!isAbort(error)) toast(error instanceof Error ? error.message : String(error)) }
+function handle(task: unknown) { void Promise.resolve(task).catch(report) }
+function on(id: string, event: string, callback: (event: Event) => unknown) { $(id).addEventListener(event, event => { try { handle(callback(event)) } catch (error) { report(error) } }) }
+const library = new Library(cinema)
+const descriptions = new Descriptions(cinema)
+const librariesStore = new LibrariesStore(cinema), access = new LibraryAccess(cinema)
+let pageController = new AbortController(), detailController = new AbortController(), playController = new AbortController()
+let art: ArtLoader | undefined, detailArt: ArtLoader | undefined
+let view: 'home' | 'library' | 'favorites' | 'history' = 'home'
+let configSnapshot: LibrariesSnapshot | null = null, activeLibraryId: string | null = null, currentRoot: CinemaLibrary | null = null
+let detailLibraryId: string | undefined, playingRoot: CinemaLibrary | null = null, playingLibraryId: string | undefined
+let navigationGeneration = 0, directory: string | null = null, directoryMode = false, query = '', format = ''
+const libraryProblems = new Map<string, string>(), knownPaths = new Map<string, string>()
+let cursors: (string | null)[] = [null], pageIndex = 0, nextCursor: string | null = null
+let currentFiles: FileNode[] = [], heroFile: FileNode | undefined, selected: FileNode | undefined
+let episodes: FileNode[] = [], episodePage = 0, episodeCursors: (string | null)[] = [null], nextEpisodeCursor: string | null = null, episodesLoading = false
+let pref = preferences(null), prefRecord: CinemaRecord<CinemaPreferences> | null = null, prefSaving = Promise.resolve()
+let favoriteRecord: CinemaRecord<CinemaFavorite> | null = null
+let session: PlaybackSession | undefined, store: ProgressStore | undefined, playing: FileNode | undefined, previousVideo: FileNode | null = null, nextVideo: FileNode | null = null
+let watchedFlag: { watched: boolean; revision: string | null } | undefined
+let numberedMovie = false
+let playGeneration = 0, startIntent = 0, restored = false, duration = 0, subtitleTracks: SubtitleTrack[] = [], subtitleController = new AbortController()
+let captionWindowAt = -Infinity, captionLoading = false, selectedSubtitle = '', restoredAudio: number | undefined
+let subtitleExplicit = false, failedPlayback = false
+let previousFocus: HTMLElement | null = null, nextTimer: ReturnType<typeof setInterval> | undefined
+const video = $<HTMLVideoElement>('video'), captions = new Captions(video)
+let series = seriesOptions(null), seriesKey = '', seriesRecord: CinemaRecord<SeriesOptions> | null = null, outroTriggered = false, introApplied = false
+const sleep = new SleepTimer(() => { cancelNext(); video.pause(); persist(true); text('play-message', '定时播放已停止'); show('play-message', true); $<HTMLSelectElement>('sleep-timer').value = '0' })
+let seriesSaving = Promise.resolve()
+let closingPlayback = Promise.resolve()
+const detail = $<HTMLDialogElement>('detail'), player = $('player'), moreMenu = $<HTMLDialogElement>('more-menu')
+const overview = element('p', 'detail-overview')
+overview.id = 'detail-overview'; overview.hidden = true
+detail.querySelector('.detail-tools')!.after(overview)
+function closeMore() { if (moreMenu.open) moreMenu.close() }
+// 详情顶部背景：海报解码完成后按小尺寸绘制到画布再模糊放大，不重新请求图片。
+const detailBackdrop = $('detail-backdrop')
+new MutationObserver(() => {
+  const image = $('detail-poster').querySelector('img')
+  if (!image?.naturalWidth) { detailBackdrop.replaceChildren(); return }
+  if (detailBackdrop.dataset.source === image.src && detailBackdrop.firstElementChild) return
+  const canvas = document.createElement('canvas'), width = 48, height = Math.max(1, Math.round(width * image.naturalHeight / image.naturalWidth))
+  canvas.width = width; canvas.height = height
+  try { canvas.getContext('2d')?.drawImage(image, 0, 0, width, height) } catch { return }
+  detailBackdrop.dataset.source = image.src; detailBackdrop.replaceChildren(canvas)
+}).observe($('detail-poster'), { childList: true, subtree: true })
+// 手机搜索栏默认收起，由顶栏搜索图标展开；桌面始终显示。
+let searchOpen = false
+function syncSearch() {
+  const available = !$('search-form').hidden
+  show('search-toggle', available)
+  $('search-form').classList.toggle('collapsed', !searchOpen)
+  $('search-toggle').setAttribute('aria-expanded', String(available && searchOpen))
+}
+function showPlayer(visible: boolean) {
+  show('player', visible)
+  document.querySelectorAll<HTMLElement>('.sidebar, #main, .bottom-nav').forEach(node => { node.inert = visible })
+}
+const clearHistory = element('button', 'clear-history', '清空历史')
+clearHistory.hidden = true; $('section-title').parentElement!.append(clearHistory)
+let confirmation: ((value: boolean) => void) | undefined
+function confirmAction(message: string, description: string) {
+  if (confirmation) return Promise.resolve(false)
+  text('confirm-title', message); text('confirm-text', description); $<HTMLDialogElement>('confirm-dialog').showModal()
+  return new Promise<boolean>(resolve => { confirmation = resolve })
+}
+function finishConfirm(ok: boolean) { $<HTMLDialogElement>('confirm-dialog').close(); confirmation?.(ok); confirmation = undefined }
+on('confirm-ok', 'click', () => finishConfirm(true)); on('confirm-cancel', 'click', () => finishConfirm(false))
+on('confirm-dialog', 'cancel', event => { event.preventDefault(); finishConfirm(false) })
+const manager = new LibraryManager(app.ui, librariesStore, access, async snapshot => {
+  configSnapshot = snapshot; libraryProblems.clear(); await navigate('library')
+}, toast, confirmAction)
+const settings = new ServiceManager(cinema, app.ui, async () => { library.clear(); descriptions.clear(); resetPages(); await loadPage() }, toast)
+
+function poster(file: FileNode, removable?: () => unknown, progress?: CinemaProgress) {
+  const card = element('article', 'poster-card'), button = element('button', 'poster-button'), image = element('div', 'poster-art')
+  image.style.setProperty('--hue', String(posterHue(file))); image.append(element('span', 'poster-initial', title(file.name).slice(0, 4)))
+  image.append(element('span', 'poster-format', (file.kind === 'directory') ? '合集目录' : extension(file.name).toUpperCase()))
+  const hover = element('span', 'poster-play'); hover.append(icon((file.kind === 'directory') ? 'folder' : 'play')); image.append(hover)
+  button.append(image, element('h3', '', (file.kind === 'directory') ? file.name : title(file.name)), element('p', '', (file.kind === 'directory') ? '打开目录，发现更多' : `${sizeText(file.size)} · ${parentPath(file.path).split('/').pop() || '网盘'}`))
+  button.title = file.path; button.setAttribute('aria-label', `${(file.kind === 'directory') ? '打开目录' : '查看影视'}：${file.name}`)
+  button.onclick = () => handle((file.kind === 'directory') ? browseDirectory(file.path) : openDetail(file))
+  card.append(button)
+  if (!(file.kind === 'directory')) {
+    const signal = pageController.signal
+    void descriptions.load(file, signal).then(info => {
+      if (signal.aborted || !card.isConnected || !info) return
+      const label = button.querySelector('h3')
+      if (info.title && label) label.textContent = info.title
+      if (info.year) button.querySelector('p')!.textContent = `${info.year} · ${extension(file.name).toUpperCase()} · ${sizeText(file.size)}`
+    }).catch(() => {})
+  }
+  if (!(file.kind === 'directory')) art?.observe(image, file)
+  if (progress) { const bar = element('div', 'progress-track'), fill = element('i'); fill.style.width = `${Math.min(100, progress.seconds / Math.max(1, progress.duration) * 100)}%`; bar.append(fill); card.append(bar) }
+  if (removable) { const remove = element('button', 'poster-remove', '移除'); remove.setAttribute('aria-label', `移除记录：${file.name}`); remove.onclick = () => handle(removable()); card.append(remove) }
+  return card
+}
+function resetPages() { pageIndex = 0; cursors = [null]; nextCursor = null }
+async function navigate(next: typeof view, libraryId: string | null = null) {
+  const generation = ++navigationGeneration
+  pageController.abort(); art?.clear(); closeDetail()
+  await closePlayer(false)
+  if (generation !== navigationGeneration) return
+  view = next; activeLibraryId = libraryId; searchOpen = false; currentRoot = null; directory = null; directoryMode = false; query = ''; format = ''
+  episodes = []; nextEpisodeCursor = null; heroFile = undefined; library.setScope(null); resetPages()
+  $<HTMLInputElement>('search').value = ''; $<HTMLSelectElement>('format').value = ''
+  await loadPage()
+}
+async function browseDirectory(path: string) {
+  requireDirectory(currentRoot?.path ?? null, path)
+  directoryMode = true; directory = path; resetPages(); await loadPage()
+}
+function closeDetail() { if (detail.open) detail.close(); detailController.abort(); detailArt?.clear(); previousFocus?.isConnected && previousFocus.focus() }
+function renderLibraries(snapshot: LibrariesSnapshot) {
+  currentRoot = null; library.setScope(null)
+  show('library-navigation', false); show('search-form', false); show('breadcrumbs', false); show('libraries', true); show('new-library', true)
+  text('section-title', '我的媒体库'); text('source-label', `${snapshot.config.libraries.length} 个媒体库`); $('source-label').title = ''
+  text('list-status', '影视后端持续维护媒体索引；选择一个媒体库后只读取该库的一页视频。')
+  for (const item of snapshot.config.libraries) {
+    const card = element('article', 'library-card'), button = element('button', 'library-enter'), actions = element('div', 'library-card-actions')
+    card.dataset.libraryId = item.id
+    button.setAttribute('aria-label', `进入媒体库：${item.name}`)
+    button.append(icon('folder'), element('h3', '', item.name), element('p', '', knownPaths.get(item.root_id) ?? item.path ?? '文件夹未授权或不可用'), element('small', '', libraryProblems.get(item.id) ? '文件夹不可用，请重新选择' : '包含子文件夹 · 点击进入'))
+    button.onclick = () => handle(navigate('library', item.id))
+    const edit = element('button', '', '编辑'), remove = element('button', 'library-delete', '删除')
+    edit.setAttribute('aria-label', `编辑媒体库：${item.name}`); remove.setAttribute('aria-label', `删除媒体库：${item.name}`)
+    edit.onclick = () => handle(manager.edit(item)); remove.onclick = () => handle(manager.remove(item))
+    actions.append(edit, remove); card.append(button, actions); $('libraries').append(card)
+  }
+  show('empty', !snapshot.config.libraries.length); show('empty-source', true)
+  text('empty-title', '尚未创建媒体库'); text('empty-text', '新建电影库或电视剧库，选择只读授权的网盘文件夹。影视连接账号与对外服务在应用设置中单独管理。')
+}
+async function loadPage() {
+  // 主动导航已读取最新数据，取消旧页面排队的刷新，避免稍后打断滚动并重建海报。
+  clearTimeout(hostEventTimer); hostEventTimer = undefined
+  pageController.abort(); pageController = new AbortController()
+  const signal = pageController.signal, recordView = view === 'favorites' || view === 'history', activeId = activeLibraryId, previousRoot = currentRoot
+  closeDetail(); art?.clear(); currentRoot = null; library.setScope(null)
+  document.querySelectorAll<HTMLElement>('[data-nav]').forEach(button => { const active = button.dataset.nav === view; button.classList.toggle('active', active); button.setAttribute('aria-current', active ? 'page' : 'false') })
+  currentFiles = []; heroFile = undefined; nextCursor = null; $('items').replaceChildren(); $('libraries').replaceChildren(); $('continue-items').replaceChildren()
+  for (const id of ['empty', 'hero', 'continue-section', 'libraries', 'search-form', 'breadcrumbs', 'previous-page', 'next-page']) show(id, false)
+  show('library-navigation', !!activeId); show('new-library', !recordView && !activeId)
+  text('page-label', ''); text('source-label', ''); $('source-label').title = ''; text('list-status', '正在读取媒体库设置…')
+  show('list-retry', false); $('items').setAttribute('aria-busy', 'true')
+  $('main').scrollTop = 0
+  text('page-title', { home: '影视', library: '媒体库', favorites: '收藏', history: '观看历史' }[view])
+  text('section-title', recordView ? view === 'history' ? '观看历史' : '我的收藏' : '我的媒体库')
+  clearHistory.hidden = view !== 'history'
+  try {
+    const snapshot = await librariesStore.load(signal)
+    signal.throwIfAborted(); configSnapshot = snapshot
+    if (!recordView && !activeId) { renderLibraries(snapshot); return }
+    if (activeId && !snapshot.config.libraries.some(item => item.id === activeId)) {
+      activeLibraryId = null; resetPages(); renderLibraries(snapshot); toast('此媒体库已删除，请重新选择'); return
+    }
+    const resolved = await access.roots(snapshot.config, signal, activeId ?? undefined)
+    signal.throwIfAborted()
+    for (const root of resolved.roots) { knownPaths.set(root.root_id, root.path); libraryProblems.delete(root.id) }
+    for (const item of resolved.unavailable) libraryProblems.set(item.library.id, item.message)
+    const notes: string[] = []
+    let records: SavedVideo<CinemaProgress | CinemaFavorite>[] = []
+    if (recordView) {
+      if (resolved.unavailable.length) notes.push('部分媒体库文件夹不可用，相关记录暂不显示，请在媒体库设置中重新选择。')
+      const page = await access.savedPage<CinemaProgress | CinemaFavorite>(resolved.roots, view === 'history' ? 'progress:' : 'favorite:', cursors[pageIndex], 48, signal)
+      signal.throwIfAborted()
+      records = page.entries; currentFiles = records.map(entry => entry.file); nextCursor = page.next_cursor
+      if (page.failed) notes.push('部分记录暂时无法验证，请刷新重试。')
+      text('source-label', '仅显示媒体库内的记录')
+      art = new ArtLoader(cinema, signal)
+    } else {
+      const root = resolved.roots[0]
+      if (!root) throw new Error('媒体库文件夹不可用，请点击“设置当前媒体库”重新选择文件夹')
+      currentRoot = root; library.setScope(root.path)
+      if (previousRoot && (previousRoot.root_id !== root.root_id || previousRoot.path !== root.path)) { resetPages(); directory = null }
+      if (!directory || !withinDirectory(directory, root.path)) directory = root.path
+      text('page-title', root.name); text('section-title', directoryMode ? '目录浏览' : `${root.name} · 全部视频`)
+      text('source-label', root.path); $('source-label').title = root.path
+      show('search-form', true); show('breadcrumbs', directoryMode)
+      if (directoryMode) {
+        const path = directory, back = element('button', '', '‹ 上一级')
+        back.disabled = path === root.path; back.onclick = () => handle(browseDirectory(parentPath(path)))
+        $('breadcrumbs').replaceChildren(back, element('span', 'muted', path))
+        const page = await access.list(root, path, cursors[pageIndex], signal)
+        signal.throwIfAborted(); currentFiles = page.items; nextCursor = page.next_cursor
+      } else {
+        const extensions = format === 'others' ? VIDEO_EXTENSIONS.filter(e => !['mp4','mkv','webm','mov'].includes(e)) : format ? [format] : VIDEO_EXTENSIONS
+        const page = await access.search(root, { q: query, extensions, cursor: cursors[pageIndex] }, signal)
+        signal.throwIfAborted(); currentFiles = page.items; nextCursor = page.next_cursor; descriptions.seed(page.items, page.descriptions)
+      }
+      art = new ArtLoader(cinema, signal)
+    }
+    signal.throwIfAborted()
+    for (let i = 0; i < currentFiles.length; i++) {
+      const file = currentFiles[i], record = records[i]?.record
+      const progress = record && validProgress(record.value) && record.value.file.content_version === file.content_version ? record.value : undefined
+      $('items').append(poster(file, record ? async () => { await cinema.delete(record.key, record.revision, signal); signal.throwIfAborted(); await loadPage() } : undefined, progress))
+    }
+    if (!currentFiles.length && nextCursor) notes.push(recordView ? '本页没有媒体库内的记录，可以继续翻页；库外记录仅隐藏，未删除。' : '本页没有视频，可以继续翻页查找。')
+    text('list-status', notes.join(' ')); show('empty', !currentFiles.length && !nextCursor)
+    text('empty-title', recordView ? '暂无媒体库内的记录' : query ? '暂时没有找到这部影片' : '此媒体库还没有视频')
+    text('empty-text', recordView ? '收藏和历史只显示已配置媒体库中的视频。库外记录仍保留，重新加入对应目录后可恢复显示。' : query ? '试试更短的文件名；搜索仅在当前媒体库中进行。' : '向绑定文件夹及其子文件夹添加视频，然后刷新；也可以修改媒体库绑定的文件夹。')
+    show('empty-source', !snapshot.config.libraries.length)
+    show('previous-page', pageIndex > 0); show('next-page', !!nextCursor)
+    text('page-label', currentFiles.length || pageIndex || nextCursor ? `第 ${pageIndex + 1} 页 · ${currentFiles.length} 项` : '')
+    if (!recordView && currentRoot && !directoryMode && !query && !format && pageIndex === 0) await homeSections(currentRoot, signal)
+  } catch (error) {
+    if (!signal.aborted) { text('list-status', `${(error as Error).message}；可重试加载本页。`); show('empty', false); show('list-retry', true) }
+  } finally {
+    syncSearch()
+    if (!signal.aborted) $('items').setAttribute('aria-busy', 'false')
+  }
+}
+async function homeSections(root: CinemaLibrary, signal: AbortSignal) {
+  const recent = await access.savedPage<CinemaProgress>([root], 'progress:', null, 12, signal)
+  signal.throwIfAborted()
+  const progress = recent.entries.filter(entry => !entry.record.value.completed && entry.record.value.seconds > 0 && entry.record.value.file.content_version === entry.file.content_version)
+  $('continue-items').replaceChildren()
+  for (const entry of progress.slice(0, 3)) {
+    const p = entry.record.value, file = entry.file, button = element('button', 'continue-card'), image = element('span', 'continue-art'), copy = element('span', 'continue-copy')
+    image.append(icon('play')); copy.append(element('strong', '', title(file.name)), element('small', '', `${timeText(p.seconds)} / ${timeText(p.duration)}`))
+    const bar = element('span', 'progress-track'), fill = element('i'); fill.style.width = `${Math.min(100, p.seconds / Math.max(1, p.duration) * 100)}%`; bar.append(fill); copy.append(bar)
+    button.append(image, copy); button.onclick = () => handle(startPlayback(file)); button.setAttribute('aria-label', `继续观看：${file.name}`); $('continue-items').append(button)
+  }
+  if (recent.failed) text('list-status', '部分观看记录暂时无法验证，可刷新重试。')
+  show('continue-section', progress.length > 0)
+  heroFile = progress[0]?.file ?? currentFiles.find(isVideo)
+  if (heroFile) {
+    text('hero-title', title(heroFile.name)); text('hero-meta', `${extension(heroFile.name).toUpperCase()}  /  ${sizeText(heroFile.size)}  /  ${root.name}`)
+    const hero = heroFile
+    void descriptions.load(hero, signal).then(info => {
+      if (signal.aborted || heroFile?.id !== hero.id || !info) return
+      if (info.title) text('hero-title', info.title)
+      if (info.year) text('hero-meta', `${info.year}  /  ${extension(hero.name).toUpperCase()}  /  ${root.name}`)
+    }).catch(() => {})
+    show('hero', true); art?.observe($('hero').querySelector('.hero-art') as HTMLElement, heroFile, true)
+  }
+}
+async function scopedVideo(file: FileNode, signal: AbortSignal, requiredId = activeLibraryId ?? undefined) {
+  const snapshot = await librariesStore.load(signal)
+  return access.video(snapshot.config, file.id, signal, requiredId)
+}
+async function downloadVideo(file: FileNode, requiredId: string | undefined, signal: AbortSignal) {
+  const current = await scopedVideo(file, signal, requiredId)
+  const ticket = await app.host.mediaUrl({ file: contentRef(current.file), representation: 'original', disposition: 'attachment', filename: current.file.name, content_type: 'application/octet-stream' }, { signal })
+  signal.throwIfAborted()
+  const link = document.createElement('a'); link.href = ticket.url; link.download = current.file.name; link.rel = 'noreferrer'; link.click()
+}
+async function openDetail(file: FileNode) {
+  const navigation = navigationGeneration
+  await closingPlayback.catch(() => {})
+  if (navigation !== navigationGeneration) return
+  detailController.abort(); detailController = new AbortController(); detailArt?.clear()
+  const signal = detailController.signal
+  selected = file; detailLibraryId = activeLibraryId ?? undefined; episodes = []; episodePage = 0; episodeCursors = [null]; nextEpisodeCursor = null; favoriteRecord = null; watchedFlag = undefined
+  previousFocus = document.activeElement as HTMLElement
+  if (!detail.open) detail.showModal()
+  text('detail-title', title(file.name)); text('detail-meta', `${extension(file.name).toUpperCase()} · ${sizeText(file.size)}`); text('detail-path', file.path)
+  text('detail-progress', ''); text('detail-status', '正在整理同目录合集…'); text('episode-count', ''); show('detail-retry', false)
+  text('detail-overview', ''); show('detail-overview', false)
+  $('detail-play').querySelector('span:last-child')!.textContent = '播放'
+  $('episodes').replaceChildren(); $('detail-poster').replaceChildren(); show('episodes-prev', false); show('episodes-next', false)
+  const image = element('div', 'poster-art'); image.style.setProperty('--hue', String(posterHue(file))); image.append(element('span', 'poster-initial', title(file.name).slice(0, 4)))
+  $('detail-poster').append(image)
+  for (const id of ['detail-play', 'detail-restart', 'detail-download', 'detail-favorite', 'detail-watched']) $<HTMLButtonElement>(id).disabled = true
+  try {
+    const { file: current, library: root } = await scopedVideo(file, signal, detailLibraryId)
+    signal.throwIfAborted(); selected = current; detailLibraryId = root.id
+    text('detail-title', title(current.name)); text('detail-meta', `${extension(current.name).toUpperCase()} · ${sizeText(current.size)}`); text('detail-path', current.path)
+    library.setScope(root.path)
+    detailArt = new ArtLoader(cinema, signal); detailArt.observe(image, current)
+    const description = await descriptions.load(current, signal, true)
+    signal.throwIfAborted()
+    if (description?.title) text('detail-title', description.title)
+    if (description?.year) text('detail-meta', `${description.year} · ${extension(current.name).toUpperCase()} · ${sizeText(current.size)}`)
+    if (description?.overview) { text('detail-overview', description.overview); show('detail-overview', true) }
+    for (const id of ['detail-play', 'detail-restart', 'detail-download']) $<HTMLButtonElement>(id).disabled = false
+    const [progress, favorite, flag] = await Promise.all([cinema.progress(current.id, signal), cinema.record<CinemaFavorite>(`favorite:${current.id}`, signal), cinema.flags(current.id, signal)])
+    signal.throwIfAborted(); favoriteRecord = favorite; watchedFlag = flag; updateFavorite(); updateWatched()
+    const p = progress?.value
+    const resumable = validProgress(p) && p.file.content_version === current.content_version && !p.completed && p.seconds > 0
+    $('detail-play').querySelector('span:last-child')!.textContent = resumable ? '继续观看' : '立即播放'
+    text('detail-progress', resumable ? `上次看到 ${timeText(p.seconds)} · 总时长 ${timeText(p.duration)}` : validProgress(p) && p.completed ? '已看完 · 可以再次回味' : '')
+    const list = await library.playlist(current, root.id, null, signal)
+    signal.throwIfAborted(); episodes = list.items; nextEpisodeCursor = list.next_cursor
+    text('detail-status', nextEpisodeCursor ? '选集按页读取，自动连播可跨页，不会遍历或截断整个目录。' : '')
+    text('episode-count', `${list.total} 个视频`); renderEpisodes()
+  } catch (error) { if (!signal.aborted) { text('detail-status', `文件不可用或加载失败：${(error as Error).message}`); show('detail-retry', true) } }
+}
+function renderEpisodes() {
+  $('episodes').replaceChildren()
+  for (const file of episodes) {
+    const button = element('button', file.id === selected?.id ? 'selected' : '', file.name)
+    button.title = file.path; button.onclick = () => handle(startPlayback(file)); $('episodes').append(button)
+  }
+  show('episodes-prev', episodePage > 0); show('episodes-next', !!nextEpisodeCursor)
+}
+async function loadEpisodes(page: number) {
+  if (!selected || !detailLibraryId || episodesLoading) return
+  episodesLoading = true
+  const signal = detailController.signal
+  try {
+    const list = await library.playlist(selected, detailLibraryId, episodeCursors[page], signal)
+    signal.throwIfAborted(); episodePage = page; episodes = list.items; nextEpisodeCursor = list.next_cursor; renderEpisodes()
+  } catch (error) { if (!signal.aborted) text('detail-status', (error as Error).message) }
+  finally { if (signal === detailController.signal) episodesLoading = false }
+}
+function updateFavorite() {
+  const button = $<HTMLButtonElement>('detail-favorite'); button.disabled = false
+  button.setAttribute('aria-pressed', String(!!favoriteRecord)); button.querySelector('span:last-child')!.textContent = favoriteRecord ? '已收藏' : '收藏'
+}
+async function toggleFavorite() {
+  if (!selected) return
+  const original = selected, button = $<HTMLButtonElement>('detail-favorite'), previous = favoriteRecord, signal = detailController.signal
+  button.disabled = true
+  try {
+    const { file } = await scopedVideo(original, signal, detailLibraryId)
+    if (previous) { await cinema.delete(previous.key, previous.revision, signal); signal.throwIfAborted(); favoriteRecord = null }
+    else { const saved = await cinema.save(`favorite:${file.id}`, { file }, null, signal); signal.throwIfAborted(); favoriteRecord = saved }
+    watchedFlag = await cinema.flags(file.id, signal); updateWatched()
+  } catch (error) {
+    if (!signal.aborted && (error as { code?: string }).code === 'storage_conflict') {
+      const saved = await cinema.record<CinemaFavorite>(`favorite:${original.id}`, signal); signal.throwIfAborted(); favoriteRecord = saved
+    }
+    throw error
+  } finally { if (!signal.aborted && selected?.id === original.id) updateFavorite() }
+}
+
+function updateWatched() {
+  const button = $<HTMLButtonElement>('detail-watched'); button.disabled = !watchedFlag
+  button.setAttribute('aria-pressed', String(!!watchedFlag?.watched)); button.querySelector('span:last-child')!.textContent = watchedFlag?.watched ? '标记未看' : '标记已看'
+}
+async function toggleWatched() {
+  if (!selected || !watchedFlag) return
+  const file = selected, previous = watchedFlag, signal = detailController.signal
+  $<HTMLButtonElement>('detail-watched').disabled = true
+  try {
+    await scopedVideo(file, signal, detailLibraryId)
+    await cinema.watched(file.id, !previous.watched, previous.revision, signal)
+    watchedFlag = await cinema.flags(file.id, signal)
+  } catch (error) {
+    if (!signal.aborted && (error as { code?: string }).code === 'storage_conflict') watchedFlag = await cinema.flags(file.id, signal)
+    throw error
+  } finally { if (!signal.aborted && selected?.id === file.id) updateWatched() }
+}
+function applyPreferences() {
+  video.playbackRate = pref.speed; video.style.objectFit = pref.fit; video.style.setProperty('--subtitle-size', `${pref.subtitleSize}px`)
+  $<HTMLSelectElement>('speed').value = String(pref.speed); $<HTMLSelectElement>('fit').value = pref.fit
+  $<HTMLInputElement>('subtitle-size').value = String(pref.subtitleSize); $<HTMLInputElement>('subtitle-offset').value = String(pref.subtitleOffset)
+  $<HTMLSelectElement>('encoding').value = pref.encoding; $<HTMLInputElement>('autoplay').checked = !numberedMovie && pref.autoplay; $<HTMLInputElement>('autoplay').disabled = numberedMovie; captions.shift(pref.subtitleOffset)
+}
+function savePreferences() {
+  applyPreferences()
+  const next = { ...pref }
+  prefSaving = prefSaving.then(async () => {
+    try { prefRecord = await cinema.save('preferences', next, prefRecord?.revision ?? null) }
+    catch (error) {
+      if ((error as { code?: string }).code === 'storage_conflict') { prefRecord = await cinema.record<CinemaPreferences>('preferences'); pref = preferences(prefRecord?.value); applyPreferences(); toast('另一设备更改了播放偏好，已读取最新设置，请重新调整') }
+      else report(error)
+    }
+  })
+  return prefSaving
+}
+function persist(immediate = false) {
+  if (!playing || !store || !restored || !session?.canSave || !Number.isFinite(video.currentTime)) return
+  store.mark({ file: playing, seconds: video.currentTime, duration, completed: outroTriggered || video.ended || duration > 0 && video.currentTime / duration >= .95, subtitle: selectedSubtitle, audio: session.selectedAudio }, immediate)
+}
+function syncStatus(message: string, conflict: boolean) {
+  text('sync-status', message); show('sync-remote', conflict); show('sync-local', conflict); show('sync-retry', !conflict && message.includes('未同步'))
+}
+// 宿主沉浸只由此处统一同步：手机常驻沉浸（主题底色），播放时黑底，桌面退出播放即恢复宿主顶栏。
+let hostShell: ImmersiveSync | undefined
+async function immersive() {
+  hostShell ??= new ImmersiveSync(app.ui, report)
+  return hostShell.update({ mobile: !!mobileQuery?.matches, playing: !player.hidden, dark })
+}
+async function leaveHost() { await hostShell?.dispose() }
+async function startPlayback(file: FileNode, restart = false) {
+  const intent = ++startIntent, requiredId = playing ? playingLibraryId : detail.open ? detailLibraryId : activeLibraryId ?? undefined
+  navigationGeneration++
+  await closePlayer(false, true)
+  if (intent !== startIntent) return
+  const active = ++playGeneration
+  playController = new AbortController(); const signal = playController.signal
+  playing = file; playingLibraryId = requiredId; playingRoot = null; previousVideo = null; nextVideo = null; restored = false; duration = 0; selectedSubtitle = ''; restoredAudio = undefined; subtitleTracks = []; subtitleExplicit = false; failedPlayback = false
+  numberedMovie = false
+  closeDetail(); art?.clear(); pageController.abort(); showPlayer(true); player.focus()
+  text('playing-title', title(file.name)); text('play-mode', '正在准备播放…'); text('play-message', '正在读取视频信息…'); show('play-message', true)
+  show('big-play', false); show('play-options', false); syncStatus('', false); text('current-time', '0:00'); text('duration', '0:00'); $<HTMLInputElement>('seek').value = '0'
+  $('subtitle').replaceChildren(new Option('关闭字幕', '')); $('audio').replaceChildren(new Option('默认音轨', ''))
+  $<HTMLButtonElement>('previous-episode').disabled = true; $<HTMLButtonElement>('next-episode').disabled = true
+  series = seriesOptions(null); seriesKey = ''; seriesRecord = null; outroTriggered = false; introApplied = false
+  $<HTMLFieldSetElement>('series-options').disabled = true; text('series-status', '正在读取本剧设置…')
+  try {
+    await immersive(); signal.throwIfAborted()
+    const { file: current, library: root } = await scopedVideo(file, signal, requiredId)
+    signal.throwIfAborted(); playing = current; playingRoot = root; playingLibraryId = root.id; text('playing-title', title(current.name))
+    const description = await descriptions.load(current, signal, true)
+    signal.throwIfAborted(); numberedMovie = isNumberedMovie(current, description)
+    if (description?.title) text('playing-title', description.title)
+    library.setScope(root.path)
+    subtitleTracks = (description?.subtitles ?? []).map(source => ({ key: `file:${source.id}`, label: source.name, source }))
+    store = new ProgressStore(cinema, current, (message, conflict) => { if (active === playGeneration) syncStatus(message, conflict) })
+    let progress: CinemaProgress | null = null
+    try { progress = await store.load(signal) } catch { syncStatus('无法读取历史，暂不保存进度；请关闭并重试', false) }
+    signal.throwIfAborted(); selectedSubtitle = progress?.subtitle ?? ''; subtitleExplicit = progress?.subtitle !== undefined; restoredAudio = progress?.audio ?? undefined
+    try {
+      const directory = await access.stat({ by: 'path', path: parentPath(current.path) }, signal)
+      requireDirectory(root.path, directory.path)
+      if (directory.kind !== 'directory') throw new Error('本剧文件夹不可用')
+      const key = 'series:' + directory.id, record = await cinema.record<SeriesOptions>(key, signal)
+      signal.throwIfAborted(); series = seriesOptions(record?.value); seriesRecord = record; seriesKey = key
+      $<HTMLInputElement>('skip-intro').value = String(series.intro); $<HTMLInputElement>('skip-outro').value = String(series.outro)
+      $<HTMLFieldSetElement>('series-options').disabled = numberedMovie; text('series-status', numberedMovie ? '同番号版本与分段独立播放，请手动切换视频。' : '0 表示不跳过；设置适用于同文件夹内的视频')
+      if (numberedMovie) series = seriesOptions(null)
+    } catch { signal.throwIfAborted(); text('series-status', '设置读取失败，重新打开影片可重试') }
+    const target = !restart && progress && !progress.completed ? progress.seconds : 0
+    session = new PlaybackSession(app.host, current, video, {
+      info: info => { if (active === playGeneration) updateInfo(info) },
+      ready: () => { if (active !== playGeneration) return; restored = true; show('play-message', false); applyPreferences(); handle(loadSelectedSubtitle()); if (sleep.check()) return; if (!introApplied && !target && series.intro && duration > series.intro + series.outro + 5 && session?.currentInfo.seekable) { introApplied = true; handle(seek(series.intro)) } },
+      error: message => { if (active !== playGeneration) return; failedPlayback = true; text('play-message', message); show('play-message', true); show('big-play', true); video.pause() },
+      note: message => { if (active === playGeneration) toast(message) },
+    })
+    applyPreferences(); updateSubtitleOptions()
+    void Promise.all([cinema.neighbor(current.id, root.id, -1, signal), cinema.neighbor(current.id, root.id, 1, signal)]).then(([previous, next]) => {
+      if (signal.aborted || active !== playGeneration) return
+      previousVideo = previous; nextVideo = next; $<HTMLButtonElement>('previous-episode').disabled = !previous; $<HTMLButtonElement>('next-episode').disabled = !next
+    }).catch(error => { if (!signal.aborted) report(error) })
+    await session.start(target, restoredAudio)
+  } catch (error) { if (active === playGeneration && !signal.aborted) { failedPlayback = true; text('play-message', (error as Error).message); show('play-message', true); show('big-play', true) } }
+}
+function updateInfo(info: PlaybackInfo) {
+  duration = info.duration; text('duration', timeText(duration)); text('play-mode', info.mode)
+  $<HTMLInputElement>('seek').max = String(duration || 100); $<HTMLInputElement>('seek').disabled = !info.seekable || !duration
+  $('audio').replaceChildren(...(info.audio.length ? info.audio.map(a => new Option(a.label, String(a.id))) : [new Option('默认音轨（浏览器不支持网页切轨）', '')]))
+  if (restoredAudio !== undefined && info.audio.some(a => a.id === restoredAudio)) $<HTMLSelectElement>('audio').value = String(restoredAudio)
+  $<HTMLSelectElement>('audio').disabled = !info.audio.length
+  subtitleTracks = [...subtitleTracks.filter(t => t.source), ...info.subtitles]; updateSubtitleOptions()
+}
+function updateSubtitleOptions() {
+  $('subtitle').replaceChildren(new Option('关闭字幕', ''), ...subtitleTracks.map(track => new Option(track.label, track.key)))
+  if (!subtitleExplicit && !selectedSubtitle) selectedSubtitle = subtitleTracks.find(t => t.source || t.codec?.startsWith('S_TEXT/'))?.key ?? ''
+  // 外挂字幕和内嵌轨异步到达，不能因另一批先到而抹掉已保存的选择。
+  if (!subtitleTracks.some(t => t.key === selectedSubtitle)) return
+  $<HTMLSelectElement>('subtitle').value = selectedSubtitle
+  if (restored && session?.canSave) handle(loadSelectedSubtitle())
+}
+async function loadSelectedSubtitle() {
+  subtitleController.abort(); subtitleController = new AbortController()
+  const signal = AbortSignal.any([playController.signal, subtitleController.signal]), track = subtitleTracks.find(t => t.key === selectedSubtitle)
+  captions.clear(); captionWindowAt = -Infinity; captionLoading = false
+  if (!track) return
+  if (track.source) {
+    const current = await access.stat({ by: 'id', id: track.source.id, content_version: track.source.version }, signal)
+    requireDirectory(playingRoot?.path ?? null, current.path)
+    if (current.content_version !== track.source.version || parentPath(current.path) !== parentPath(playing!.path)) throw new Error('字幕已移动或内容改变，请重新打开影片')
+    const file = new RangeFile(app.host, current, signal)
+    const cues = await readSubtitle(file, pref.encoding); file.clear(); signal.throwIfAborted(); captions.set(cues, pref.subtitleOffset)
+  } else await refreshEmbedded(true)
+}
+async function refreshEmbedded(force = false) {
+  const track = subtitleTracks.find(t => t.key === selectedSubtitle), activeSession = session, currentTime = video.currentTime
+  if (!track?.embeddedId || !activeSession || captionLoading || !restored || (!force && currentTime >= captionWindowAt - 5 && currentTime < captionWindowAt + 20)) return
+  captionLoading = true
+  const generation = playGeneration, choice = selectedSubtitle, subtitleSignal = subtitleController.signal
+  try {
+    const cues = await activeSession.embedded(track, currentTime)
+    if (subtitleSignal.aborted || generation !== playGeneration || choice !== selectedSubtitle || session !== activeSession) return
+    captions.set(cues, pref.subtitleOffset); captionWindowAt = currentTime
+  } catch (error) { if (!isAbort(error) && !subtitleSignal.aborted && generation === playGeneration) { captionWindowAt = currentTime; toast((error as Error).message) } }
+  finally { if (generation === playGeneration && subtitleController.signal === subtitleSignal) captionLoading = false }
+}
+async function seek(seconds: number) {
+  if (!session) return
+  const activeSession = session, generation = playGeneration
+  cancelNext(); captions.clear(); captionWindowAt = -Infinity
+  try { await activeSession.seek(seconds) }
+  catch (error) {
+    if (isAbort(error) || generation !== playGeneration || session !== activeSession) return
+    failedPlayback = true; text('play-message', `${(error as Error).message}；可重新点击播放重试`); show('play-message', true); throw error
+  }
+  if (generation !== playGeneration || session !== activeSession) return
+  if (activeSession.currentInfo.mode === '原生播放') { persist(true); handle(loadSelectedSubtitle()) }
+}
+async function closePlayer(reload = true, keepIntent = false) {
+  if (!keepIntent) startIntent++
+  if (player.hidden && !session && !playing) return closingPlayback
+  cancelNext(); persist(true)
+  if (!keepIntent) { sleep.set(0); $<HTMLSelectElement>('sleep-timer').value = '0' }
+  const oldStore = store
+  restored = false; playGeneration++; subtitleController.abort(); playController.abort()
+  session?.stop(); session = undefined; captions.clear(); oldStore?.stop(); store = undefined
+  if (document.pictureInPictureElement) await document.exitPictureInPicture().catch(() => {})
+  if (document.fullscreenElement) await document.exitFullscreen().catch(() => {})
+  showPlayer(false); show('play-options', false); player.classList.remove('css-fullscreen'); playing = undefined; playingRoot = null; playingLibraryId = undefined
+  closingPlayback = (async () => {
+    await Promise.all([oldStore?.close(), immersive()])
+    if (reload) { await loadPage(); $('main').focus() }
+  })()
+  await closingPlayback
+}
+async function togglePlay() {
+  cancelNext()
+  if (sleep.stopped) sleep.set(0)
+  if ((!session || failedPlayback || video.error) && playing) return startPlayback(playing)
+  if (video.paused) await session?.play(); else video.pause()
+}
+async function goEpisode(delta: number) { if (!playing || !playingLibraryId) return; const file = await cinema.neighbor(playing.id, playingLibraryId, delta, playController.signal); if (file) await startPlayback(file) }
+function cancelNext() { clearInterval(nextTimer); nextTimer = undefined; show('next-countdown', false) }
+function ended() {
+  if (sleep.check(true)) return
+  persist(true)
+  cancelNext()
+  if (numberedMovie || !pref.autoplay || !nextVideo) return
+  let remaining = 5; show('next-countdown', true); text('countdown-text', `${remaining} 秒后播放下一集`)
+  nextTimer = setInterval(() => { remaining--; text('countdown-text', `${remaining} 秒后播放下一集`); if (!remaining) { cancelNext(); handle(goEpisode(1)) } }, 1000)
+}
+async function fullscreen() {
+  if (document.fullscreenElement) { await document.exitFullscreen(); return }
+  if (player.classList.contains('css-fullscreen')) { player.classList.remove('css-fullscreen'); $('fullscreen').setAttribute('aria-label', '全屏播放'); return }
+  // 手机优先 iOS 原生视频全屏，其次标准全屏；均被拒绝时降级为页面沉浸，不影响正常播放。
+  for (const method of fullscreenOrder(video, player, !!mobileQuery?.matches)) {
+    if (method === 'page') break
+    try {
+      if (method === 'native-video') (video as HTMLVideoElement & { webkitEnterFullscreen: () => void }).webkitEnterFullscreen()
+      else await player.requestFullscreen()
+      return
+    } catch { /* 被拒绝时继续下一种方式。 */ }
+  }
+  player.classList.add('css-fullscreen'); $('fullscreen').setAttribute('aria-label', '退出全屏'); toast('已进入页面沉浸，可使用返回或退出全屏按钮离开')
+}
+
+for (const button of document.querySelectorAll<HTMLElement>('[data-nav]')) button.onclick = () => handle(navigate(button.dataset.nav as typeof view))
+document.querySelector('.brand')!.addEventListener('click', event => { event.preventDefault(); handle(navigate('home')) })
+for (const id of ['source','empty-source','new-library']) on(id, 'click', () => manager.edit())
+for (const id of ['settings','mobile-source']) on(id, 'click', async () => { await closePlayer(false); closeDetail(); await settings.open() })
+on('library-back', 'click', () => navigate('library'))
+on('settings-libraries', 'click', () => { if (settings.dismiss()) return navigate('library') })
+on('settings-index-refresh', 'click', refresh)
+on('library-edit-current', 'click', () => { const item = configSnapshot?.config.libraries.find(item => item.id === activeLibraryId); if (item) return manager.edit(item) })
+for (const id of ['exit', 'mobile-exit', 'more-exit']) on(id, 'click', async () => { closeMore(); await closePlayer(false); await Promise.all([manager.flush(), settings.flush()]); await leaveHost(); await app.ui.close() })
+let refreshing = false
+async function refresh() {
+  if (refreshing) return
+  refreshing = true; closeDetail(); text('list-status', '正在刷新后端媒体索引…')
+  try {
+    await app.ui.task({ id: 'cinema-refresh', title: '刷新影视媒体库', completed: 0, state: 'running', cancellable: false })
+    await cinema.refresh(lifetime.signal)
+    library.clear(); descriptions.clear(); resetPages(); await loadPage(); await settings.refreshIfOpen()
+    await app.ui.task({ id: 'cinema-refresh', title: '刷新影视媒体库', completed: 1, total: 1, state: 'completed', cancellable: false })
+  } catch (error) {
+    await app.ui.task({ id: 'cinema-refresh', title: '刷新影视媒体库', completed: 0, state: 'failed', cancellable: false }).catch(() => {})
+    throw error
+  } finally { refreshing = false }
+}
+on('refresh', 'click', refresh)
+on('more-toggle', 'click', () => { if (!moreMenu.open) moreMenu.showModal() })
+on('more-cancel', 'click', closeMore)
+// 点击面板外的遮罩关闭“更多”。
+moreMenu.addEventListener('click', event => { if (event.target === moreMenu) closeMore() })
+on('more-refresh', 'click', () => { closeMore(); return refresh() })
+on('more-new', 'click', () => { closeMore(); return manager.edit() })
+on('more-settings', 'click', async () => { closeMore(); await closePlayer(false); closeDetail(); await settings.open() })
+on('search-toggle', 'click', () => {
+  searchOpen = !searchOpen; syncSearch()
+  if (searchOpen) $('search').focus()
+})
+on('list-retry', 'click', loadPage)
+on('detail-retry', 'click', () => selected && openDetail(selected))
+on('directory-mode', 'click', () => { if (!currentRoot) return; directoryMode = !directoryMode; directory = currentRoot.path; resetPages(); return loadPage() })
+function searchInLibrary() { if (!currentRoot) return; query = value('search').trim(); format = value('format'); directoryMode = false; resetPages(); return loadPage() }
+on('search-submit', 'click', searchInLibrary)
+on('search', 'keydown', event => { const key = event as KeyboardEvent; if (key.key === 'Enter' && !key.isComposing) { event.preventDefault(); return searchInLibrary() } })
+on('format', 'change', () => { if (!currentRoot) return; format = value('format'); directoryMode = false; resetPages(); return loadPage() })
+on('next-page', 'click', () => { if (nextCursor) { cursors[++pageIndex] = nextCursor; return loadPage() } })
+on('previous-page', 'click', () => { if (pageIndex) { pageIndex--; return loadPage() } })
+on('hero-play', 'click', () => heroFile && startPlayback(heroFile)); on('hero-detail', 'click', () => heroFile && openDetail(heroFile))
+on('detail-close', 'click', closeDetail)
+on('detail', 'cancel', event => { event.preventDefault(); closeDetail(); previousFocus?.focus() })
+on('detail-show-file', 'click', async () => {
+  if (!selected) return
+  const current = await scopedVideo(selected, detailController.signal, detailLibraryId)
+  navigationGeneration++; view = 'library'; activeLibraryId = current.library.id; currentRoot = current.library; directoryMode = true; directory = parentPath(current.file.path); query = ''; format = ''; resetPages(); await loadPage()
+})
+on('detail-file-info', 'click', async () => { if (selected) { const { file } = await scopedVideo(selected, detailController.signal, detailLibraryId); toast(`${file.name}\n${file.path}\n${sizeText(file.size)} · 文件 ID ${file.id}`) } })
+on('detail-play', 'click', () => selected && startPlayback(selected))
+on('detail-restart', 'click', () => selected && startPlayback(selected, true))
+on('detail-favorite', 'click', toggleFavorite); on('detail-watched', 'click', toggleWatched)
+on('detail-download', 'click', () => selected && downloadVideo(selected, detailLibraryId, detailController.signal))
+on('episodes-prev', 'click', () => { if (episodePage) return loadEpisodes(episodePage - 1) })
+on('episodes-next', 'click', () => { if (nextEpisodeCursor) { episodeCursors[episodePage + 1] = nextEpisodeCursor; return loadEpisodes(episodePage + 1) } })
+clearHistory.onclick = () => handle((async () => {
+  if (!await confirmAction('清空观看历史？', '将删除全部观看进度，包括库外隐藏记录，其他设备也会同步；不删除原视频、媒体库配置或收藏。')) return
+  await cinema.clearHistory(lifetime.signal)
+  toast('观看历史已清空'); await loadPage()
+})())
+on('player-back', 'click', () => closePlayer())
+on('player-download', 'click', () => playing && downloadVideo(playing, playingLibraryId, playController.signal))
+on('big-play', 'click', togglePlay); on('toggle-play', 'click', togglePlay)
+on('rewind', 'click', () => seek(video.currentTime - 10)); on('forward', 'click', () => seek(video.currentTime + 10))
+on('seek', 'change', () => seek(Number(value('seek'))))
+on('previous-episode', 'click', () => goEpisode(-1)); on('next-episode', 'click', () => goEpisode(1))
+on('mute', 'click', () => { video.muted = !video.muted; $('mute').setAttribute('aria-pressed', String(video.muted)) })
+on('volume', 'input', () => { video.volume = Number(value('volume')); video.muted = false })
+on('sleep-timer', 'change', () => { sleep.set(Number(value('sleep-timer'))); toast(value('sleep-timer') === '0' ? '已取消定时停止' : '定时停止已设置') })
+on('save-series', 'click', () => {
+  if (!seriesKey) return
+  const generation = playGeneration, key = seriesKey, revision = seriesRecord?.revision ?? null
+  const next = seriesOptions({ schemaVersion: 1, intro: Number(value('skip-intro')), outro: Number(value('skip-outro')) })
+  $<HTMLFieldSetElement>('series-options').disabled = true
+  seriesSaving = (async () => {
+    try {
+      const saved = await cinema.save(key, next, revision)
+      if (generation !== playGeneration) return
+      series = next; seriesRecord = saved; text('series-status', '本剧设置已同步；片头在下次从头播放时生效')
+    } catch (error) {
+      if (generation !== playGeneration) return
+      if ((error as { code?: string }).code === 'storage_conflict') {
+        seriesKey = ''; text('series-status', '另一设备更改了本剧设置，请重新打开影片后调整')
+      } else text('series-status', '保存失败，点击保存重试')
+    } finally { if (generation === playGeneration) $<HTMLFieldSetElement>('series-options').disabled = !seriesKey }
+  })()
+  return seriesSaving
+})
+on('speed', 'change', () => { pref.speed = Number(value('speed')); return savePreferences() })
+on('fit', 'change', () => { pref.fit = value('fit') === 'cover' ? 'cover' : 'contain'; return savePreferences() })
+on('autoplay', 'change', () => { pref.autoplay = $<HTMLInputElement>('autoplay').checked; if (!pref.autoplay) cancelNext(); return savePreferences() })
+on('subtitle-size', 'change', () => { pref.subtitleSize = Number(value('subtitle-size')); return savePreferences() })
+on('subtitle-offset', 'change', () => { pref.subtitleOffset = Math.max(-10, Math.min(10, Number(value('subtitle-offset')) || 0)); return savePreferences() })
+on('subtitle', 'change', async () => { selectedSubtitle = value('subtitle'); subtitleExplicit = true; persist(true); await loadSelectedSubtitle() })
+on('encoding', 'change', async () => { pref.encoding = value('encoding') === 'gb18030' ? 'gb18030' : 'utf-8'; await savePreferences(); await loadSelectedSubtitle() })
+on('audio', 'change', async () => {
+  if (!session) return
+  persist(true)
+  const activeSession = session, generation = playGeneration, previous = session.selectedAudio
+  restoredAudio = Number(value('audio'))
+  try { await activeSession.selectAudio(restoredAudio) }
+  catch (error) {
+    if (isAbort(error) || generation !== playGeneration || session !== activeSession) return
+    failedPlayback = true; restoredAudio = previous; text('play-message', `${(error as Error).message}；可重新选择音轨或点击播放重试`); show('play-message', true); throw error
+  }
+})
+on('options-toggle', 'click', () => show('play-options', $('play-options').hidden)); on('options-close', 'click', () => show('play-options', false))
+on('cancel-next', 'click', cancelNext); on('fullscreen', 'click', fullscreen)
+show('pip', !!document.pictureInPictureEnabled)
+on('pip', 'click', async () => { if (document.pictureInPictureElement) await document.exitPictureInPicture(); else await video.requestPictureInPicture() })
+on('sync-retry', 'click', () => store?.flush())
+on('sync-remote', 'click', async () => { const remote = await store?.resolve(true); if (remote) await seek(remote.seconds) })
+on('sync-local', 'click', () => store?.resolve(false))
+video.addEventListener('timeupdate', () => {
+  text('current-time', timeText(video.currentTime)); if (document.activeElement !== $('seek')) $<HTMLInputElement>('seek').value = String(video.currentTime)
+  if (sleep.check()) return
+  if (restored && !video.paused && !outroTriggered && series.outro > 0 && duration > series.intro + series.outro + 5 && video.currentTime >= duration - series.outro) {
+    outroTriggered = true; video.pause(); ended(); return
+  }
+  persist(); handle(refreshEmbedded())
+})
+video.addEventListener('playing', () => { if (sleep.check()) { video.pause(); return } const activeStore = store; if (activeStore && restored && session?.canSave) handle(activeStore.restored(playController.signal).then(() => { if (store === activeStore) persist(true) })); show('big-play', false); show('play-message', false); $('toggle-play').replaceChildren(icon('pause')) })
+video.addEventListener('pause', () => { show('big-play', true); $('toggle-play').replaceChildren(icon('play')); persist(true) })
+video.addEventListener('waiting', () => { if (restored && !video.paused) { text('play-message', '正在缓冲…'); show('play-message', true) } })
+video.addEventListener('ended', ended)
+video.addEventListener('click', () => handle(togglePlay()))
+let touch: { x: number; y: number; at: number } | undefined, tap: { side: number; at: number } | undefined
+$('stage').addEventListener('touchstart', event => { if (event.touches.length !== 1 || (event.target as HTMLElement).closest('button,input,select')) { touch = undefined; return } touch = { x: event.touches[0].clientX, y: event.touches[0].clientY, at: Date.now() } }, { passive: true })
+$('stage').addEventListener('touchmove', event => { if (event.touches.length !== 1 || touch && (Math.abs(event.touches[0].clientX - touch.x) > 18 || Math.abs(event.touches[0].clientY - touch.y) > 18)) touch = undefined }, { passive: true })
+$('stage').addEventListener('touchcancel', () => { touch = undefined; tap = undefined }, { passive: true })
+$('stage').addEventListener('touchend', event => {
+  if (!touch || event.touches.length || Date.now() - touch.at > 280) { touch = undefined; return }
+  const box = $('stage').getBoundingClientRect(), ratio = (touch.x - box.left) / box.width, side = ratio < .35 ? -1 : ratio > .65 ? 1 : 0
+  if (side && tap?.side === side && Date.now() - tap.at < 350) { handle(seek(video.currentTime + side * 10)); tap = undefined }
+  else tap = { side, at: Date.now() }
+  touch = undefined
+}, { passive: true })
+player.addEventListener('keydown', event => {
+  if (event.isComposing || event.defaultPrevented) return
+  if (event.key === 'Tab') {
+    const controls = Array.from(player.querySelectorAll<HTMLElement>('button,input,select,textarea,a[href],[tabindex]')).filter(node => node.tabIndex >= 0 && !node.matches(':disabled') && node.getClientRects().length > 0)
+    const first = controls[0], last = controls.at(-1)
+    if (!first) { event.preventDefault(); player.focus() }
+    else if (event.shiftKey && (document.activeElement === first || document.activeElement === player)) { event.preventDefault(); last?.focus() }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    return
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault(); event.stopPropagation()
+    if (!$('play-options').hidden) { show('play-options', false); $('options-toggle').focus() }
+    else if (player.classList.contains('css-fullscreen')) handle(fullscreen())
+    else if (!document.fullscreenElement) handle(closePlayer())
+    return
+  }
+  if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable=true]')) return
+  if ((event.target as HTMLElement).closest('button') && [' ', 'Enter'].includes(event.key)) return
+  const actions: Record<string, () => unknown> = { ' ': togglePlay, ArrowLeft: () => seek(video.currentTime - 10), ArrowRight: () => seek(video.currentTime + 10), ArrowUp: () => { video.volume = Math.min(1, video.volume + .1) }, ArrowDown: () => { video.volume = Math.max(0, video.volume - .1) }, m: () => { video.muted = !video.muted }, f: fullscreen }
+  const action = actions[event.key] ?? actions[event.key.toLowerCase()]
+  if (action) { event.preventDefault(); handle(action()) }
+})
+document.addEventListener('visibilitychange', () => { sleep.check(); if (document.hidden && !document.pictureInPictureElement) { video.pause(); persist(true) } })
+app.ui.beforeClose(async signal => {
+  persist(true); const pending = store?.close(signal); restored = false; session?.stop(); session = undefined
+  pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort()
+  await Promise.all([pending, manager.flush(), settings.flush(), prefSaving, seriesSaving])
+})
+
+// 宿主事件核对授权与入口；应用自己的 SQLite 业务修订只用轻量轮询，不伪装成宿主 KV 事件。
+let hostEventTimer: ReturnType<typeof setTimeout> | undefined, businessTimer: ReturnType<typeof setTimeout> | undefined
+let lastBusinessRevision: string | undefined, eventsStarted = false
+const inPlayback = () => !!session || !$('player').hidden
+const dialogOpen = () => !!document.querySelector('dialog[open]')
+function refreshLists() {
+  clearTimeout(hostEventTimer)
+  hostEventTimer = setTimeout(() => { hostEventTimer = undefined; if (!inPlayback() && !dialogOpen()) { library.clear(); descriptions.clear(); handle(loadPage()) } }, 800)
+}
+async function pollBusiness() {
+  try {
+    if (!document.hidden) {
+      const result = await cinema.request<{ revision: string }>('/owner/revision', undefined, lifetime.signal)
+      if (lastBusinessRevision && result.revision !== lastBusinessRevision) refreshLists()
+      lastBusinessRevision = result.revision
+    }
+  } catch (error) { if (lifetime.signal.aborted) return; if ((error as { code?: string }).code === 'session_expired') report(error) }
+  if (!lifetime.signal.aborted) businessTimer = setTimeout(() => { void pollBusiness() }, 3000)
+}
+async function hostEvents() {
+  try {
+    for await (const event of app.host.events({ signal: lifetime.signal })) {
+      if (event.event === 'external_service.changed' || event.event === 'backend.changed') { handle(settings.refreshIfOpen()); continue }
+      if (event.event === 'scope.changed' || event.event === 'app.changed') { pageController.abort(); art?.clear(); closeDetail(); handle(closePlayer(false)); refreshLists() }
+      else if (event.event === 'files.changed' || event.event === 'sync.required') refreshLists()
+    }
+  } catch (error) { if (!lifetime.signal.aborted) report(error) }
+}
+window.addEventListener('pagehide', () => { sleep.clear(); clearTimeout(hostEventTimer); clearTimeout(businessTimer); pageController.abort(); detailController.abort(); playController.abort(); subtitleController.abort(); manager.stop(); settings.stop(); session?.stop(); store?.stop(); art?.clear(); detailArt?.clear(); library.setScope(null); cancelNext(); clearTimeout(toastTimer) }, { once: true })
+async function boot() {
+  const signal = lifetime.signal
+  await app.host.runtimeInfo({ signal })
+  dark = app.context.theme === 'dark'; applyTheme(document.documentElement, dark)
+  await app.ui.setTitle({ title: '影视' }, { signal }); await immersive()
+  const libraries = await librariesStore.load(signal)
+  const revision = await cinema.request<{ revision: string }>('/owner/revision', undefined, signal)
+  lastBusinessRevision = revision.revision
+  const saved = await cinema.record<CinemaPreferences>('preferences', signal)
+  signal.throwIfAborted(); prefRecord = saved; pref = preferences(saved?.value); applyPreferences()
+  show('app', true); show('boot-status', false); await loadPage()
+  if (app.context.launch.action === 'open') {
+    const file = app.context.launch.file
+    if (libraries.config.libraries.some(root => root.authorized && root.path && withinDirectory(file.path, root.path))) await startPlayback(file)
+    else { toast('请先手动创建包含此视频的媒体库，选择目录不会自动授权或开启对外服务'); await manager.edit() }
+  }
+  if (!eventsStarted) { eventsStarted = true; void hostEvents(); void pollBusiness() }
+}
+let booting = false
+async function initialize() {
+  if (booting || lifetime.signal.aborted) return
+  booting = true; show('boot-retry', false); text('boot-message', '正在点亮你的私人影院…')
+  try { await boot(); show('boot-status', false) }
+  catch (error) { if (!lifetime.signal.aborted && !isAbort(error)) { show('app', false); show('boot-status', true); show('boot-retry', true); text('boot-message', `影院暂时无法加载：${(error as Error).message}`) } }
+  finally { booting = false }
+}
+on('boot-retry', 'click', initialize)
+app.ui.onNotice(notice => { if (notice.event === 'ui.theme_changed') { dark = notice.data.theme === 'dark'; applyTheme(document.documentElement, dark); handle(immersive()) } })
+mobileQuery?.addEventListener?.('change', () => { closeMore(); handle(immersive()) })
+on('boot-exit', 'click', async () => { await leaveHost(); await app.ui.close() })
+void initialize()

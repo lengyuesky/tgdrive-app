@@ -1,0 +1,11 @@
+{
+  "name": "@tgdrive/media-scraper-page",
+  "version": "1.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "影视刮削沙箱页面，仅配置和观察应用后端任务。",
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": { "@tgdrive/page-sdk": "1.0.0", "@tgdrive/ui": "1.0.0" },
+  "devDependencies": { "@tgdrive/test-host": "1.0.0" }
+}

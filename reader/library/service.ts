@@ -1,0 +1,366 @@
+import { reconcileUnits } from './reconcile'
+import type { NodeId } from '@tgdrive/page-sdk'
+/** 应用层只需持有一个 ReadingLibrary；初始化不枚举正文，退出时显式销毁。 */
+import { BookGroupsStore } from './book-groups'
+import type { HostClient } from '@tgdrive/page-sdk'
+import { isAbort } from '../io'
+import { BudgetCache, CACHE_BUDGETS, type CacheStatus } from './cache'
+import { CoverStore } from '../cover-store'
+import { CoverService, ThumbnailCache } from './covers'
+import { queryLibrary, type LibraryQuery } from './catalog'
+import { reconcileWorks } from './grouping'
+import { HistoryStore } from './history'
+import { MetadataService, metadataKey, validMetadataResult, type PdfOpener } from './metadata'
+import { LibraryError, errorMessage, parseUnit, unitFormat, uniqueUnits, within, type BibliographicMetadata, type LibraryIssue, type LibraryScope, type ReadingUnit, type UnitReading, type WorkFlags } from './model'
+import { ReadingDataStore } from './reading'
+import { ReadingStateCache } from './reading-cache'
+import { LibraryScanner, mergeScan, type ScanHandle, type ScanProgress, type ScanResult } from './scanner'
+import { ShardedStore, type ShardedSnapshot } from './snapshot'
+import { LibraryAccess, SourcesStore, sourcesIdentity, type SourceRoots, type SourcesSnapshot } from './sources'
+import { WorksStore, type WorksSnapshot } from './works'
+
+interface IndexMeta { schemaVersion: 1; sourceIdentity: string; roots: { nodeId: NodeId; path: string; contentVersion: string }[]; complete: boolean; indexedAt: number; changeCursor?: string }
+const rootVersions = (resolved: SourceRoots) => resolved.roots.map(root => ({ nodeId: root.source.nodeId, path: root.file.path, contentVersion: root.file.revision }))
+/** 服务端 JSON 对象键顺序可能变化；按字段核对目录身份，不能把键顺序当成缓存失效。 */
+const sameRoots = (left: IndexMeta['roots'], right: IndexMeta['roots']) => left.length === right.length
+  && left.every(root => right.some(item => item.nodeId === root.nodeId && item.path === root.path))
+const indexMeta = (raw: unknown): IndexMeta => {
+  const meta = raw as IndexMeta | null
+  if (!meta || meta.schemaVersion !== 1 || typeof meta.sourceIdentity !== 'string' || typeof meta.complete !== 'boolean' || !Number.isFinite(meta.indexedAt)
+    || !Array.isArray(meta.roots) || meta.roots.length > 16 || !meta.roots.every(root => root && typeof root.nodeId === 'string' && typeof root.path === 'string' && typeof root.contentVersion === 'string')) throw new LibraryError('invalid_index', '书库缓存格式无效，可以显式刷新重新整理')
+  return { ...meta }
+}
+export interface LibrarySnapshot {
+  sources: SourcesSnapshot
+  units: ReadingUnit[]
+  works: WorksSnapshot
+  complete: boolean
+  fromCache: boolean
+  issues: LibraryIssue[]
+  progress?: ScanProgress
+  indexedSourceId?: NodeId
+}
+export interface LibraryCallbacks {
+  changed?: (snapshot: LibrarySnapshot) => void
+  progress?: (progress: ScanProgress) => void
+  cacheStatus?: (kind: 'metadata', status: CacheStatus) => void
+}
+export class ReadingLibrary {
+  readonly bookGroups: BookGroupsStore
+  readonly sources: SourcesStore
+  readonly access: LibraryAccess
+  readonly works: WorksStore
+  readonly metadata: MetadataService
+  readonly covers: CoverService
+  readonly history: HistoryStore
+  readonly reading: ReadingDataStore
+  private scanner: LibraryScanner
+  private index: ShardedStore<ReadingUnit, IndexMeta>
+  private indexSnapshot: ShardedSnapshot<ReadingUnit, IndexMeta>
+  private state: LibrarySnapshot
+  private roots: SourceRoots = { roots: [], unavailable: [] }
+  private names = new Map<NodeId, BibliographicMetadata>()
+  private controller = new AbortController()
+  private scan?: ScanHandle
+  private workQueue: Promise<void> = Promise.resolve()
+  private generation = 0
+  private initialized = false
+  private paused = false
+  private indexedSourceId?: NodeId
+  private readingCache: ReadingStateCache
+  private initialization?: Promise<LibrarySnapshot>
+  private sourceSelection?: object
+  get selectingSource() { return this.sourceSelection !== undefined }
+  private readonly indexKey: string
+  constructor(readonly host: HostClient, readonly kind: LibraryScope, private callbacks: LibraryCallbacks = {}, private openPdf?: PdfOpener, readonly manualShelves = false) {
+    this.indexKey = manualShelves ? 'library:cache:shelves:v1:index' : 'library:cache:index'
+    this.bookGroups = new BookGroupsStore(host)
+    this.sources = new SourcesStore(host, manualShelves); this.access = new LibraryAccess(host); this.works = new WorksStore(host)
+    this.metadata = new MetadataService(host, this.access, new BudgetCache(host, 'metadata', CACHE_BUDGETS.metadata, validMetadataResult, status => callbacks.cacheStatus?.('metadata', status)), this.openPdf)
+    this.covers = new CoverService(host, this.access, new ThumbnailCache(new CoverStore(host)), this.openPdf)
+    this.readingCache = new ReadingStateCache(host, this.controller.signal)
+    this.history = new HistoryStore(host, this.access); this.reading = new ReadingDataStore(host, this.access, record => this.history.record(record, this.controller.signal), key => this.invalidateReadingState(key))
+    this.scanner = new LibraryScanner(this.access, kind)
+    const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
+    this.index = new ShardedStore(host, this.indexKey, parseUnit, indexMeta, empty)
+    this.indexSnapshot = { rows: [], meta: empty(), revision: null }
+    this.state = { sources: { config: { schemaVersion: 1, sources: [] }, revision: null }, units: [], works: { rows: [], meta: { schemaVersion: 1 }, revision: null }, complete: false, fromCache: false, issues: [] }
+  }
+  get snapshot(): LibrarySnapshot { return structuredClone(this.state) }
+  private emit() { this.callbacks.changed?.(this.snapshot) }
+  private indexIdentity(sourceId = this.indexedSourceId) {
+    if (!this.manualShelves) return this.access.identity
+    const source = this.state.sources.config.sources.find(item => item.nodeId === sourceId)
+    return JSON.stringify(['shelf-v1', source?.nodeId, source?.rootConfirmed])
+  }
+  private scopedRoots(roots: SourceRoots, sourceId = this.indexedSourceId): SourceRoots {
+    if (sourceId === undefined) return this.manualShelves ? { roots: [], unavailable: [] } : roots
+    return { roots: roots.roots.filter(root => root.source.nodeId === sourceId), unavailable: roots.unavailable.filter(item => item.source.nodeId === sourceId) }
+  }
+  private current(generation: number, signal: AbortSignal) { signal.throwIfAborted(); this.controller.signal.throwIfAborted(); if (generation !== this.generation) throw new LibraryError('source_changed', '旧代阅读馆任务已停止') }
+  private visible(units: readonly ReadingUnit[]) {
+    return units.filter(unit => (this.indexedSourceId === undefined || unit.sourceIds.includes(this.indexedSourceId))
+      && this.roots.roots.some(root => unit.sourceIds.includes(root.source.nodeId) || within(unit.file.path, root.file.path)))
+      .map(unit => ({ ...unit, sourceIds: this.roots.roots.filter(root => unit.sourceIds.includes(root.source.nodeId) || within(unit.file.path, root.file.path)).map(root => root.source.nodeId) }))
+  }
+  initialize(signal = this.controller.signal): Promise<LibrarySnapshot> {
+    const pending = this.initializeData(signal).finally(() => { if (this.initialization === pending) this.initialization = undefined })
+    this.initialization = pending
+    return pending
+  }
+  private async initializeData(signal: AbortSignal): Promise<LibrarySnapshot> {
+    const current = AbortSignal.any([signal, this.controller.signal]), generation = ++this.generation
+    this.initialized = false; this.scanner.cancel(); this.invalidateReadingState()
+    const loadedSources = await this.sources.load(current)
+    this.current(generation, current)
+    if (this.indexedSourceId !== undefined && !loadedSources.config.sources.some(source => source.nodeId === this.indexedSourceId)) {
+      this.indexedSourceId = undefined; this.state.indexedSourceId = undefined
+      const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
+      this.index = new ShardedStore(this.host, this.indexKey, parseUnit, indexMeta, empty)
+      this.indexSnapshot = { rows: [], meta: empty(), revision: null }
+    }
+    this.state.sources = loadedSources; this.access.setSources(loadedSources)
+    const roots = await this.access.roots(current); this.current(generation, current); this.roots = this.scopedRoots(roots)
+    this.state.issues = this.roots.unavailable.map(item => ({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message }))
+    const works = await this.works.load(current); this.current(generation, current); this.state.works = works
+    let indexHealthy = true
+    try {
+      if (!this.manualShelves || this.indexedSourceId !== undefined) {
+        const index = await this.index.load(current); uniqueUnits(index.rows); this.current(generation, current); this.indexSnapshot = index
+      }
+    } catch (error) { this.current(generation, current); indexHealthy = false; this.state.issues.push({ code: 'index_unavailable', message: errorMessage(error) }) }
+    this.current(generation, current)
+    this.state.units = this.visible(this.indexSnapshot.rows)
+    this.state.complete = indexHealthy && this.indexSnapshot.meta.complete && this.indexSnapshot.meta.sourceIdentity === this.indexIdentity()
+      && sameRoots(this.indexSnapshot.meta.roots, rootVersions(this.roots)) && !this.roots.unavailable.length
+    this.state.fromCache = this.state.units.length > 0
+    for (const unit of this.state.units) {
+      const cached = await this.metadata.cache.get(metadataKey(unit.file), current)
+      if (cached) this.rememberName(unit.nodeId, cached.metadata)
+    }
+    this.current(generation, current); this.initialized = true; this.emit()
+    return this.snapshot
+  }
+  private requireReady() { if (!this.initialized) throw new LibraryError('not_initialized', '请先初始化阅读馆；读取失败时不能用空配置覆盖原数据'); this.controller.signal.throwIfAborted() }
+  private async changeSources(snapshot: SourcesSnapshot, signal: AbortSignal) {
+    this.scanner.cancel(); this.metadata.pause(); this.covers.pause(); const generation = ++this.generation
+    this.access.setSources(snapshot); this.state.sources = snapshot; this.state.complete = false
+    const roots = await this.access.roots(signal); this.current(generation, signal); this.roots = this.scopedRoots(roots)
+    this.state.units = this.visible(this.indexSnapshot.rows)
+    this.state.issues = this.roots.unavailable.map(item => ({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message }))
+    if (!this.paused) { this.metadata.resume(); this.covers.resume() }
+    this.emit()
+  }
+  async addSource(path: string, options: { name?: string; confirmedRoot?: boolean; base?: SourcesSnapshot; signal?: AbortSignal } = {}) {
+    this.requireReady()
+    const signal = options.signal ? AbortSignal.any([options.signal, this.controller.signal]) : this.controller.signal
+    const saved = await this.sources.add(options.base ?? this.state.sources, path, options.confirmedRoot ?? false, signal, options.name)
+    await this.changeSources(saved, signal)
+    if (this.manualShelves) {
+      const source = saved.config.sources.at(-1)!
+      // 新书库只扫描自己绑定的目录；保存配置后再使用独立持久索引，旧来源缓存不参与。
+      await this.selectSource(source.nodeId, signal, false)
+      const scan = this.refresh(signal)
+      return { sources: saved, source, scan }
+    }
+    const scan = this.refresh(signal)
+    return { sources: saved, source: saved.config.sources.at(-1)!, scan }
+  }
+  async renameSource(nodeId: NodeId, name: string, base = this.state.sources, signal = this.controller.signal) {
+    this.requireReady()
+    const saved = await this.sources.rename(base, nodeId, name, signal)
+    await this.changeSources(saved, signal)
+    return this.snapshot
+  }
+  async removeSource(nodeId: NodeId, base = this.state.sources, signal = this.controller.signal) {
+    this.requireReady()
+    const saved = await this.sources.remove(base, nodeId, signal)
+    await this.changeSources(saved, signal)
+    if (this.indexedSourceId === nodeId) await this.selectSource(undefined, signal)
+    return this.snapshot
+  }
+  refresh(signal = this.controller.signal, changedPaths?: readonly string[]): Promise<ScanResult> {
+    if (this.initialization) return this.initialization.then(() => this.refresh(signal, changedPaths))
+    this.requireReady()
+    if (this.manualShelves && this.indexedSourceId === undefined) return Promise.reject(new LibraryError('no_shelf_selected', '请先创建并选择一个书库；不会扫描全部目录'))
+    const generation = ++this.generation, sourceIdentity = this.indexIdentity(), accessIdentity = this.access.identity
+    const wasComplete = this.indexSnapshot.meta.complete
+    const previous = this.indexSnapshot.rows, current = AbortSignal.any([signal, this.controller.signal])
+    const check = () => { this.current(generation, current); if (accessIdentity !== this.access.identity) throw new LibraryError('source_changed', '来源已变化，旧索引不会发布') }
+    const firstIndexedAt = new Map(this.state.works.rows.flatMap(work => work.members.map(member => [member.unitId, member.firstIndexedAt ?? work.firstIndexedAt] as const)))
+    const handle = this.scanner.start({ signal: current, previous, firstIndexedAt, sourceId: this.indexedSourceId, changedPaths,
+      onProgress: progress => {
+        if (generation !== this.generation) return
+        this.state.progress = progress
+        if (!progress.complete) { this.state.complete = false; this.callbacks.progress?.(progress); this.emit() }
+        // 完成通知必须等作品与索引发布后再发送，不能让卡片在半份分组状态下提前可点击。
+      },
+      onBatch: units => {
+        if (generation !== this.generation) return
+        const merged = new Map(this.state.units.map(unit => [unit.nodeId, unit]))
+        for (const unit of units) merged.set(unit.nodeId, unit)
+        this.state.units = this.visible([...merged.values()]); this.state.fromCache = false
+      },
+    })
+    this.scan = handle
+    if (this.paused) handle.pause()
+    return (async () => {
+      const scan = await handle.result
+      check()
+      const roots = this.scopedRoots(await this.access.roots(current)); check(); this.roots = roots
+      if (roots.unavailable.length || !sameRoots(scan.sourceRoots, rootVersions(roots))) {
+        scan.complete = false; scan.phase = 'incomplete'; scan.end = 'failed'
+        scan.issues.push(...roots.unavailable.map(item => ({ code: 'source_unavailable', nodeId: item.source.nodeId, message: item.message })))
+        if (!roots.unavailable.length) scan.issues.push({ code: 'source_changed', message: '来源在扫描结束后变化，旧索引保留，请重新刷新' })
+      }
+      const merged = mergeScan(previous, scan)
+      this.state.units = this.visible(merged.units)
+      this.state.complete = merged.complete && (!changedPaths || wasComplete)
+      this.invalidateReadingState()
+      this.state.issues = [...scan.issues]; this.state.fromCache = false
+      await this.updateWorks(generation, current); check()
+      const draft = { rows: merged.units, meta: { schemaVersion: 1 as const, sourceIdentity, roots: rootVersions(roots), complete: this.state.complete, indexedAt: Date.now(), ...(scan.changeCursor ? { changeCursor: scan.changeCursor } : {}) }, revision: this.indexSnapshot.revision }
+      try { const index = await this.index.save(draft, current, check); check(); this.indexSnapshot = index }
+      catch (error) { check(); this.indexSnapshot = draft; this.state.issues.push({ code: 'index_session_only', message: `索引暂存于本次会话：${errorMessage(error)}` }) }
+      this.state.progress = scan
+      this.callbacks.progress?.(scan)
+      this.emit()
+      return scan
+    })()
+  }
+  /** 每个来源独立分页索引，切换只驻留一份；大型文件树不会混入阅读单元索引。 */
+  async selectSource(sourceId?: NodeId, signal = this.controller.signal, scanIncomplete = true) {
+    await this.initialization
+    this.requireReady()
+    if (sourceId === this.indexedSourceId && !this.sourceSelection) return
+    if (sourceId !== undefined && !this.state.sources.config.sources.some(source => source.nodeId === sourceId)) throw new LibraryError('source_removed', '所选来源已移除')
+    this.scanner.cancel(); const generation = ++this.generation, selection = {}
+    this.sourceSelection = selection
+    try {
+      const empty = (): IndexMeta => ({ schemaVersion: 1, sourceIdentity: '', roots: [], complete: false, indexedAt: 0 })
+      const store = new ShardedStore(this.host, this.indexKey + (sourceId === undefined ? '' : ':source:' + sourceId), parseUnit, indexMeta, empty)
+      const index = this.manualShelves && sourceId === undefined ? { rows: [], meta: empty(), revision: null } : await store.load(signal)
+      this.current(generation, signal)
+      const roots = this.scopedRoots(await this.access.roots(signal), sourceId); this.current(generation, signal)
+      this.roots = roots; this.index = store; this.indexedSourceId = sourceId; this.state.indexedSourceId = sourceId
+      this.indexSnapshot = index; this.state.units = this.visible(index.rows)
+      this.state.complete = index.meta.complete && index.meta.sourceIdentity === this.indexIdentity(sourceId) && sameRoots(index.meta.roots, rootVersions(roots)) && !roots.unavailable.length
+      this.invalidateReadingState(); this.emit()
+      if (scanIncomplete && (!this.manualShelves || sourceId !== undefined)) await this.synchronize(signal)
+    } finally { if (this.sourceSelection === selection) this.sourceSelection = undefined }
+  }
+
+  /** 有检查点时只核对增量；授权或日志失效重读范围并重新分页，不把撤权当普通删除。 */
+  async synchronize(signal = this.controller.signal): Promise<void> {
+    await this.initialization
+    this.requireReady()
+    if (this.manualShelves && this.indexedSourceId === undefined) return
+    if (!this.state.complete || !this.indexSnapshot.meta.changeCursor) { await this.refresh(signal); return }
+    const generation = ++this.generation, current = AbortSignal.any([signal, this.controller.signal])
+    const check = () => this.current(generation, current)
+    try {
+      const roots = this.scopedRoots(await this.access.roots(current)); check(); this.roots = roots
+      const result = await reconcileUnits(this.access, roots, this.kind, this.indexSnapshot.rows, this.indexSnapshot.meta.changeCursor, current)
+      check()
+      this.state.units = this.visible(result.units); this.state.complete = !roots.unavailable.length; this.invalidateReadingState()
+      await this.updateWorks(generation, current); check()
+      const draft = { rows: result.units, meta: { ...this.indexSnapshot.meta, roots: rootVersions(roots), complete: this.state.complete, indexedAt: Date.now(), changeCursor: result.cursor }, revision: this.indexSnapshot.revision }
+      try { this.indexSnapshot = await this.index.save(draft, current, check) }
+      catch (error) { check(); this.indexSnapshot = draft; this.state.issues.push({ code: 'index_session_only', message: errorMessage(error) }) }
+      this.emit()
+    } catch (error) {
+      current.throwIfAborted()
+      if (!['scope_changed', 'scope_denied', 'cursor_expired'].includes((error as { code?: string }).code ?? '')) throw error
+      await this.host.scope({ signal: current })
+      this.roots = this.scopedRoots(await this.access.roots(current)); this.state.units = this.visible(this.indexSnapshot.rows)
+      this.state.complete = false; this.emit()
+      await this.refresh(current)
+    }
+  }
+
+  private updateWorks(generation: number, signal: AbortSignal) {
+    const task = this.workQueue.catch(() => {}).then(async () => {
+      const check = () => this.current(generation, signal)
+      check()
+      let rows = reconcileWorks(this.state.works.rows, this.state.units, this.kind, this.names)
+      if (this.indexedSourceId !== undefined) {
+        const visible = new Set(this.state.units.map(unit => unit.nodeId))
+        const partial = new Map(this.state.works.rows.filter(work => work.members.some(member => !visible.has(member.unitId))).map(work => [work.id, work]))
+        rows = rows.map(work => {
+          const previous = partial.get(work.id)
+          // 局部扫描保留旧顺序，但不能恢复已按真实格式拆分的旧成员关系。
+          return previous && previous.kind === work.kind && previous.members.length === work.members.length
+            && previous.members.every((member, index) => member.unitId === work.members[index]?.unitId) ? previous : work
+        })
+      }
+      if (JSON.stringify(rows) === JSON.stringify(this.state.works.rows)) return
+      const works = await this.works.save({ ...this.state.works, rows }, signal, check)
+      check(); this.state.works = works
+    })
+    this.workQueue = task
+    return task
+  }
+  async publishWorks(draft: WorksSnapshot, signal = this.controller.signal) {
+    this.requireReady(); this.scanner.cancel()
+    const generation = ++this.generation, current = AbortSignal.any([signal, this.controller.signal])
+    const check = () => this.current(generation, current)
+    const saved = await this.works.save(draft, current, check)
+    check(); this.state.works = saved; this.emit()
+    return saved
+  }
+  private rememberName(nodeId: NodeId, metadata: BibliographicMetadata) {
+    const { description: _description, ...searchable } = metadata
+    this.names.set(nodeId, searchable)
+    while (this.names.size > 2000) this.names.delete(this.names.keys().next().value!)
+  }
+  async getMetadata(unit: ReadingUnit, signal = this.controller.signal) {
+    this.requireReady()
+    const generation = this.generation, result = await this.metadata.get(unit, signal)
+    this.current(generation, signal); this.rememberName(unit.nodeId, result.metadata)
+    await this.updateWorks(generation, signal); this.current(generation, signal); this.emit()
+    return result
+  }
+  async loadReadingState(signal = this.controller.signal, onProgress?: (records: number) => void) {
+    await this.initialization
+    this.requireReady()
+    const generation = this.generation, current = AbortSignal.any([signal, this.controller.signal])
+    const state = await this.readingCache.load(`${generation}:${this.state.works.revision}`, this.state.units,
+      () => this.reading.loadCatalogState(this.state.units, this.state.works.rows, this.controller.signal, count => { if (generation === this.generation) onProgress?.(count) }), current)
+    this.current(generation, current)
+    return state
+  }
+  invalidateReadingState(key?: string) { this.readingCache.invalidate(key) }
+  async reloadWorks(signal = this.controller.signal) {
+    await this.initialization
+    const generation = this.generation
+    await this.workQueue.catch(() => {})
+    const works = await this.works.load(signal)
+    this.current(generation, signal); this.state.works = works; this.invalidateReadingState(); this.emit()
+  }
+  query(query: LibraryQuery = {}, readings?: ReadonlyMap<NodeId, UnitReading>, flags?: ReadonlyMap<string, WorkFlags>) {
+    return queryLibrary({ bookGroups: this.bookGroups, units: this.state.units, works: this.state.works.rows, metadata: this.names, readings, flags, complete: this.state.complete && (this.manualShelves || this.indexedSourceId === undefined || query.sourceId === this.indexedSourceId) }, query)
+  }
+  async openUnit(nodeId: NodeId, signal = this.controller.signal) {
+    await this.initialization
+    this.requireReady()
+    if (this.manualShelves && this.indexedSourceId === undefined && !this.access.isOpenedFile(nodeId)) throw new LibraryError('no_shelf_selected', '请先选择自己创建的书库')
+    const checked = await this.access.file(nodeId, signal), format = unitFormat(checked.file, this.kind)
+    if (this.manualShelves && this.indexedSourceId !== undefined && !this.access.isOpenedFile(nodeId) && !checked.sourceIds.includes(this.indexedSourceId)) throw new LibraryError('outside_shelf', '文件不在当前书库目录中')
+    if (!format) throw new LibraryError('unsupported_file', '文件不再是此应用支持的阅读格式')
+    return { ...checked, format }
+  }
+  pause() { this.paused = true; this.scanner.pause(); this.metadata.pause(); this.covers.pause() }
+  resume() { this.controller.signal.throwIfAborted(); this.paused = false; this.metadata.resume(); this.covers.resume(); this.scanner.resume() }
+  cancelScan() { this.scan?.cancel() }
+  destroy() { this.generation++; this.controller.abort(); this.scanner.cancel(); this.history.cancel(); this.metadata.destroy(); this.covers.destroy(); this.access.destroy() }
+}
+
+/** 与页面生命周期绑定；进入阅读时由界面另行调用 library.pause()，离开阅读再 resume()。 */
+export function bindLibraryLifecycle(library: ReadingLibrary, targetDocument = document, targetWindow = window) {
+  const visibility = () => { if (targetDocument.hidden) library.pause() }
+  const exit = () => library.destroy()
+  targetDocument.addEventListener('visibilitychange', visibility); targetWindow.addEventListener('pagehide', exit, { once: true })
+  return () => { targetDocument.removeEventListener('visibilitychange', visibility); targetWindow.removeEventListener('pagehide', exit) }
+}
+export const isLibraryAbort = (error: unknown) => isAbort(error) || (error as { name?: string })?.name === 'AbortError' || (error as { code?: string })?.code === 'source_changed'
+export { sourcesIdentity }

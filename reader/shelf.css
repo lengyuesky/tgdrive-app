@@ -1,0 +1,88 @@
+/* 阅读馆封面书架：统一绿色强调，深浅色继承宿主主题。 */
+#app[data-app="reader"] { --accent: #25834b; --soft: #e4f1e8; }
+body[data-theme="dark"] #app[data-app="reader"] { --accent: #79cf93; --soft: #233a2b; }
+body[data-theme="sepia"] #app[data-app="reader"] { --accent: #456d35; --soft: #e5e8cf; }
+#app[data-app="reader"] .brand-mark { width: 28px; height: 34px; border-radius: 3px 7px 7px 3px; }
+#app[data-app="reader"] .library-grid { grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 24px 18px; margin: 0; }
+#app[data-app="reader"] .library-card { min-height: 0; padding: 0; gap: 10px; background: transparent; border: 0; border-radius: 8px; overflow: visible; }
+#app[data-app="reader"] .card-cover { position: relative; width: 100%; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px #0002; }
+#app[data-app="reader"] .cover-art { position: relative; width: 100%; aspect-ratio: 1 / 1.42; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background-color: var(--soft); background-image: linear-gradient(145deg, var(--soft), color-mix(in srgb, var(--accent) 18%, var(--surface))); background-size: cover; background-position: center; }
+#app[data-app="reader"] .cover-initial { font-size: 46px; font-weight: 700; color: var(--accent); opacity: .4; }
+#app[data-app="reader"] .has-cover .cover-initial { display: none; }
+#app[data-app="reader"] .card-cover .file-mark { position: absolute; top: 8px; left: 8px; padding: 3px 6px; border-radius: 4px; font-size: 10px; color: white; background: #18231ccc; }
+#app[data-app="reader"] .card-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0 2px; }
+#app[data-app="reader"] .card-title { font-size: 13px; font-weight: 600; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#app[data-app="reader"] .library-card:hover .card-title { color: var(--accent); }
+#app[data-app="reader"] .continue-cover { width: 84px; height: auto; flex-shrink: 0; }
+#app[data-app="reader"] .detail-tags .badge-status { position: static; }
+#app[data-app="reader"] .reading-viewport[data-format="comic"] .comic-page { padding-bottom: 0; }
+#app[data-app="reader"] .reading-viewport[data-format="comic"] .comic-page figcaption { display: none; }
+
+/* 工具栏始终悬浮，不占正文空间；显隐、目录与设置都不改变漫画适配尺寸。 */
+#app.reader-desktop .reader { position: relative; width: 100%; height: 100%; overflow: hidden; }
+#app.reader-desktop .reader-toolbar { position: absolute; inset: 0 0 auto; z-index: 6; background: var(--surface); box-shadow: 0 3px 18px #0002; }
+#app.reader-desktop .reader-footer { position: absolute; inset: auto 0 0; z-index: 5; box-shadow: 0 -3px 18px #0002; }
+#app.reader-desktop #notice { position: absolute; top: 64px; left: 12px; right: 12px; z-index: 10; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 12px #0002; }
+#app:is(.reader-desktop, .immersive) :is(#conflict, #layout-notice) { position: absolute; top: 64px; left: 12px; right: 12px; z-index: 9; padding: 12px; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; }
+#app.reader-desktop #reading-status:not(:empty) { position: absolute; top: 50%; left: 12px; right: 12px; z-index: 3; background: var(--surface); border-radius: 10px; }
+#app.reader-desktop[data-controls="hidden"] .reader-toolbar,
+#app.reader-desktop[data-controls="hidden"] .reader-footer { visibility: hidden; pointer-events: none; }
+#app.reader-desktop .reader-more { position: absolute; inset: calc(100% + 8px) 12px auto auto; display: flex; flex-direction: column; gap: 8px; width: min(320px, 90%); max-height: var(--panel-height, 75vh); overflow-y: auto; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px #0003; }
+#app.reader-desktop :is(.preferences, .reader-more, .bookmarks-panel) .panel-heading { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+#app.reader-desktop .reader-navigation,
+#app.reader-desktop .preferences,
+#app.reader-desktop .bookmarks-panel { position: absolute; inset: 58px auto 65px 0; width: min(380px, 45%); max-height: none; overflow-y: auto; z-index: 8; border-right: 1px solid var(--line); box-shadow: 6px 0 24px #0002; }
+#app.reader-desktop .reader-navigation .toc-tree { flex: 1; min-height: 0; max-height: none; }
+#app.reader-desktop .preferences { inset-inline: auto 0; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 20px; }
+#app.reader-desktop .preferences label { justify-content: space-between; }
+
+/* 手动书库列表只展示用户创建的名称与目录，未选择书库时不展示图书网格。 */
+#app[data-app="reader"] .shelves-view-container { padding:24px; }
+.shelves-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.shelves-header h2, .shelves-header h3 { margin:0; overflow-wrap:anywhere; }
+.shelves-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr)); gap:16px; margin-top:24px; }
+.shelf-card { min-height:116px; display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:20px; text-align:left; border:1px solid var(--line); background:var(--surface); border-radius:12px; }
+.shelf-card strong { font-size:18px; overflow-wrap:anywhere; }
+.shelf-card .file-meta { width:100%; overflow-wrap:anywhere; }
+.shelf-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.shelf-actions button, .shelves-header button { min-height:44px; }
+@media (max-width:768px), (pointer:coarse) {
+  #app[data-app="reader"] .shelves-view-container { padding:18px 16px; }
+  #app[data-app="reader"] .source-list-item { align-items:flex-start; flex-direction:column; }
+}
+
+/* 书库标题和路径共用一块紧凑区域，避免段落默认外边距叠加 flex 间距。 */
+#app[data-app="reader"] .library-view-container { gap: 12px; padding-top: 16px; }
+
+@media (max-width: 768px), (pointer: coarse) {
+  #app[data-app="reader"] .mobile-header { padding: 2px 12px; }
+  #app[data-app="reader"] .mobile-title { font-size: 16px; }
+  #app[data-app="reader"] .mobile-action-btn { width: 44px; min-width: 44px; padding: 0; }
+  #app[data-app="reader"] .mobile-action-icon { display: inline; font-size: 22px; }
+  #app[data-app="reader"] .mobile-action-label { display: none; }
+  #app[data-app="reader"] .home-container { padding: 18px 16px; }
+  #app[data-app="reader"] .library-view-container { padding: 10px 12px 16px; gap: 10px; }
+  #app[data-app="reader"] .library-heading { gap: 8px; }
+  #app[data-app="reader"] .library-heading h2 { font-size: 18px; }
+  #app[data-app="reader"] .library-heading > button { padding: 6px 8px; font-size: 12px; }
+  #app[data-app="reader"] .library-toolbar-main { flex-direction: column; align-items: stretch; gap: 6px; }
+  #app[data-app="reader"] .toolbar-search-row { gap: 8px; }
+  #app[data-app="reader"] .library-filters-toggle { min-height: 44px; padding: 6px 8px; font-size: 12px; }
+  #app[data-app="reader"] .toggle-btn { min-width: 56px; min-height: 44px; padding: 6px 10px; font-size: 12px; }
+  #app[data-app="reader"] .library-filter-panel { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  #app[data-app="reader"] .library-filter-actions > button,
+  #app[data-app="reader"] .book-group-controls button,
+  #app[data-app="reader"] .group-selection-heading button,
+  #app[data-app="reader"] .group-selection-actions button { min-height: 44px; }
+  #app[data-app="reader"] .group-selection-heading,
+  #app[data-app="reader"] .group-selection-actions { flex-wrap: nowrap; gap: 6px; }
+  #app[data-app="reader"] .group-selection-actions select { min-width: 0; }
+  #app[data-app="reader"] .group-selection-heading button,
+  #app[data-app="reader"] .group-selection-actions button { flex-shrink: 0; }
+  #app[data-app="reader"] .library-grid,
+  #app[data-app="reader"] .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
+  #app[data-app="reader"] .toolbar-filters-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #app[data-app="reader"] .toolbar-filters-row select { width: 100%; }
+  #app[data-app="reader"] .section-title { font-size: 19px; }
+  #app[data-app="reader"] .continue-card { padding: 14px; gap: 14px; }
+}

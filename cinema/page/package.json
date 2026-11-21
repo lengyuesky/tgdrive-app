@@ -1,0 +1,15 @@
+{
+  "name": "@tgdrive/cinema-page",
+  "version": "1.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "影视应用页面，共用自己的后端媒体库、收藏和观看进度。",
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@tgdrive/page-sdk": "1.0.0",
+    "@tgdrive/ui": "1.0.0",
+    "mediabunny": "1.56.1"
+  },
+  "devDependencies": { "@tgdrive/test-host": "1.0.0" }
+}

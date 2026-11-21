@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>影视刮削</title><script type="module" src="./main.ts"></script></head>
+<body>
+<main id="app" hidden>
+  <header class="topbar"><button id="exit" class="quiet" type="button">返回网盘</button><div><h1>影视刮削</h1><p>选好目录，一键补齐影视资料</p></div></header>
+  <nav class="tabs" aria-label="刮削导航"><button data-tab="scrape" class="active" aria-current="page" type="button">目录刮削</button><button data-tab="history" type="button">操作记录</button><button data-tab="connection" type="button">设置</button></nav>
+  <p id="observation-error" class="notice" role="status" hidden></p>
+  <section id="scrape-view">
+    <section class="panel directory-panel">
+      <h2>刮削目录</h2>
+      <div class="directory-picker"><output id="directory">请选择目录</output><button id="choose" type="button">选择目录</button></div>
+      <p id="scope-status" class="hint"></p>
+      <p class="hint">包含所有子目录，逐部补齐资料。已有资料默认保留，单部失败会记录原因并继续。</p>
+      <div class="actions"><button id="start" class="tg-primary start-button" type="button" disabled>开始刮削</button><button id="cancel" type="button" hidden>停止刮削</button><button id="refresh-status" class="quiet" type="button">刷新状态</button></div>
+      <p class="page-note">任务由应用后端运行，关闭页面不会停止。后端重启或中断后不会自动续跑。</p>
+      <button id="show-active" class="quiet" type="button" hidden>查看正在进行的任务</button>
+    </section>
+    <section id="progress-panel" class="panel" hidden>
+      <div class="section-heading"><h2 id="execution-status" class="run-status" role="status" aria-live="polite"></h2><time id="run-time"></time></div>
+      <p id="run-directory" class="file-path"></p>
+      <p id="current-file" class="current-file"></p>
+      <progress id="progress" aria-label="刮削进度" max="1" value="0"></progress><p id="progress-label" class="hint"></p>
+      <dl class="counts"><div><dt>视频</dt><dd id="total-count">0</dd></div><div><dt>成功</dt><dd id="done-count">0</dd></div><div><dt>跳过</dt><dd id="skipped-count">0</dd></div><div><dt>失败</dt><dd id="failed-count">0</dd></div></dl>
+      <p id="verification-note" class="notice" hidden></p>
+      <button id="retry-run" class="quiet" type="button" hidden>重试未完成项</button>
+      <p class="page-note">重试先核实旧写入，只按当前文件补缺，不覆盖已有资料；不会回滚已完成文件。</p>
+    </section>
+    <section id="results-panel" hidden><div class="section-heading"><h2>任务结果</h2><span id="results-loading" class="hint" role="status"></span></div><div id="results" class="result-list"></div><p id="results-empty" class="hint"></p><div class="pagination" aria-label="结果分页"><button id="results-prev" type="button">上一页</button><output id="results-page"></output><button id="results-next" type="button">下一页</button></div></section>
+    <section id="detail-panel" class="panel" hidden><div class="section-heading"><h2>执行明细</h2><button id="close-detail" class="quiet" type="button">关闭明细</button></div><p id="detail-title" class="file-name"></p><p id="detail-status" class="hint" role="status"></p>
+      <section><h3>文件步骤</h3><div id="detail-steps" class="detail-list"></div><div class="pagination" aria-label="文件步骤分页"><button id="step-prev" type="button">上一页</button><output id="step-page"></output><button id="step-next" type="button">下一页</button></div></section>
+      <section><h3>演员资料</h3><div id="detail-actors" class="detail-list"></div><div class="pagination" aria-label="演员资料分页"><button id="actor-prev" type="button">上一页</button><output id="actor-page"></output><button id="actor-next" type="button">下一页</button></div></section>
+      <section><h3>来源错误</h3><div id="detail-attempts" class="detail-list"></div><div class="pagination" aria-label="来源错误分页"><button id="attempt-prev" type="button">上一页</button><output id="attempt-page"></output><button id="attempt-next" type="button">下一页</button></div></section>
+    </section>
+  </section>
+  <section id="history-view" hidden><div class="section-heading"><div><h2>操作记录</h2><p>保留最近 30 天的目录刮削结果与失败原因；清理记录不会删除网盘文件</p></div><button id="reload-history" type="button">刷新记录</button></div><p id="history-status" class="hint" role="status"></p><div id="history" class="history-list"></div><div class="pagination" aria-label="操作记录分页"><button id="history-prev" type="button">上一页</button><output id="history-page"></output><button id="history-next" type="button">下一页</button></div></section>
+  <section id="connection-view" hidden>
+    <section id="connection-form" class="panel connection-panel" aria-label="刮削设置"><h2>MetaTube 后端</h2><label for="backend-url">后端地址</label><input id="backend-url" type="url" required autocomplete="off" spellcheck="false" placeholder="https://metatube-server.hf.space/"/><label for="backend-token">Token（可选）</label><input id="backend-token" type="password" autocomplete="new-password" spellcheck="false" placeholder="留空保留已保存的 Token"/><p id="token-status" class="hint"></p><label class="check"><input id="clear-token" type="checkbox"/>清除已保存的 Token</label><p class="page-note">Token 仅保存在应用后端私有数据库，页面只显示已配置或未配置；HTTP 地址不加密，请优先使用 HTTPS。</p>
+      <h3>刮削选项</h3><p class="hint">散放视频按番号整理到当前父目录下的文件夹，保留原名；明确关联的配套资料随视频移动。</p><label class="check"><input id="overwrite-nfo" type="checkbox"/>覆盖已有专属 NFO（整份替换，包括手工编辑内容）</label><label class="check"><input id="overwrite-poster" type="checkbox"/>覆盖已有专属海报</label><p class="page-note">默认只补缺。覆盖选项只影响新任务，目录共用资料和旧演员头像不会删除；重试始终只补缺。</p>
+      <div class="actions"><button id="save-settings" class="tg-primary" type="button">保存设置</button><button id="reload-settings" type="button">重新读取设置</button></div><p id="settings-status" class="hint" role="status"></p><button id="authorize" class="quiet" type="button">管理目录授权</button>
+    </section>
+  </section>
+  <div id="message" class="tg-toast" role="status" hidden><span id="message-text"></span><button id="dismiss-message" type="button" aria-label="关闭提示">关闭</button></div>
+</main>
+<div id="boot" class="boot"><p id="boot-status" role="status">正在打开影视刮削…</p><button id="boot-retry" type="button" hidden>重试</button></div>
+</body></html>

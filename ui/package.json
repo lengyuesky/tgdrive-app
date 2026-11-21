@@ -1,0 +1,16 @@
+{
+  "name": "@tgdrive/ui",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "description": "应用共用的界面规范与线性图标",
+  "exports": {
+    ".": "./icons.ts",
+    "./icons": "./icons.ts",
+    "./base.css": "./base.css"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

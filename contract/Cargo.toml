@@ -1,0 +1,23 @@
+[package]
+name = "tgdrive-contract"
+version = "1.0.0"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "宿主与应用的通用契约；页面类型由同一份 Rust 定义生成"
+
+[features]
+default = []
+# 仅类型生成工具启用；宿主不需要类型生成器及其依赖。
+types = ["dep:ts-rs"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+semver.workspace = true
+ts-rs = { version = "11", optional = true, features = ["serde-json-impl"] }
+
+[[bin]]
+name = "generate-types"
+path = "src/bin/generate-types.rs"
+required-features = ["types"]

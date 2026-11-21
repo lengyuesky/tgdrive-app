@@ -1,0 +1,23 @@
+{
+  "name": "@tgdrive/page-sdk",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "应用页面的类型化宿主客户端和界面通道，无运行时依赖",
+  "files": ["dist", "NOTICE"],
+  "exports": {
+    ".": {
+      "types": "./dist/page-sdk/src/index.d.ts",
+      "import": "./dist/page-sdk/src/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract/types/contract.d.ts",
+      "import": "./dist/contract/types/contract.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  }
+}

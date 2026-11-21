@@ -1,0 +1,100 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ReaderChrome } from './chrome'
+
+const cleanups: (() => void)[] = []
+afterEach(() => {
+  cleanups.splice(0).forEach(cleanup => cleanup())
+  vi.unstubAllGlobals()
+  document.body.replaceChildren()
+})
+
+function setup(desktopControls = true, mobile = false, supported = true, shelf = false) {
+  document.body.innerHTML = `<div id="app">
+    <main id="viewport" tabindex="0"></main><button id="back"></button>
+    <button id="reader-menu-toggle"></button><button id="toc-toggle"></button><button id="reader-more-toggle"></button>
+    <button id="reader-backdrop" hidden></button>
+    <div id="reader-desktop-actions"><div id="reader-actions"></div></div><div id="reader-footer-actions"></div>
+    <section id="preferences" hidden><button>关闭</button></section><section id="bookmarks" hidden><button>关闭</button></section>
+    <section id="navigation" hidden><button>关闭</button></section><section id="reader-more" hidden><button>关闭</button></section>
+    <section id="appearance" hidden><button>关闭</button></section><section id="paging" hidden><button>关闭</button></section>
+  </div>`
+  const root = document.getElementById('app')!
+  const media = { matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() }
+  vi.stubGlobal('matchMedia', vi.fn(() => media))
+  document.body.style.setProperty('--bg', '#f5f6f2')
+  const setImmersive = vi.fn(async () => { if (!supported) throw new Error('沉浸请求失败') })
+  const error = vi.fn()
+  const chrome = new ReaderChrome(root, {
+    ui: { setImmersive },
+    immersive: true, desktopControls, shelf, paged: () => false, turn: vi.fn(), error,
+  })
+  cleanups.push(() => chrome.destroy())
+  return { chrome, root, media, setImmersive, error }
+}
+
+describe('阅读馆全屏阅读菜单', () => {
+  it('桌面请求宿主全屏但保留桌面悬浮控件，显隐和面板不退出全屏，离开后恢复宿主', async () => {
+    const x = setup()
+    await x.chrome.enter(); x.chrome.opened()
+    expect(x.root.classList.contains('reader-desktop')).toBe(true)
+    expect(x.root.classList.contains('immersive')).toBe(false)
+    expect(x.setImmersive).toHaveBeenCalledWith({ active: true, background: '#f5f6f2' })
+    expect(x.root.dataset.controls).toBe('visible')
+    x.chrome.toggle(); expect(x.root.dataset.controls).toBe('hidden')
+    x.chrome.togglePanel('preferences'); expect(x.root.dataset.controls).toBe('visible')
+    x.chrome.closePanel(); x.chrome.toggle()
+    expect(x.setImmersive).toHaveBeenCalledTimes(1)
+    document.body.style.setProperty('--bg', '#141d1c')
+    await x.chrome.themeChanged()
+    expect(x.setImmersive).toHaveBeenLastCalledWith({ active: true, background: '#141d1c' })
+    await x.chrome.leave()
+    expect(x.setImmersive).toHaveBeenLastCalledWith({ active: false })
+    expect(x.root.classList.contains('reader-desktop')).toBe(false)
+  })
+
+  it('阅读中桌面与手机切换只改变菜单布局，宿主不反复退出全屏', async () => {
+    const x = setup()
+    await x.chrome.enter(); x.chrome.opened()
+    x.media.matches = true; x.media.addEventListener.mock.calls[0]![1]()
+    expect(x.root.classList.contains('immersive')).toBe(true)
+    expect(x.root.classList.contains('reader-desktop')).toBe(false)
+    expect(x.root.dataset.controls).toBe('hidden')
+    expect(document.getElementById('reader-actions')?.parentElement?.id).toBe('reader-footer-actions')
+    x.media.matches = false; x.media.addEventListener.mock.calls[0]![1]()
+    expect(x.root.classList.contains('reader-desktop')).toBe(true)
+    expect(document.getElementById('reader-actions')?.parentElement?.id).toBe('reader-desktop-actions')
+    await x.chrome.themeChanged()
+    expect(x.setImmersive).toHaveBeenCalledTimes(1)
+  })
+
+  it('沉浸请求失败仍可使用本地菜单，并报告真实错误', async () => {
+    const x = setup(true, false, false)
+    await x.chrome.enter(); x.chrome.opened(); x.chrome.toggle()
+    expect(x.root.dataset.controls).toBe('hidden')
+    expect(x.setImmersive).toHaveBeenCalled(); expect(x.error).toHaveBeenCalled()
+  })
+
+  it('非沉浸桌面布局保留菜单，触摸布局默认收起菜单', async () => {
+    const desktop = setup(false)
+    await desktop.chrome.enter(); desktop.chrome.opened()
+    expect(desktop.setImmersive).not.toHaveBeenCalled()
+    desktop.chrome.destroy()
+    const mobile = setup(false, true)
+    await mobile.chrome.enter(); mobile.chrome.opened()
+    expect(mobile.setImmersive).toHaveBeenCalledWith({ active: true, background: '#f5f6f2' })
+    expect(mobile.root.dataset.controls).toBe('hidden')
+  })
+
+  it('手机书库也进入宿主沉浸，读完返回书库保持沉浸；桌面书库不请求', async () => {
+    const mobile = setup(false, true, true, true)
+    await Promise.resolve(); await Promise.resolve()
+    expect(mobile.setImmersive).toHaveBeenLastCalledWith({ active: true, background: '#f5f6f2' })
+    await mobile.chrome.enter(); mobile.chrome.opened(); await mobile.chrome.leave()
+    expect(mobile.setImmersive).not.toHaveBeenCalledWith({ active: false })
+    expect(document.body.classList.contains('is-reading')).toBe(false)
+    mobile.chrome.destroy()
+    const desktop = setup(false, false, true, true)
+    await Promise.resolve()
+    expect(desktop.setImmersive).not.toHaveBeenCalled()
+  })
+})

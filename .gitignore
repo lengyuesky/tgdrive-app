@@ -1,0 +1,10 @@
+node_modules/
+.build/
+/catalog/
+dist/
+.DS_Store
+*.log
+.playwright/
+test-results/
+playwright-report/
+/target/
