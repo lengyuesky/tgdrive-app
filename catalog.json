@@ -9,7 +9,7 @@
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "contract": {
           "major": 1,
           "minor": 0
@@ -63,14 +63,14 @@
       },
       "packages": {
         "linux-amd64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.1/cinema-1.0.1-linux-amd64.tgapp",
-          "sha256": "116965853378cf2ff13821695c5397ad9805bba5e0f14e5389b3dacafee6fab4",
-          "size": "4707160"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.2/cinema-1.0.2-linux-amd64.tgapp",
+          "sha256": "79343c9931325a9ef27baf87829f353e5a3b91f25ea101d710418d6ca06664db",
+          "size": "4714883"
         },
         "linux-arm64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.1/cinema-1.0.1-linux-arm64.tgapp",
-          "sha256": "261bd1f74fbbb48dcd499fe5ab39978eb81f31cbc2e30ac3b3fc39ca116fff09",
-          "size": "4617358"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.2/cinema-1.0.2-linux-arm64.tgapp",
+          "sha256": "e8277ad9cfe4f0cc3c214bb6af4839de0342f7ab6bcc8225b331c43a10c86ee1",
+          "size": "4624431"
         }
       }
     },
