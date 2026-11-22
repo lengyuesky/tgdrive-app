@@ -91,6 +91,124 @@ impl Writer<'_> {
         self.db.save_step(&step)?;
         Ok(step)
     }
+
+    /// 新 NFO 提交确认或有效 NFO 保留后，按当前引用回收本组无用头像；失败重试只重新规划。
+    pub async fn cleanup_actors(
+        &self,
+        item: &Item,
+        run: &Run,
+        plan: &Plan,
+        cache: &mut DirectoryCache,
+        nfo_step: &Step,
+    ) -> Result<()> {
+        let target = plan.target.as_ref().unwrap_or(&plan.source);
+        let snapshot = cache
+            .get(self.host, &target.id, self.scope, self.cancel)
+            .await?;
+        if !snapshot.entries.values().any(|node| {
+            node.kind == NodeKind::File
+                && crate::nfo::is_actor_image(&node.name, &plan.base)
+                && !item
+                    .actors
+                    .iter()
+                    .any(|actor| actor.data.thumb == node.name)
+        }) {
+            return Ok(());
+        }
+        let expected =
+            confirmed_content(nfo_step).ok_or(Error::Protocol("头像清理没有已确认的 NFO 文件"))?;
+        let current_nfo = snapshot
+            .entries
+            .get(&expected.id)
+            .filter(|node| {
+                node.name == nfo_step.name
+                    && node.content_version.as_ref() == Some(&expected.content_version)
+            })
+            .ok_or_else(|| {
+                Error::api(
+                    error_code::NODE_CHANGED,
+                    "已确认的 NFO 在头像清理前已改变，保留旧头像",
+                )
+            })?;
+        let cleanup = planner::actor_cleanup(self.host, &snapshot, &plan.base, self.cancel).await?;
+        for (index, batch) in cleanup
+            .files
+            .chunks(tgdrive_contract::http::MAX_MUTATION_OPERATIONS as usize)
+            .enumerate()
+        {
+            let root = crate::scan::root_guard(self.host, run, self.cancel).await?;
+            let current = cache
+                .get(self.host, &target.id, self.scope, self.cancel)
+                .await?;
+            if current
+                .entries
+                .values()
+                .filter(|node| node.kind == NodeKind::File && extension(&node.name) == "nfo")
+                .count()
+                != cleanup.nfos.len()
+                || cleanup.nfos.iter().any(|old| {
+                    !current.entries.get(&old.id).is_some_and(|node| {
+                        node.revision == old.revision && node.content_version == old.content_version
+                    })
+                })
+            {
+                return Err(Error::api(
+                    error_code::CHILDREN_CHANGED,
+                    "清理期间 NFO 资料已改变，保留剩余旧头像",
+                ));
+            }
+            let mut files = Vec::new();
+            for old in batch {
+                let Some(node) = current.entries.get(&old.id) else {
+                    continue;
+                };
+                if node.revision != old.revision {
+                    return Err(Error::api(
+                        error_code::NODE_CHANGED,
+                        "待清理头像已改变，未继续回收",
+                    ));
+                }
+                files.push(node.clone());
+            }
+            if files.is_empty() {
+                continue;
+            }
+            if self.cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            // 直属集合修订包含 NFO 的内容版本变化；读完引用后的新增或改写会阻止整批回收。
+            let request = FileMutationRequest {
+                scope_revision: self.scope.into(),
+                assertions: vec![
+                    planner::children_assertion(&current.directory)?,
+                    planner::node_assertion(&root),
+                    planner::node_assertion(current_nfo),
+                ],
+                operations: files
+                    .iter()
+                    .enumerate()
+                    .map(|(i, file)| FileOperation::Trash {
+                        operation_id: format!("actor_{i}"),
+                        node: planner::condition(file),
+                    })
+                    .collect(),
+            };
+            let mut step = self.step(
+                item,
+                "actor_cleanup",
+                &format!("旧演员头像（第 {} 批）", index + 1),
+            );
+            step.target_id = Some(target.id.clone());
+            step.before = files;
+            let receipt = self.mutation(&mut step, &random_id(), request).await?;
+            step.receipt = Some(receipt);
+            step.state = "done".into();
+            step.message = format!("已将 {} 张不再引用的演员头像移入回收站", step.before.len());
+            self.db.save_step(&step)?;
+        }
+        Ok(())
+    }
+
     async fn mutation(
         &self,
         step: &mut Step,
@@ -478,7 +596,7 @@ impl Writer<'_> {
                 Err(error) => return Err(error),
             }
         }
-        if step.role != "organize" {
+        if !matches!(step.role.as_str(), "organize" | "actor_cleanup") {
             let current = match (&step.create_request, &step.target_id) {
                 (
                     Some(CreateUploadRequest {

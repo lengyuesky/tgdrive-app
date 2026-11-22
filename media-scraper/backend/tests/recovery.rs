@@ -438,7 +438,7 @@ async fn scope_revocation_before_move_stops_all_later_steps() {
     app.shutdown().await;
 }
 #[tokio::test]
-async fn actor_images_are_committed_before_nfo_references_and_rescrape_keeps_old_portraits() {
+async fn actor_images_are_committed_before_nfo_references_and_rescrape_reclaims_old_portraits() {
     let fake = Fake::new(|uri| standard(uri, &["演员甲"])).await;
     let (app, host) = configured(vec![root(), video("3", "ABC-123.mp4")], &fake).await;
     let first = run(&app, None).await;
@@ -461,7 +461,20 @@ async fn actor_images_are_committed_before_nfo_references_and_rescrape_keeps_old
         .thumb
         .clone();
     assert_ne!(old, new);
-    assert_eq!(content(&host, &format!("/影片/ABC-123/{old}")).await, image);
+    assert_eq!(content(&host, &format!("/影片/ABC-123/{new}")).await, image);
+    let xml = String::from_utf8(content(&host, "/影片/ABC-123/ABC-123.nfo").await).unwrap();
+    assert!(xml.contains(&new));
+    assert!(!xml.contains(&old));
+    assert_eq!(
+        host.stat(NodeReference::Path {
+            path: format!("/影片/ABC-123/{old}"),
+            content_version: None,
+        })
+        .await
+        .unwrap_err()
+        .code(),
+        "not_found"
+    );
     app.shutdown().await;
 }
 #[tokio::test]

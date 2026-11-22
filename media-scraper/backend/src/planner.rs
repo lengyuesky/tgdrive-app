@@ -448,6 +448,76 @@ async fn read_existing(
     }
     Ok(bytes.to_vec())
 }
+
+pub(crate) struct ActorCleanup {
+    pub files: Vec<FileNode>,
+    pub nfos: Vec<FileNode>,
+}
+
+pub(crate) async fn actor_cleanup(
+    host: &dyn HostClient,
+    snapshot: &DirectorySnapshot,
+    base: &str,
+    cancel: &CancellationToken,
+) -> Result<ActorCleanup> {
+    let nfos: Vec<_> = snapshot
+        .entries
+        .values()
+        .filter(|node| node.kind == NodeKind::File && extension(&node.name) == "nfo")
+        .cloned()
+        .collect();
+    if nfos
+        .iter()
+        .fold(0u64, |total, node| total.saturating_add(node.size.0))
+        > DIRECTORY_BYTES as u64
+    {
+        return Err(Error::api(
+            error_code::QUOTA_EXCEEDED,
+            "同目录 NFO 引用核对超过 32 MiB 预算，未清理旧头像",
+        ));
+    }
+    let read = async {
+        let mut references = HashSet::new();
+        for file in &nfos {
+            let bytes = read_existing(host, file, nfo::MAX_BYTES, cancel).await?;
+            let referenced = std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|xml| nfo::actor_image_references(xml, base))
+                .ok_or_else(|| {
+                    Error::api(
+                        error_code::INVALID_OPERATION,
+                        "同目录 NFO 无法解析，未猜测引用或清理旧头像",
+                    )
+                })?;
+            references.extend(referenced);
+        }
+        Ok(ActorCleanup {
+            files: snapshot
+                .entries
+                .values()
+                .filter(|node| {
+                    node.kind == NodeKind::File
+                        && nfo::is_actor_image(&node.name, base)
+                        && !references.contains(&node.name.to_ascii_lowercase())
+                })
+                .cloned()
+                .collect(),
+            nfos,
+        })
+    };
+    cancellable(cancel, async {
+        tokio::time::timeout(Duration::from_secs(40), read)
+            .await
+            .map_err(|_| {
+                Error::api(
+                    error_code::INVALID_OPERATION,
+                    "同目录 NFO 引用核对超时，未清理旧头像",
+                )
+            })?
+    })
+    .await
+}
+
 pub async fn build(
     host: &dyn HostClient,
     cache: &mut DirectoryCache,

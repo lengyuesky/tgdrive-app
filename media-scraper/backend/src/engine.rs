@@ -354,8 +354,8 @@ async fn process_item(
         )
         .await?;
     }
-    if plan.nfo.action == "keep" {
-        writer.keep(item, "nfo", &plan.nfo)?;
+    let nfo_step = if plan.nfo.action == "keep" {
+        writer.keep(item, "nfo", &plan.nfo)?
     } else {
         let movie = movie
             .as_ref()
@@ -429,8 +429,11 @@ async fn process_item(
         let root = root_guard(host, run, cancel).await?;
         writer
             .upload(item, &root, &plan, cache, "nfo", &plan.nfo, nfo)
-            .await?;
-    }
+            .await?
+    };
+    writer
+        .cleanup_actors(item, run, &plan, cache, &nfo_step)
+        .await?;
     if cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }

@@ -1,7 +1,7 @@
 //! NFO 生成保留已验收的业务字段；现有资料只做有界、安全的归属读取。
 use crate::model::{Actor, Movie, normalized_number, valid_number};
 use sha2::{Digest, Sha256};
-use std::fmt::Write;
+use std::{collections::HashSet, fmt::Write};
 use tgdrive_backend_sdk::{Error, Result};
 use tgdrive_contract::error_code;
 
@@ -222,6 +222,26 @@ pub fn is_actor_image(name: &str, base: &str) -> bool {
         })
 }
 
+/// 按文件名保守保留所有头像引用，包括其它影片的 NFO、相对路径和目录共用资料。
+pub fn actor_image_references(xml: &str, base: &str) -> Option<HashSet<String>> {
+    let doc = document(xml)?;
+    Some(
+        doc.descendants()
+            .filter(|node| node.has_tag_name("thumb"))
+            .filter_map(|node| node.text())
+            .filter_map(|value| {
+                let name = value
+                    .trim()
+                    .split(['?', '#'])
+                    .next()?
+                    .rsplit(['/', '\\'])
+                    .next()?;
+                is_actor_image(name, base).then(|| name.to_ascii_lowercase())
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,5 +415,21 @@ mod tests {
         assert!(is_actor_image(&name, "abc-123-4k"));
         assert!(!is_actor_image(&name, "ABC-123"));
         assert_ne!(name, actor_image_name("ABC-123-4K", "new-operation", 0));
+    }
+
+    #[test]
+    fn actor_references_preserve_paths_case_and_decoded_xml_text() {
+        let name = actor_image_name("ABC-123", "旧头像", 0);
+        let other = actor_image_name("DEF-456", "其他视频", 0);
+        let encoded = name.replacen('t', "&#116;", 1);
+        let xml = format!(
+            "<movie><actor><thumb>./{}</thumb></actor><thumb>images\\{name}?v=1</thumb><actor><thumb>../{encoded}</thumb></actor><thumb>{other}</thumb></movie>",
+            name.to_ascii_uppercase()
+        );
+        assert_eq!(
+            actor_image_references(&xml, "ABC-123").unwrap(),
+            HashSet::from([name])
+        );
+        assert!(actor_image_references("<movie><actor>", "ABC-123").is_none());
     }
 }

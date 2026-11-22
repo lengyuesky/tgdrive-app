@@ -64,5 +64,5 @@ export const stateName = (state: string): string => ({
   creating: '准备上传', uploading: '上传中', ready: '待提交', committing: '提交中', unknown: '待核实',
   matched: '已补充', unmatched: '未匹配', timeout: '查询超时', no_image: '来源无头像',
 } as Record<string, string>)[state] ?? `未知状态（${state}）`
-export const roleName = (role: string): string => ({ organize: '整理', nfo: 'NFO', poster: '海报', search: '搜索', detail: '详情' } as Record<string, string>)[role] ?? (role.startsWith('actor_') ? `演员头像 ${Number(role.slice(6)) + 1}` : role)
+export const roleName = (role: string): string => ({ organize: '整理', nfo: 'NFO', poster: '海报', actor_cleanup: '旧头像清理', search: '搜索', detail: '详情' } as Record<string, string>)[role] ?? (role.startsWith('actor_') ? `演员头像 ${Number(role.slice(6)) + 1}` : role)
 export const verificationNote = '失败计数包含待核实项；待核实不代表写入失败。重试会先核对回执和当前文件，再补齐缺失资料；本轮仍无终态证据时保持待核实，请在应用中心重启后端后再试。'
