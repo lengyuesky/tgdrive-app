@@ -193,14 +193,7 @@ TypeScript 生成类型表示 Rust 序列化后的规范化对象。请求中写
   "backend": {
     "entry": "backend/app",
     "run_mode": "resident",
-    "external_service": true,
-    "resources": {
-      "memory_bytes": "536870912",
-      "cache_bytes": "1073741824",
-      "database_bytes": "536870912",
-      "cpu_millis": 1000,
-      "pids": 64
-    }
+    "external_service": true
   }
 }
 ```
@@ -214,13 +207,12 @@ TypeScript 生成类型表示 Rust 序列化后的规范化对象。请求中写
 | `files.read` / `files.write` | 缺省 false；write=true 必须 read=true。声明不是目录授权；未声明 write 永远拿不到读写 |
 | `page` | 可选；entry 必须在 `page/` 下且以 `.html` 结束 |
 | `backend` | 可选；entry 固定 `backend/app`，run_mode 必需为 `resident` 或 `on_demand`；external_service 缺省 false |
-| `backend.resources` | 可省略；请求资源不是自行授予，安装预览展示，宿主实际限额以启动上下文为准 |
 | `icon` | 可选的 `assets/` 或 `page/` 下 SVG、PNG、WebP，不超过 256 KiB，以图像方式显示，不执行 SVG 脚本 |
 | `required_capabilities` | 最多 64 个互不重复的通用名称；未知必需能力只使该版本不可安装 |
 | `open_with` | 可省略；extensions 为 0～64 个互不重复的小写后缀，directories 缺省 false；声明入口必须 read=true |
 | 其他字段 | 可选扩展，保留但无权限效力；不得与已定义字段重名 |
 
-资源请求的可校验区间：内存 32 MiB～8 GiB，缓存 16 MiB～16 GiB，数据库 16 MiB～8 GiB，CPU 100～32000 毫秒/秒，进程数 16～512。宿主可以用主人配置的更小上限拒绝安装；不能声称满足请求却静默给更大权限。默认值见第 14 节。
+应用不在清单里声明或请求资源。内存与 CPU 只有一组由主人在宿主设置里填写的总体限制，全部应用后端合计共用，不按应用分配；进程数、打开文件数、数据库与缓存容量是宿主对每个应用统一使用的固定值，见第 14 节。旧包清单里的 `backend.resources` 按普通扩展字段保留，没有任何效力。
 
 不提供宿主专用设置表、内容格式列表、内置爬取源、固定应用 ID 特权或应用专用迁移回调。配置、业务状态、SQLite/KV 的应用自身 schema 迁移都由应用实现。
 
@@ -736,7 +728,7 @@ run/host.sock 的目录由 root 管理、组访问绑定唯一应用 UID/GID；�
 
 启动后端必须满足的硬要求只有：每应用独立 UID/GID、文件权限隔离、专用套接字身份、清空宿主环境、按应用进程组回收全部子进程。无法满足这些要求时返回 capability_unavailable/backend_unavailable，不能假装隔离。
 
-资源限制**尽力而为**：内存/CPU 在 cgroup v2 的相应控制器可写且实际设置成功时应用；cgroup 只读、不可用或设置失败时仍照常启动。PID 数用 RLIMIT_NPROC（独立 UID 使计数按应用生效），fd 用 RLIMIT_NOFILE，禁用 core dump。配置目标与实际强制分开：RuntimeInfo.limits.backend 和 BackendStartContext.limits 都必须带 `enforced={memory,cpu,pids,open_files}`，四项布尔值只在该轮实际强制成功时为 true；失败记录告警并为 false，不把配置值冒充硬上限。
+资源限制**尽力而为**：内存/CPU 是宿主设置里的总体限制，设置在全部应用后端共同所在的 cgroup 上，各后端合计不超过它，0 表示不限制；主人修改后对运行中的后端立即生效。设了内存上限时同时禁止这些后端使用交换空间，合计超出时内核在这些后端里终止占用最多的进程。它在 cgroup v2 的相应控制器可写且实际设置成功时应用；cgroup 只读、不可用或设置失败时仍照常启动。PID 数用 RLIMIT_NPROC（独立 UID 使计数按应用生效），fd 用 RLIMIT_NOFILE，禁用 core dump。配置目标与实际强制分开：RuntimeInfo.limits.backend 和 BackendStartContext.limits 都必须带 `enforced={memory,cpu,pids,open_files}`，四项布尔值只在该轮实际强制成功时为 true，设为不限制的项为 false；失败记录告警并为 false，不把配置值冒充硬上限。
 
 磁盘只有**监督式计量**：KV/API 缓存写入由宿主同步计量，cache/work、state、tmp 的后端文件写入由宿主监督统计，发现超限停止后端、阻止再启动直至主人清理/调整。数据库按 database_bytes 计量，cache/work/objects 与 tmp 合计按 cache_bytes 计量。监督可能短暂超额，**不是实时硬隔离保证**，不能静默删除 SQLite 业务数据；应用必须主动限制缓存和临时输出。
 
@@ -898,7 +890,7 @@ data: {"cursor":"events-2","occurred_at":2,"event":"files.changed","data":{"chan
 | 清单与名称 | 名称120/描述1600/作者160字节、版本80字节、能力名称80字节/必需列表64项、后缀40字节、MIME256字节、资源/路径/节点名沿用相应上限 |
 | 分发 | 仓库owner39/name100字节、架构目标名48字节/最多16目标、SHA256固定64位、包/图标/目录文件和条目限额沿用对应常量 |
 | 操作与默认 | operation_id64字节、幂等键16～128字节、Unix套接字路径107字节、文件/KV/随机默认200/100/20项、正数参数最小1 |
-| 资源与事件 | 清单内存/缓存/数据库及CPU/PID的min/max资源请求均导出；缓存淘汰目标90%、文件提示去抖250ms/最长1000ms亦统一导出 |
+| 资源与事件 | 后端数据库/缓存/PID/fd 的每应用固定值均导出；缓存淘汰目标90%、文件提示去抖250ms/最长1000ms亦统一导出 |
 
 **响应预算核算与选择**：FileNode 的名字/路径禁止控制字符，UTF-8 JSON 仅引号等至多约2倍转义，不按每字节6倍或再次字符串化 JSON value 估算。按路径4096、名字255、修订/内容标识128、数值和字段名，单个 FileNode 保守上界10 KiB；未按字节截页时500节点加游标约5 MiB。KV单值的32 KiB已是序列化 JSON，放进 record.value 不再二次转义，200条连同键/修订约6.4 MiB。子树失效变更还包含旧路径，500项可接近10 MiB。这些大整页不适合把通用SDK预算放大到约14 MiB，因此选择512 KiB数组字节截页，而不是降低所有小记录的条数上限。
 
@@ -923,7 +915,8 @@ data: {"cursor":"events-2","occurred_at":2,"event":"files.changed","data":{"chan
 | KV | 10 万条、64 MiB、单值 32 KiB、键 128 字节、页最多 200 |
 | 页面缓存 / 后端缓存（含 tmp） | 256 MiB / 1 GiB，单 API 对象 2 MiB、metadata 4096 字节、lookup 最多 64 键 |
 | 缓存元信息响应头 | CacheEntry 完整 JSON 5120 字节，base64url 无 padding 头值最多 6827 字节；与请求 CachePutMetadata 分开解释 |
-| 后端 SQLite / 内存 / CPU / PID / fd | 默认 512 MiB / 512 MiB / 1000 毫秒每秒 / 64 / 1024；磁盘监督，内存/CPU 可写 cgroup 时强制，PID/fd 用 rlimit，四项状态见 enforced |
+| 后端 SQLite / 缓存 / PID / fd | 每应用固定 512 MiB / 1 GiB / 64 / 1024，应用不能声明；磁盘监督，PID/fd 用 rlimit |
+| 后端内存 / CPU | 宿主设置里的总体限制，全部应用后端合计共用，默认 2 GiB / 不限制，0 为不限制；可写 cgroup 时强制，状态见 enforced |
 | 就绪 / 停止 / 按需空闲 | 30 / 10 / 300 秒 |
 | 重启 | 10 分钟最多 5 次，退避 1/2/4/8/16 秒 |
 | UI 等待 / 关闭保存 / 待请求 | 300 秒 / 2000 ms / 32 项 |
@@ -956,6 +949,8 @@ data: {"cursor":"events-2","occurred_at":2,"event":"files.changed","data":{"chan
 | POST `/admin/api/app-center/v1/apps/{app_id}/backend/restart` | 无正文 | 200 BackendStatus | not_found/caller_not_allowed（无后端）/backend_unavailable；清崩溃计数，换 run_id |
 | POST `/admin/api/app-center/v1/apps/{app_id}/launch` | LaunchPageRequest={open_node_id?} | 200 LaunchPageResponse={frame_url,bootstrap} | 没页面则 caller_not_allowed；若 open 未授权先主人授权，取消不得泄露节点详情 |
 | GET `/admin/api/app-center/v1/root-app` | 无 | 200 RootAppSelection={app_id?,revision} | app_id=null 表示无选择 |
+| GET `/admin/api/app-center/v1/resource-limits` | 无 | 200 AppResourceLimits={memory_bytes,cpu_millis,memory_enforced,cpu_enforced} | 全部应用后端合计共用的唯一一组限制；0 表示不限制，enforced 只在实际写入 cgroup 时为 true |
+| PUT `/admin/api/app-center/v1/resource-limits` | AppResourceLimitsUpdateRequest={memory_bytes,cpu_millis} | 200 AppResourceLimits | invalid_request（非 0 时内存须在 64 MiB～1 TiB、CPU 须在 100～256000 毫秒/秒）；保存后对运行中的后端立即生效，不重启应用 |
 | PUT `/admin/api/app-center/v1/root-app` | RootAppUpdateRequest={expected_revision,app_id?}；null 清除 | 200 RootAppSelection | app_changed/caller_not_allowed（未声明对外服务或停用）；只选一个，不写应用协议 |
 
 InstalledApp 包含 manifest、generation、state_revision、enabled/pinned、ScopeInfo、实际 target/摘要/大小、可选 BackendStatus、安装/更新时间。更新只接受同 ID 更高稳定版本（同版本同内容可返回已安装，不能改内容），已确认的旧 state_revision 不匹配则重新预览。切换包、generation、写权限降级和撤销旧运行必须原子协调；失败不留下半个新安装。

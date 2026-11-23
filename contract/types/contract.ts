@@ -19,6 +19,26 @@ export type AppChangedEvent = { generation: string, enabled: boolean, };
 
 export type AppIdentity = { id: string, name: string, version: string, generation: string, };
 
+/**
+ * 宿主设置里唯一一组应用资源限制：全部应用后端合计共用，不按应用分配。
+ */
+
+export type AppResourceLimits = {
+/**
+ * 全部应用后端合计的内存上限；0 表示不限制。
+ */
+memory_bytes: ByteCount,
+/**
+ * 全部应用后端合计每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU，0 表示不限制。
+ */
+cpu_millis: number,
+/**
+ * 该项上限当前是否已实际写入 cgroup；不限制或没有可写 cgroup 时为 false。
+ */
+memory_enforced: boolean, cpu_enforced: boolean, };
+
+export type AppResourceLimitsUpdateRequest = { memory_bytes: ByteCount, cpu_millis: number, };
+
 export type AppStatePatch = { expected_state_revision: string, enabled?: boolean | null, pinned?: boolean | null, };
 
 export type AuthorizedRoot = { directory_id: string, access: AccessLevel,
@@ -37,13 +57,17 @@ export type BackendKeepaliveRequest = { ttl_seconds: number, };
 
 export type BackendLimitEnforcement = { memory: boolean, cpu: boolean, pids: boolean, open_files: boolean, };
 
-export type BackendManifest = { entry: string, run_mode: RunMode, external_service: boolean, resources: ResourceRequest, } & ({ [key in string]?: number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null });
+export type BackendManifest = { entry: string, run_mode: RunMode, external_service: boolean, } & ({ [key in string]?: number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null });
 
 export type BackendReadyResponse = { contract: ContractVersion, app_id: string, version: string, generation: string, run_id: string, };
 
-export type BackendResourceLimits = { memory_bytes: ByteCount,
+export type BackendResourceLimits = {
 /**
- * 每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU。
+ * 宿主设置里全部应用后端合计的内存上限，不是本应用独占的份额；0 表示不限制。
+ */
+memory_bytes: ByteCount,
+/**
+ * 全部应用后端合计每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU，0 表示不限制。
  */
 cpu_millis: number, pids: number, open_files: number, cache_bytes: ByteCount, database_bytes: ByteCount, enforced: BackendLimitEnforcement, };
 
@@ -420,8 +444,6 @@ export type RawCatalogEntry = { manifest: JsonValue, packages: { [key in string]
 
 export type ReadLease = { id: string, expires_at: Timestamp, };
 
-export type ResourceRequest = { memory_bytes?: ByteCount | null, cache_bytes?: ByteCount | null, database_bytes?: ByteCount | null, cpu_millis?: number | null, pids?: number | null, } & ({ [key in string]?: number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null });
-
 export type RootAppSelection = { app_id: string | null, revision: string, };
 
 export type RootAppUpdateRequest = { expected_revision: string, app_id: string | null, };
@@ -704,9 +726,7 @@ export const LIMITS = {
   "CATALOG_TIMEOUT_SECONDS": 10,
   "CONTROL_TIMEOUT_SECONDS": 30,
   "DEFAULT_BACKEND_CACHE_BYTES": 1073741824,
-  "DEFAULT_BACKEND_CPU_MILLIS": 1000,
   "DEFAULT_BACKEND_DATABASE_BYTES": 536870912,
-  "DEFAULT_BACKEND_MEMORY_BYTES": 536870912,
   "DEFAULT_BACKEND_OPEN_FILES": 1024,
   "DEFAULT_BACKEND_PIDS": 64,
   "DEFAULT_FILE_PAGE_LIMIT": 200,
@@ -719,6 +739,8 @@ export const LIMITS = {
   "DEFAULT_MEDIA_TICKET_SECONDS": 900,
   "DEFAULT_PAGE_CACHE_BYTES": 268435456,
   "DEFAULT_RANDOM_LIMIT": 20,
+  "DEFAULT_SHARED_BACKEND_CPU_MILLIS": 0,
+  "DEFAULT_SHARED_BACKEND_MEMORY_BYTES": 2147483648,
   "FILE_CHANGE_RETENTION_SECONDS": 604800,
   "FILE_EVENT_DEBOUNCE_MILLIS": 250,
   "IMMERSIVE_COLOR_BYTES": 7,
@@ -726,11 +748,6 @@ export const LIMITS = {
   "INSTALL_PREVIEW_SECONDS": 600,
   "MAX_APP_ID_BYTES": 64,
   "MAX_AUTHORIZATION_REASON_BYTES": 800,
-  "MAX_BACKEND_CACHE_BYTES": 17179869184,
-  "MAX_BACKEND_CPU_MILLIS": 32000,
-  "MAX_BACKEND_DATABASE_BYTES": 8589934592,
-  "MAX_BACKEND_MEMORY_BYTES": 8589934592,
-  "MAX_BACKEND_PIDS": 512,
   "MAX_BACKEND_RESTARTS": 5,
   "MAX_BYTE_COUNT": "18446744073709551615",
   "MAX_BYTE_COUNT_DIGITS": 20,
@@ -799,6 +816,8 @@ export const LIMITS = {
   "MAX_REPOSITORY_OWNER_BYTES": 39,
   "MAX_REQUIRED_CAPABILITIES": 64,
   "MAX_RESOURCE_PATH_BYTES": 240,
+  "MAX_SHARED_BACKEND_CPU_MILLIS": 256000,
+  "MAX_SHARED_BACKEND_MEMORY_BYTES": 1099511627776,
   "MAX_STREAM_DIRECTIVE_BYTES": 4096,
   "MAX_TASK_ID_BYTES": 64,
   "MAX_TASK_PROGRESS": 4294967295,
@@ -810,14 +829,11 @@ export const LIMITS = {
   "MAX_UPLOADS": 4,
   "MAX_URI_BYTES": 8192,
   "MAX_VERSION_BYTES": 80,
-  "MIN_BACKEND_CACHE_BYTES": 16777216,
-  "MIN_BACKEND_CPU_MILLIS": 100,
-  "MIN_BACKEND_DATABASE_BYTES": 16777216,
-  "MIN_BACKEND_MEMORY_BYTES": 33554432,
-  "MIN_BACKEND_PIDS": 16,
   "MIN_IDEMPOTENCY_KEY_BYTES": 16,
   "MIN_JSON_PAGE_BYTES": 65536,
   "MIN_POSITIVE_LIMIT": 1,
+  "MIN_SHARED_BACKEND_CPU_MILLIS": 100,
+  "MIN_SHARED_BACKEND_MEMORY_BYTES": 67108864,
   "MUTATION_RECEIPT_SECONDS": 604800,
   "PACKAGE_DOWNLOAD_SECONDS": 120,
   "PACKAGE_STAGING_SECONDS": 3600,
@@ -1428,6 +1444,26 @@ export const ENDPOINTS = [
       "PUT"
     ],
     "path": "/admin/api/app-center/v1/root-app",
+    "access": "owner_only",
+    "capability": null,
+    "backend_socket": false
+  },
+  {
+    "name": "center.limits.read",
+    "methods": [
+      "GET"
+    ],
+    "path": "/admin/api/app-center/v1/resource-limits",
+    "access": "owner_only",
+    "capability": null,
+    "backend_socket": false
+  },
+  {
+    "name": "center.limits.update",
+    "methods": [
+      "PUT"
+    ],
+    "path": "/admin/api/app-center/v1/resource-limits",
     "access": "owner_only",
     "capability": null,
     "backend_socket": false

@@ -515,8 +515,8 @@ impl State {
     }
     pub fn limits(&self, caller: RuntimeCaller) -> RuntimeLimits {
         let backend = self.config.has_backend.then_some(BackendResourceLimits {
-            memory_bytes: ByteCount(DEFAULT_BACKEND_MEMORY_BYTES),
-            cpu_millis: DEFAULT_BACKEND_CPU_MILLIS as u32,
+            memory_bytes: ByteCount(0),
+            cpu_millis: 0,
             pids: DEFAULT_BACKEND_PIDS as u16,
             open_files: DEFAULT_BACKEND_OPEN_FILES as u32,
             cache_bytes: ByteCount(DEFAULT_BACKEND_CACHE_BYTES),

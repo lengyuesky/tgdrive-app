@@ -34,23 +34,6 @@ pub enum RunMode {
     OnDemand,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "types", derive(ts_rs::TS))]
-pub struct ResourceRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory_bytes: Option<ByteCount>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_bytes: Option<ByteCount>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub database_bytes: Option<ByteCount>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu_millis: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pids: Option<u16>,
-    #[serde(flatten)]
-    pub extra: Extensions,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "types", derive(ts_rs::TS))]
 pub struct BackendManifest {
@@ -58,8 +41,6 @@ pub struct BackendManifest {
     pub run_mode: RunMode,
     #[serde(default)]
     pub external_service: bool,
-    #[serde(default)]
-    pub resources: ResourceRequest,
     #[serde(flatten)]
     pub extra: Extensions,
 }

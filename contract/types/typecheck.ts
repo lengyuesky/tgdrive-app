@@ -15,7 +15,7 @@ export const manifest: Manifest = {
   id: 'example-app', name: '示例应用', version: '1.0.0', contract: CONTRACT_VERSION,
   description: '类型符合性示例', author: '开发者',
   files: { read: true, write: true }, page: { entry: 'page/index.html' },
-  backend: { entry: 'backend/app', run_mode: 'resident', external_service: true, resources: {} },
+  backend: { entry: 'backend/app', run_mode: 'resident', external_service: true },
   required_capabilities: ['files.query'], open_with: { extensions: [], directories: false },
   future_optional_badge: { enabled: true },
 }

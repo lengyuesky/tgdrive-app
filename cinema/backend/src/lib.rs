@@ -63,7 +63,7 @@ impl Application {
             index_lock: Mutex::new(()),
             read_sync: Mutex::new(None),
             cover_wake: Notify::new(),
-            probe_slots: Arc::new(Semaphore::new(2)),
+            probe_slots: Arc::new(Semaphore::new(media::PROBE_CONCURRENCY)),
             pending_probes: std::sync::Mutex::default(),
             probe_jobs: std::sync::Mutex::default(),
             login_slots: Arc::new(Semaphore::new(2)),

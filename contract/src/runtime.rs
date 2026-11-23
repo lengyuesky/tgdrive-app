@@ -56,8 +56,9 @@ pub struct BackendLimitEnforcement {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "types", derive(ts_rs::TS))]
 pub struct BackendResourceLimits {
+    /// 宿主设置里全部应用后端合计的内存上限，不是本应用独占的份额；0 表示不限制。
     pub memory_bytes: ByteCount,
-    /// 每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU。
+    /// 全部应用后端合计每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU，0 表示不限制。
     pub cpu_millis: u32,
     pub pids: u16,
     pub open_files: u32,
@@ -268,6 +269,26 @@ pub struct InstalledApp {
 pub struct RootAppSelection {
     pub app_id: Option<String>,
     pub revision: Revision,
+}
+
+/// 宿主设置里唯一一组应用资源限制：全部应用后端合计共用，不按应用分配。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "types", derive(ts_rs::TS))]
+pub struct AppResourceLimits {
+    /// 全部应用后端合计的内存上限；0 表示不限制。
+    pub memory_bytes: ByteCount,
+    /// 全部应用后端合计每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU，0 表示不限制。
+    pub cpu_millis: u32,
+    /// 该项上限当前是否已实际写入 cgroup；不限制或没有可写 cgroup 时为 false。
+    pub memory_enforced: bool,
+    pub cpu_enforced: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "types", derive(ts_rs::TS))]
+pub struct AppResourceLimitsUpdateRequest {
+    pub memory_bytes: ByteCount,
+    pub cpu_millis: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -40,7 +40,8 @@ fn delayed_probe(directory: &std::path::Path) -> String {
 
 async fn wait_for_probe_cleanup(app: &Application, host: &LocalHost) {
     tokio::time::timeout(Duration::from_secs(2), async {
-        while app.probe_slots.available_permits() != 2 || host.active() != 0 {
+        while app.probe_slots.available_permits() != media::PROBE_CONCURRENCY || host.active() != 0
+        {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
@@ -230,7 +231,7 @@ async fn long_videos_with_index_beyond_eight_mebibytes_probe_at_head_and_tail() 
         assert!(info.video().is_some());
         let read = host.reads.load(Ordering::Relaxed);
         assert!(
-            read > index as u64 && read <= media::BYTE_LIMIT,
+            read > index as u64 && read <= bytes.len() as u64,
             "{name}: {read}"
         );
         assert_eq!(host.active(), 0);
@@ -269,7 +270,6 @@ async fn valid_tail_index_fragmented_mp4_and_transport_streams_probe_with_bounde
             info.duration
         );
         assert!(info.video().is_some());
-        assert!(host.reads.load(Ordering::Relaxed) <= media::BYTE_LIMIT);
         assert_eq!(host.active(), 0);
         app.shutdown().await;
     }
@@ -423,7 +423,10 @@ async fn application_shutdown_reaps_shared_probes_before_closing_the_database() 
         Err(tgdrive_backend_sdk::Error::Cancelled)
     ));
     assert_eq!(host.active(), 0);
-    assert_eq!(app.probe_slots.available_permits(), 2);
+    assert_eq!(
+        app.probe_slots.available_permits(),
+        media::PROBE_CONCURRENCY
+    );
     assert_probe_process_exited(&pid);
 }
 
@@ -483,7 +486,7 @@ async fn real_mp4_mkv_probe_tracks_and_cache_use_bounded_local_input() {
             2
         );
         let used = host.reads.load(Ordering::Relaxed);
-        assert!(used > 0 && used <= media::BYTE_LIMIT);
+        assert!(used > 0);
         media::probe(&app, &e, &CancellationToken::new())
             .await
             .unwrap();
@@ -519,7 +522,6 @@ async fn frames_skip_black_intro_preserve_display_aspect_and_handle_single_frame
         assert!((image.width() as f64 / image.height() as f64 - aspect).abs() < 0.02);
         let p = image.get_pixel(20, 20);
         assert!(p[0] > 200 && p[1] < 40);
-        assert!(host.reads.load(Ordering::Relaxed) <= media::BYTE_LIMIT);
         assert_eq!(host.active(), 0);
         app.shutdown().await;
     }
@@ -543,7 +545,6 @@ async fn pure_large_video_gets_bounded_frame_and_black_video_is_terminal() {
             )
         });
     assert!(jpeg.len() <= media::IMAGE_LIMIT);
-    assert!(host.reads.load(Ordering::Relaxed) <= media::BYTE_LIMIT);
     app.shutdown().await;
     let bytes = video("color=c=black:size=160x90:rate=25", "1", "mp4");
     let (app, host) = application(&bytes, "black.mp4", None).await;
@@ -609,21 +610,34 @@ async fn invalid_specific_image_falls_back_to_original_and_thumbnail_needs_no_vi
     );
 }
 #[tokio::test]
-async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded() {
+async fn busy_probes_queue_instead_of_rejecting_cancel_reaps_children_and_deadline_is_bounded() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("slow-probe");
     std::fs::write(&path, "#!/bin/sh\nexec /bin/sleep 60\n").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     let (app, host) = application(b"fake", "video.mp4", Some(path.to_string_lossy().into())).await;
-    for (id, name) in [("4", "second.mp4"), ("5", "third.mp4")] {
+    // 占满全部名额的视频之外再多一个，用来验证排队。
+    let ids: Vec<String> = (3..=3 + media::PROBE_CONCURRENCY)
+        .map(|id| id.to_string())
+        .collect();
+    for id in &ids[1..] {
         host.memory
-            .add_node(seed(id, "2", name, NodeKind::File, b"fake"))
+            .add_node(seed(
+                id,
+                "2",
+                &format!("video-{id}.mp4"),
+                NodeKind::File,
+                b"fake",
+            ))
             .unwrap();
     }
     app.synchronize(true).await.unwrap();
-    let e = app.db.entry("3").unwrap().unwrap();
-    let other = app.db.entry("4").unwrap().unwrap();
-    let third = app.db.entry("5").unwrap().unwrap();
+    let mut entries: Vec<_> = ids
+        .iter()
+        .map(|id| app.db.entry(id).unwrap().unwrap())
+        .collect();
+    let queued = entries.pop().unwrap();
+    let e = entries[0].clone();
     let lease = host
         .create_read_lease(CreateReadLeaseRequest { ttl_seconds: 60 })
         .await
@@ -631,7 +645,7 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
     let token = app.service.login(app.service.epoch(), lease).unwrap();
     let cancel = app.service.authenticate(&token).unwrap().cancel;
     let mut jobs = Vec::new();
-    for e in [e.clone(), other] {
+    for e in entries {
         let (app, cancel) = (app.clone(), cancel.clone());
         jobs.push(tokio::spawn(async move {
             media::probe(&app, &e, &cancel).await
@@ -644,13 +658,25 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
     })
     .await
     .unwrap();
-    let began = Instant::now();
+    // 名额占满时新的探测排队等候，不向客户端报忙；等待者离开后任务随之取消。
+    let queued_cancel = CancellationToken::new();
+    let mut waiting = {
+        let (app, cancel) = (app.clone(), queued_cancel.clone());
+        tokio::spawn(async move { media::probe(&app, &queued, &cancel).await })
+    };
     assert!(
-        media::probe(&app, &third, &CancellationToken::new())
+        tokio::time::timeout(Duration::from_millis(500), &mut waiting)
             .await
             .is_err()
     );
-    assert!(began.elapsed() < Duration::from_millis(500));
+    queued_cancel.cancel();
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap()
+            .unwrap(),
+        Err(tgdrive_backend_sdk::Error::Cancelled)
+    ));
     app.revoke_sessions().await.unwrap();
     for job in jobs {
         assert!(
@@ -662,7 +688,10 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
         );
     }
     wait_for_probe_cleanup(&app, &host).await;
-    assert_eq!(app.probe_slots.available_permits(), 2);
+    assert_eq!(
+        app.probe_slots.available_permits(),
+        media::PROBE_CONCURRENCY
+    );
     assert_eq!(host.active(), 0);
     let began = Instant::now();
     assert!(

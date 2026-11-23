@@ -105,6 +105,8 @@ fn registry() -> Registry {
         AppStatePatch,
         ScopeUpdateRequest,
         RootAppUpdateRequest,
+        AppResourceLimits,
+        AppResourceLimitsUpdateRequest,
         LaunchPageRequest,
         LaunchPageResponse,
         HostEvent,

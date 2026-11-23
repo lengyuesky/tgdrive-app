@@ -473,65 +473,9 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<()> {
         }
         validate_extra(
             &backend.extra,
-            &["entry", "run_mode", "external_service", "resources"],
+            &["entry", "run_mode", "external_service"],
             "backend.extra",
         )?;
-        let resources = &backend.resources;
-        validate_extra(
-            &resources.extra,
-            &[
-                "memory_bytes",
-                "cache_bytes",
-                "database_bytes",
-                "cpu_millis",
-                "pids",
-            ],
-            "backend.resources.extra",
-        )?;
-        for (name, value, min, max) in [
-            (
-                "memory_bytes",
-                resources.memory_bytes,
-                MIN_BACKEND_MEMORY_BYTES,
-                MAX_BACKEND_MEMORY_BYTES,
-            ),
-            (
-                "cache_bytes",
-                resources.cache_bytes,
-                MIN_BACKEND_CACHE_BYTES,
-                MAX_BACKEND_CACHE_BYTES,
-            ),
-            (
-                "database_bytes",
-                resources.database_bytes,
-                MIN_BACKEND_DATABASE_BYTES,
-                MAX_BACKEND_DATABASE_BYTES,
-            ),
-        ] {
-            if value.is_some_and(|value| !(min..=max).contains(&value.0)) {
-                return Err(manifest_error(
-                    format!("backend.resources.{name}"),
-                    "资源请求超过允许区间",
-                ));
-            }
-        }
-        if resources.cpu_millis.is_some_and(|value| {
-            !(MIN_BACKEND_CPU_MILLIS..=MAX_BACKEND_CPU_MILLIS).contains(&u64::from(value))
-        }) {
-            return Err(manifest_error(
-                "backend.resources.cpu_millis",
-                "CPU 请求超过允许区间",
-            ));
-        }
-        if resources
-            .pids
-            .is_some_and(|value| !(MIN_BACKEND_PIDS..=MAX_BACKEND_PIDS).contains(&u64::from(value)))
-        {
-            return Err(manifest_error(
-                "backend.resources.pids",
-                "进程数请求超过允许区间",
-            ));
-        }
     }
     if let Some(icon) = &manifest.icon {
         if !valid_resource_path(icon)

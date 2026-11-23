@@ -115,16 +115,6 @@ limits! {
     DEFAULT_KV_PAGE_LIMIT => 100,
     DEFAULT_RANDOM_LIMIT => 20,
     MIN_POSITIVE_LIMIT => 1,
-    MIN_BACKEND_MEMORY_BYTES => 32 * 1024 * 1024,
-    MAX_BACKEND_MEMORY_BYTES => 8 * 1024 * 1024 * 1024,
-    MIN_BACKEND_CACHE_BYTES => 16 * 1024 * 1024,
-    MAX_BACKEND_CACHE_BYTES => 16 * 1024 * 1024 * 1024,
-    MIN_BACKEND_DATABASE_BYTES => 16 * 1024 * 1024,
-    MAX_BACKEND_DATABASE_BYTES => 8 * 1024 * 1024 * 1024,
-    MIN_BACKEND_CPU_MILLIS => 100,
-    MAX_BACKEND_CPU_MILLIS => 32_000,
-    MIN_BACKEND_PIDS => 16,
-    MAX_BACKEND_PIDS => 512,
     MAX_CATALOG_BYTES => 4 * 1024 * 1024,
     MAX_CATALOG_ENTRIES => 512,
     MAX_PACKAGE_BYTES => 128 * 1024 * 1024,
@@ -174,9 +164,13 @@ limits! {
     DEFAULT_PAGE_CACHE_BYTES => 256 * 1024 * 1024,
     DEFAULT_BACKEND_CACHE_BYTES => 1024 * 1024 * 1024,
     DEFAULT_BACKEND_DATABASE_BYTES => 512 * 1024 * 1024,
-    DEFAULT_BACKEND_MEMORY_BYTES => 512 * 1024 * 1024,
-    DEFAULT_BACKEND_CPU_MILLIS => 1000,
     DEFAULT_BACKEND_PIDS => 64,
+    DEFAULT_SHARED_BACKEND_MEMORY_BYTES => 2 * 1024 * 1024 * 1024,
+    DEFAULT_SHARED_BACKEND_CPU_MILLIS => 0,
+    MIN_SHARED_BACKEND_MEMORY_BYTES => 64 * 1024 * 1024,
+    MAX_SHARED_BACKEND_MEMORY_BYTES => 1024 * 1024 * 1024 * 1024,
+    MIN_SHARED_BACKEND_CPU_MILLIS => 100,
+    MAX_SHARED_BACKEND_CPU_MILLIS => 256_000,
     DEFAULT_BACKEND_OPEN_FILES => 1024,
     PAGE_CONTROL_CONCURRENCY => 16,
     BACKEND_CONTROL_CONCURRENCY => 32,
@@ -339,6 +333,8 @@ endpoints! {
     "center.app.launch", ["POST"], "/admin/api/app-center/v1/apps/{app_id}/launch", OwnerOnly, None;
     "center.root.read", ["GET"], "/admin/api/app-center/v1/root-app", OwnerOnly, None;
     "center.root.update", ["PUT"], "/admin/api/app-center/v1/root-app", OwnerOnly, None;
+    "center.limits.read", ["GET"], "/admin/api/app-center/v1/resource-limits", OwnerOnly, None;
+    "center.limits.update", ["PUT"], "/admin/api/app-center/v1/resource-limits", OwnerOnly, None;
 }
 
 #[cfg(test)]

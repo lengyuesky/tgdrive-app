@@ -20,7 +20,6 @@ fn backend_manifest() -> Manifest {
         entry: BACKEND_ENTRY.into(),
         run_mode: RunMode::Resident,
         external_service: true,
-        resources: ResourceRequest::default(),
         extra: Extensions::new(),
     });
     manifest
@@ -75,6 +74,22 @@ fn regular(path: &str, size: u64) -> ArchiveEntry {
         compression: ArchiveCompression::Deflate,
         encrypted: false,
     }
+}
+
+/// 已发布的旧包仍带资源请求：它只是普通扩展字段，原样保留，不影响安装也没有任何效力。
+#[test]
+fn legacy_backend_resource_request_is_an_inert_extension() {
+    let raw = r#"{
+        "id":"sample","name":"示例","version":"1.0.0","contract":{"major":1,"minor":0},
+        "description":"测试","author":"开发者","files":{"read":true,"write":false},
+        "backend":{"entry":"backend/app","run_mode":"resident","external_service":true,
+            "resources":{"memory_bytes":"536870912","cpu_millis":1000,"pids":64}}
+    }"#;
+    let manifest = parse_manifest(raw.as_bytes()).unwrap();
+    let backend = manifest.backend.as_ref().unwrap();
+    assert_eq!(backend.extra["resources"]["memory_bytes"], "536870912");
+    let roundtrip = parse_manifest(&serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert_eq!(roundtrip, manifest);
 }
 
 #[test]

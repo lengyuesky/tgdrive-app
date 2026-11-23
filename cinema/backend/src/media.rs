@@ -7,18 +7,22 @@ use image::ImageEncoder;
 use serde_json::{Value, json};
 use std::{process::Stdio, sync::Arc, time::Duration};
 use tgdrive_backend_sdk::{Error, HostClient, Result};
-use tgdrive_contract::{ByteCount, error_code, files::*};
+use tgdrive_contract::{
+    ByteCount, error_code,
+    files::*,
+    http::{MAX_LOCAL_BYTE_BUDGET, MAX_LOCAL_REQUEST_BUDGET},
+};
 use tokio::sync::watch;
 use tokio::{io::AsyncReadExt, process::Command};
 use tokio_util::sync::CancellationToken;
 
-/// 长片 MP4 的索引随时长增长，三小时 60 帧影片约 16 MiB，探测必须整段读完才能得到时长与轨道。
-pub const BYTE_LIMIT: u64 = 64 * 1024 * 1024;
 pub const IMAGE_LIMIT: usize = 256 * 1024;
 /// FFprobe 自身的执行预算；截帧仍用 10 秒。
 pub const PROBE_BUDGET: Duration = Duration::from_secs(30);
 const FRAME_BUDGET: Duration = Duration::from_secs(10);
 const PROBE_TASK_BUDGET: Duration = Duration::from_secs(40);
+/// 同时运行的 FFprobe 数量；超出的探测排队，不向客户端报忙。
+pub const PROBE_CONCURRENCY: usize = 4;
 /// 本机地址与租约要覆盖探测任务总预算，结束时显式撤销。
 const INPUT_TTL_SECONDS: u16 = 45;
 
@@ -111,7 +115,7 @@ impl ProbeRequest {
         tokio::select! { biased;
             _=cancel.cancelled()=>Err(Error::Cancelled),
             _=app.shutdown_token().cancelled()=>Err(Error::Cancelled),
-            result=tokio::time::timeout(PROBE_TASK_BUDGET,read)=>result.unwrap_or_else(|_|Err(Error::api(error_code::REQUEST_TIMEOUT,"媒体探测等待超过 40 秒总预算"))),
+            result=read=>result,
         }
     }
 }
@@ -178,8 +182,9 @@ impl Input {
             .local_url(LocalFileUrlRequest {
                 file: entry.file(),
                 ttl_seconds: Some(INPUT_TTL_SECONDS),
-                byte_budget: Some(ByteCount(BYTE_LIMIT)),
-                request_budget: Some(32),
+                // 应用不自设读取量上限：长片索引随时长增长，按宿主允许的最大值申请，由超时兜底。
+                byte_budget: Some(ByteCount(MAX_LOCAL_BYTE_BUDGET)),
+                request_budget: Some(MAX_LOCAL_REQUEST_BUDGET as u16),
                 lease_id: Some(lease.id.clone()),
             })
             .await
@@ -231,7 +236,7 @@ impl Drop for Input {
     }
 }
 pub fn limits() -> Value {
-    json!({"probe_bytes":BYTE_LIMIT,"probe_seconds":PROBE_BUDGET.as_secs(),"probe_task_seconds":PROBE_TASK_BUDGET.as_secs(),"probe_concurrency":2,"probe_queue":0,"probe_output_bytes":128*1024,"probe_packets":64,"nfo_bytes":crate::nfo::MAX_BYTES,"poster_bytes":2*1024*1024,"subtitle_bytes":512*1024,"frame_pixels":16*1024*1024,"frame_edge":640,"frame_image_bytes":IMAGE_LIMIT})
+    json!({"probe_seconds":PROBE_BUDGET.as_secs(),"probe_task_seconds":PROBE_TASK_BUDGET.as_secs(),"probe_concurrency":PROBE_CONCURRENCY,"probe_output_bytes":128*1024,"probe_packets":64,"nfo_bytes":crate::nfo::MAX_BYTES,"poster_bytes":2*1024*1024,"subtitle_bytes":512*1024,"frame_pixels":16*1024*1024,"frame_edge":640,"frame_image_bytes":IMAGE_LIMIT})
 }
 pub fn command(program: &str) -> Command {
     let mut command = Command::new(program);
@@ -268,7 +273,7 @@ pub async fn probe(
         return Ok(info);
     }
     app.service.pause_background();
-    // 同文件及内容版本的起播接口共用任务，只有不同媒体才占用新的探测名额。
+    // 同文件及内容版本的起播接口共用任务；不同媒体同时探测时排队等候，不拒绝请求。
     let (request, owner) = {
         let mut pending = app.pending_probes.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(request) = pending
@@ -277,27 +282,20 @@ pub async fn probe(
         {
             (request, None)
         } else {
-            let slot =
-                app.probe_slots.clone().try_acquire_owned().map_err(|_| {
-                    Error::api(error_code::RATE_LIMITED, "媒体探测正忙，请稍后重试")
-                })?;
             let flight = ProbeFlight::new(app.shutdown_token().child_token());
             let request = flight.subscribe().expect("新探测任务可以接受请求");
             pending.insert(entry.media_guid.clone(), flight.clone());
             (
                 request,
-                Some((
-                    ProbeOwner {
-                        app: app.clone(),
-                        key: entry.media_guid.clone(),
-                        flight,
-                    },
-                    slot,
-                )),
+                Some(ProbeOwner {
+                    app: app.clone(),
+                    key: entry.media_guid.clone(),
+                    flight,
+                }),
             )
         }
     };
-    if let Some((owner, slot)) = owner {
+    if let Some(owner) = owner {
         let entry = entry.clone();
         let mut jobs = app.probe_jobs.lock().unwrap_or_else(|e| e.into_inner());
         while jobs.try_join_next().is_some() {}
@@ -305,18 +303,25 @@ pub async fn probe(
             owner.flight.finish(Err(Error::Cancelled));
         } else {
             jobs.spawn(async move {
-                let _slot = slot;
-                let result = tokio::time::timeout(
-                    PROBE_TASK_BUDGET,
-                    probe_once(&owner.app, &entry, &owner.flight.cancel),
-                )
-                .await
-                .unwrap_or_else(|_| {
-                    Err(Error::api(
-                        error_code::REQUEST_TIMEOUT,
-                        "媒体探测任务超过 40 秒总预算",
-                    ))
-                });
+                let slots = owner.app.probe_slots.clone();
+                // 排队期间最后一个等待者离开或应用关停都会取消本任务；总预算从拿到名额后起算。
+                let result = tokio::select! { biased;
+                    _ = owner.flight.cancel.cancelled() => Err(Error::Cancelled),
+                    slot = slots.acquire_owned() => match slot {
+                        Ok(_slot) => tokio::time::timeout(
+                            PROBE_TASK_BUDGET,
+                            probe_once(&owner.app, &entry, &owner.flight.cancel),
+                        )
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(Error::api(
+                                error_code::REQUEST_TIMEOUT,
+                                "媒体探测任务超过 40 秒总预算",
+                            ))
+                        }),
+                        Err(_) => Err(Error::Cancelled),
+                    },
+                };
                 owner.flight.finish(result);
             });
         }
