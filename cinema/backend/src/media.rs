@@ -54,11 +54,11 @@ pub(crate) struct ProbeFlight {
     cancel: CancellationToken,
 }
 impl ProbeFlight {
-    fn new() -> Arc<Self> {
+    fn new(cancel: CancellationToken) -> Arc<Self> {
         Arc::new(Self {
             result: watch::channel(None).0,
             state: std::sync::Mutex::default(),
-            cancel: CancellationToken::new(),
+            cancel,
         })
     }
     fn subscribe(self: &Arc<Self>) -> Option<ProbeRequest> {
@@ -273,7 +273,7 @@ pub async fn probe(
                 app.probe_slots.clone().try_acquire_owned().map_err(|_| {
                     Error::api(error_code::RATE_LIMITED, "媒体探测正忙，请稍后重试")
                 })?;
-            let flight = ProbeFlight::new();
+            let flight = ProbeFlight::new(app.shutdown_token().child_token());
             let request = flight.subscribe().expect("新探测任务可以接受请求");
             pending.insert(entry.media_guid.clone(), flight.clone());
             (
@@ -334,11 +334,7 @@ async fn probe_once(
         return Ok(info);
     }
     let mut input = Input::open(app, entry).await?;
-    let result = tokio::select! {
-        _=cancel.cancelled()=>Err(Error::Cancelled),
-        _=app.shutdown_token().cancelled()=>Err(Error::Cancelled),
-        result=tokio::time::timeout(Duration::from_secs(10),run_probe(&app.ffprobe_path,&input.url,entry))=>result.unwrap_or_else(|_|Err(Error::api(error_code::REQUEST_TIMEOUT,"媒体探测超过 10 秒预算"))),
-    };
+    let result = run_probe(&app.ffprobe_path, &input.url, entry, cancel).await;
     input.close().await;
     let info = result?;
     crate::index::authorized(app, &entry.file()).await?;
@@ -354,7 +350,12 @@ async fn probe_once(
     app.db.put_probe(entry, &info)?;
     Ok(info)
 }
-pub async fn run_probe(program: &str, input: &str, entry: &Entry) -> Result<MediaInfo> {
+pub async fn run_probe(
+    program: &str,
+    input: &str,
+    entry: &Entry,
+    cancel: &CancellationToken,
+) -> Result<MediaInfo> {
     let mut child = command(program);
     child
         .args([
@@ -380,7 +381,7 @@ pub async fn run_probe(program: &str, input: &str, entry: &Entry) -> Result<Medi
             "json",
         ])
         .arg(input);
-    let bytes = run(child, 128 * 1024).await?;
+    let bytes = run(child, 128 * 1024, Some(cancel)).await?;
     let value: Value = tgdrive_contract::validation::parse_unique_json(&bytes)?;
     let duration = value["format"]["duration"]
         .as_str()
@@ -448,7 +449,11 @@ pub async fn run_probe(program: &str, input: &str, entry: &Entry) -> Result<Medi
         policy_version: 1,
     })
 }
-async fn run(mut command: Command, limit: usize) -> Result<Vec<u8>> {
+async fn run(
+    mut command: Command,
+    limit: usize,
+    cancel: Option<&CancellationToken>,
+) -> Result<Vec<u8>> {
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -469,31 +474,50 @@ async fn run(mut command: Command, limit: usize) -> Result<Vec<u8>> {
         .ok_or(Error::Protocol("媒体错误管道缺失"))?;
     let mut output = Vec::new();
     let mut errors = Vec::new();
-    let read_output = async {
-        stdout
-            .take(limit as u64 + 1)
-            .read_to_end(&mut output)
-            .await?;
-        if output.len() > limit {
-            return Err(Error::api(
-                error_code::PAYLOAD_TOO_LARGE,
-                "媒体组件输出超过预算",
-            ));
+    let result = {
+        let read_output = async {
+            stdout
+                .take(limit as u64 + 1)
+                .read_to_end(&mut output)
+                .await?;
+            if output.len() > limit {
+                return Err(Error::api(
+                    error_code::PAYLOAD_TOO_LARGE,
+                    "媒体组件输出超过预算",
+                ));
+            }
+            Ok::<_, Error>(())
+        };
+        let read_errors = async {
+            stderr.take(8193).read_to_end(&mut errors).await?;
+            if errors.len() > 8192 {
+                return Err(Error::api(
+                    error_code::PAYLOAD_TOO_LARGE,
+                    "媒体组件错误输出超过预算",
+                ));
+            }
+            Ok::<_, Error>(())
+        };
+        let wait = async { child.wait().await.map_err(Error::from) };
+        let stopped = async {
+            match cancel {
+                Some(cancel) => cancel.cancelled().await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! { biased;
+            _ = stopped => Err(Error::Cancelled),
+            result = tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::try_join!(read_output, read_errors, wait)
+            }) => result.unwrap_or_else(|_| Err(Error::api(error_code::REQUEST_TIMEOUT, "媒体组件执行超过 10 秒预算"))),
         }
-        Ok::<_, Error>(())
     };
-    let read_errors = async {
-        stderr.take(8193).read_to_end(&mut errors).await?;
-        if errors.len() > 8192 {
-            return Err(Error::api(
-                error_code::PAYLOAD_TOO_LARGE,
-                "媒体组件错误输出超过预算",
-            ));
-        }
-        Ok::<_, Error>(())
-    };
-    let wait = async { child.wait().await.map_err(Error::from) };
-    let (_, _, status) = tokio::try_join!(read_output, read_errors, wait)?;
+    if result.is_err() {
+        // 取消、超时和输出失败先终止并等待退出，任务结束时子进程已经回收。
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
+    let (_, _, status) = result?;
     if !status.success() {
         let errors = String::from_utf8_lossy(&errors).to_ascii_lowercase();
         let transient = [
@@ -534,7 +558,7 @@ pub async fn frame(
 async fn frame_inner(app: &Application, entry: &Entry, input: &str) -> Result<Vec<u8>> {
     let info = match cached(app, entry).await? {
         Some(info) => info,
-        None => run_probe(&app.ffprobe_path, input, entry).await?,
+        None => run_probe(&app.ffprobe_path, input, entry, app.shutdown_token()).await?,
     };
     let video = info
         .video()
@@ -612,7 +636,7 @@ async fn frame_inner(app: &Application, entry: &Entry, input: &str) -> Result<Ve
                 "image2pipe",
                 "pipe:1",
             ]);
-        match run(child, 1024 * 1024).await {
+        match run(child, 1024 * 1024, None).await {
             Ok(frame) => {
                 if let Some(jpeg) = encode_frame(frame).await? {
                     return Ok(jpeg);
