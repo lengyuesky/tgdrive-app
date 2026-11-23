@@ -4,6 +4,7 @@ mod common;
 mod local_host;
 use common::*;
 use local_host::LocalHost;
+use serde_json::json;
 use std::{
     os::unix::fs::PermissionsExt,
     sync::{Arc, atomic::Ordering},
@@ -21,6 +22,69 @@ fn program(name: &str) -> String {
         .unwrap_or_else(|| panic!("媒体测试需要 {name}"))
         .to_string_lossy()
         .into()
+}
+
+fn delayed_probe(directory: &std::path::Path) -> String {
+    let delayed = directory.join("delayed-ffprobe");
+    std::fs::write(
+        &delayed,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" != '-version' ]; then /bin/sleep 0.3; fi\nexec '{}' \"$@\"\n",
+            program("ffprobe")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&delayed, std::fs::Permissions::from_mode(0o700)).unwrap();
+    delayed.to_string_lossy().into()
+}
+
+async fn wait_for_probe_cleanup(app: &Application, host: &LocalHost) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while app.probe_slots.available_permits() != 2 || host.active() != 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+fn slow_probe_with_pid(directory: &std::path::Path) -> (String, std::path::PathBuf) {
+    let script = directory.join("slow-ffprobe");
+    let pid = directory.join("probe.pid");
+    let literal = format!("'{}'", pid.to_string_lossy().replace('\'', "'\\''"));
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\nprintf '%s' \"$$\" > {literal}\nexec /bin/sleep 60\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    (script.to_string_lossy().into(), pid)
+}
+
+async fn probe_pid(path: &std::path::Path) -> String {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(pid) = std::fs::read_to_string(path)
+                && !pid.is_empty()
+            {
+                return pid;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+fn assert_probe_process_exited(pid: &str) {
+    assert!(
+        !std::process::Command::new("/bin/kill")
+            .args(["-0", pid])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
 }
 fn video(filter: &str, seconds: &str, wrapper: &str) -> Vec<u8> {
     let directory = tempfile::tempdir().unwrap();
@@ -66,6 +130,231 @@ fn video(filter: &str, seconds: &str, wrapper: &str) -> Vec<u8> {
     assert!(status.success());
     std::fs::read(path).unwrap()
 }
+
+fn remux(bytes: &[u8], flags: &str) -> Vec<u8> {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("input.mp4");
+    let output = directory.path().join("output.mp4");
+    std::fs::write(&input, bytes).unwrap();
+    let status = std::process::Command::new(program("ffmpeg"))
+        .args(["-v", "error", "-nostdin", "-i"])
+        .arg(&input)
+        .args(["-map", "0", "-c", "copy", "-movflags", flags])
+        .arg(&output)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::fs::read(output).unwrap()
+}
+
+fn tail_index(bytes: Vec<u8>) -> Vec<u8> {
+    let mut cursor = 0;
+    loop {
+        let size = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        assert!(size >= 8 && cursor + size <= bytes.len());
+        if &bytes[cursor + 4..cursor + 8] == b"moov" {
+            assert_eq!(cursor + size, bytes.len());
+            let mut output = bytes[..cursor].to_vec();
+            let padding = 12 * 1024 * 1024_u32;
+            output.extend_from_slice(&padding.to_be_bytes());
+            output.extend_from_slice(b"free");
+            output.resize(output.len() + padding as usize - 8, 0);
+            output.extend_from_slice(&bytes[cursor..]);
+            return output;
+        }
+        cursor += size;
+    }
+}
+
+#[tokio::test]
+async fn valid_tail_index_fragmented_mp4_and_transport_streams_probe_with_bounded_input() {
+    let original = video("testsrc2=size=160x90:rate=25", "1", "mp4");
+    for (name, bytes) in [
+        ("tail.mp4", tail_index(remux(&original, "0"))),
+        (
+            "fragmented.mp4",
+            remux(&original, "frag_keyframe+empty_moov+default_base_moof"),
+        ),
+        (
+            "transport.ts",
+            video("testsrc2=size=160x90:rate=25", "1", "ts"),
+        ),
+    ] {
+        let (app, host) = application(&bytes, name, None).await;
+        let entry = app.db.entry("3").unwrap().unwrap();
+        let info = media::probe(&app, &entry, &CancellationToken::new())
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{name}: {error}; 读取 {} 字节，{} 次请求",
+                    host.reads.load(Ordering::Relaxed),
+                    host.requests.load(Ordering::Relaxed)
+                )
+            });
+        assert!(
+            (0.9..1.2).contains(&info.duration),
+            "{name}: {}",
+            info.duration
+        );
+        assert!(info.video().is_some());
+        assert!(host.reads.load(Ordering::Relaxed) <= media::BYTE_LIMIT);
+        assert_eq!(host.active(), 0);
+        app.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn concurrent_first_playback_requests_share_one_probe_and_all_return_playable_tracks() {
+    let directory = tempfile::tempdir().unwrap();
+    let bytes = video("testsrc2=size=160x90:rate=25", "1", "mp4");
+    let (app, host) = application(&bytes, "first.mp4", Some(delayed_probe(directory.path()))).await;
+    let revision = app.db.settings().unwrap().revision;
+    app.configure_account(&revision, "synthetic", "Synthetic-Only-Account")
+        .await
+        .unwrap();
+    let revision = app.db.settings().unwrap().revision;
+    app.start_service(&revision).await.unwrap();
+    let token = login(&app).await;
+    let entry = app.db.entry("3").unwrap().unwrap();
+    let list_path = format!("/v/api/v1/stream/list/{}", entry.media_guid);
+    let (info, stream, tracks) = tokio::join!(
+        wire(
+            &app,
+            false,
+            "POST",
+            "/v/api/v1/play/info",
+            Some(&token),
+            json!({"item_guid":entry.guid}),
+            &[]
+        ),
+        wire(
+            &app,
+            false,
+            "POST",
+            "/v/api/v1/stream",
+            Some(&token),
+            json!({"media_guid":entry.media_guid}),
+            &[]
+        ),
+        wire(&app, false, "GET", &list_path, Some(&token), json!({}), &[]),
+    );
+    let (info_status, info) = body(info).await;
+    let (stream_status, stream) = body(stream).await;
+    let (track_status, tracks) = body(tracks).await;
+    assert_eq!(
+        [info_status, stream_status, track_status],
+        [200, 200, 200],
+        "{info}; {stream}; {tracks}"
+    );
+    assert_eq!(
+        info["data"]["video_guid"],
+        tracks["data"]["video_streams"][0]["guid"]
+    );
+    assert_eq!(stream["data"]["audio_streams"].as_array().unwrap().len(), 2);
+    assert_eq!(host.local_urls.load(Ordering::Relaxed), 1);
+    assert_eq!(host.active(), 0);
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn cancelling_one_request_does_not_cancel_another_request_for_the_same_video() {
+    let directory = tempfile::tempdir().unwrap();
+    let bytes = video("testsrc2=size=160x90:rate=25", "1", "mp4");
+    let (app, host) =
+        application(&bytes, "shared.mp4", Some(delayed_probe(directory.path()))).await;
+    let entry = app.db.entry("3").unwrap().unwrap();
+    let cancel_first = CancellationToken::new();
+    let cancel_second = CancellationToken::new();
+    let mut first = Box::pin(media::probe(&app, &entry, &cancel_first));
+    let mut second = Box::pin(media::probe(&app, &entry, &cancel_second));
+    tokio::select! { biased;
+        _=&mut first=>panic!("延迟探测尚未完成"),
+        _=&mut second=>panic!("延迟探测尚未完成"),
+        _=tokio::time::sleep(Duration::from_millis(50))=>{},
+    }
+    cancel_first.cancel();
+    let (first, second) = tokio::join!(first, second);
+    assert!(matches!(first, Err(tgdrive_backend_sdk::Error::Cancelled)));
+    assert!(second.unwrap().video().is_some());
+    assert_eq!(host.local_urls.load(Ordering::Relaxed), 1);
+    wait_for_probe_cleanup(&app, &host).await;
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn dropping_one_http_request_keeps_the_shared_probe_alive_for_remaining_requests() {
+    let directory = tempfile::tempdir().unwrap();
+    let bytes = video("testsrc2=size=160x90:rate=25", "1", "mp4");
+    let (app, host) =
+        application(&bytes, "shared.mp4", Some(delayed_probe(directory.path()))).await;
+    let entry = app.db.entry("3").unwrap().unwrap();
+    let cancel = CancellationToken::new();
+    let mut first = Box::pin(media::probe(&app, &entry, &cancel));
+    let mut second = Box::pin(media::probe(&app, &entry, &cancel));
+    tokio::select! { biased;
+        _=&mut first=>panic!("延迟探测尚未完成"),
+        _=&mut second=>panic!("延迟探测尚未完成"),
+        _=tokio::time::sleep(Duration::from_millis(50))=>{},
+    }
+    drop(first);
+    assert!(second.await.unwrap().video().is_some());
+    assert_eq!(host.local_urls.load(Ordering::Relaxed), 1);
+    wait_for_probe_cleanup(&app, &host).await;
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn dropping_the_last_request_reaps_the_probe_and_a_new_request_can_retry() {
+    let directory = tempfile::tempdir().unwrap();
+    let (script, marker) = slow_probe_with_pid(directory.path());
+    let bytes = video("testsrc2=size=160x90:rate=25", "1", "mp4");
+    let (app, host) = application(&bytes, "retry.mp4", Some(script.clone())).await;
+    let entry = app.db.entry("3").unwrap().unwrap();
+    let pending_app = app.clone();
+    let pending_entry = entry.clone();
+    let request = tokio::spawn(async move {
+        media::probe(&pending_app, &pending_entry, &CancellationToken::new()).await
+    });
+    let pid = probe_pid(&marker).await;
+    request.abort();
+    assert!(request.await.unwrap_err().is_cancelled());
+    wait_for_probe_cleanup(&app, &host).await;
+    assert_probe_process_exited(&pid);
+    std::fs::write(
+        script,
+        format!("#!/bin/sh\nexec '{}' \"$@\"\n", program("ffprobe")),
+    )
+    .unwrap();
+    let info = media::probe(&app, &entry, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(info.video().is_some());
+    assert_eq!(host.local_urls.load(Ordering::Relaxed), 2);
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn application_shutdown_reaps_shared_probes_before_closing_the_database() {
+    let directory = tempfile::tempdir().unwrap();
+    let (script, marker) = slow_probe_with_pid(directory.path());
+    let (app, host) = application(b"synthetic", "stop.mp4", Some(script)).await;
+    let entry = app.db.entry("3").unwrap().unwrap();
+    let pending_app = app.clone();
+    let request =
+        tokio::spawn(
+            async move { media::probe(&pending_app, &entry, &CancellationToken::new()).await },
+        );
+    let pid = probe_pid(&marker).await;
+    app.shutdown().await;
+    assert!(matches!(
+        request.await.unwrap(),
+        Err(tgdrive_backend_sdk::Error::Cancelled)
+    ));
+    assert_eq!(host.active(), 0);
+    assert_eq!(app.probe_slots.available_permits(), 2);
+    assert_probe_process_exited(&pid);
+}
+
 async fn application(
     bytes: &[u8],
     name: &str,
@@ -254,7 +543,15 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
     std::fs::write(&path, "#!/bin/sh\nexec /bin/sleep 60\n").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     let (app, host) = application(b"fake", "video.mp4", Some(path.to_string_lossy().into())).await;
+    for (id, name) in [("4", "second.mp4"), ("5", "third.mp4")] {
+        host.memory
+            .add_node(seed(id, "2", name, NodeKind::File, b"fake"))
+            .unwrap();
+    }
+    app.synchronize(true).await.unwrap();
     let e = app.db.entry("3").unwrap().unwrap();
+    let other = app.db.entry("4").unwrap().unwrap();
+    let third = app.db.entry("5").unwrap().unwrap();
     let lease = host
         .create_read_lease(CreateReadLeaseRequest { ttl_seconds: 60 })
         .await
@@ -262,8 +559,8 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
     let token = app.service.login(app.service.epoch(), lease).unwrap();
     let cancel = app.service.authenticate(&token).unwrap().cancel;
     let mut jobs = Vec::new();
-    for _ in 0..2 {
-        let (app, e, cancel) = (app.clone(), e.clone(), cancel.clone());
+    for e in [e.clone(), other] {
+        let (app, cancel) = (app.clone(), cancel.clone());
         jobs.push(tokio::spawn(async move {
             media::probe(&app, &e, &cancel).await
         }));
@@ -277,7 +574,7 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
     .unwrap();
     let began = Instant::now();
     assert!(
-        media::probe(&app, &e, &CancellationToken::new())
+        media::probe(&app, &third, &CancellationToken::new())
             .await
             .is_err()
     );
@@ -292,6 +589,7 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
                 .is_err()
         );
     }
+    wait_for_probe_cleanup(&app, &host).await;
     assert_eq!(app.probe_slots.available_permits(), 2);
     assert_eq!(host.active(), 0);
     let began = Instant::now();

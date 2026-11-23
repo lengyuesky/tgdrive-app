@@ -35,6 +35,9 @@ pub struct Application {
     pub(crate) read_sync: Mutex<Option<index::ReadSynchronization>>,
     pub cover_wake: Notify,
     pub probe_slots: Arc<Semaphore>,
+    pub(crate) pending_probes:
+        std::sync::Mutex<std::collections::HashMap<String, Arc<media::ProbeFlight>>>,
+    pub(crate) probe_jobs: std::sync::Mutex<tokio::task::JoinSet<()>>,
     pub login_slots: Arc<Semaphore>,
     pub ffprobe_path: String,
     pub ffmpeg_path: String,
@@ -61,6 +64,8 @@ impl Application {
             read_sync: Mutex::new(None),
             cover_wake: Notify::new(),
             probe_slots: Arc::new(Semaphore::new(2)),
+            pending_probes: std::sync::Mutex::default(),
+            probe_jobs: std::sync::Mutex::default(),
             login_slots: Arc::new(Semaphore::new(2)),
             ffprobe_path,
             ffmpeg_path,
@@ -373,6 +378,16 @@ impl Application {
             {
                 abort.abort();
             }
+        }
+        let mut probes =
+            std::mem::take(&mut *self.probe_jobs.lock().unwrap_or_else(|e| e.into_inner()));
+        if tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while probes.join_next().await.is_some() {}
+        })
+        .await
+        .is_err()
+        {
+            probes.shutdown().await;
         }
         self.db.close();
     }

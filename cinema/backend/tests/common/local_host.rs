@@ -19,6 +19,7 @@ pub struct LocalHost {
     pub memory: MemoryHost,
     pub reads: Arc<AtomicU64>,
     pub requests: Arc<AtomicU64>,
+    pub local_urls: AtomicU64,
     servers: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
 }
 impl LocalHost {
@@ -27,6 +28,7 @@ impl LocalHost {
             memory,
             reads: Arc::new(AtomicU64::new(0)),
             requests: Arc::new(AtomicU64::new(0)),
+            local_urls: AtomicU64::new(0),
             servers: Mutex::new(HashMap::new()),
         }
     }
@@ -60,6 +62,7 @@ impl HostClient for LocalHost {
     fn local_url(&self, request: LocalFileUrlRequest) -> HostFuture<'_, LocalFileUrl> {
         Box::pin(async move {
             let mut ticket = self.memory.local_url(request).await?;
+            self.local_urls.fetch_add(1, Ordering::Relaxed);
             let original = ticket.url.clone();
             let uri: tgdrive_backend_sdk::http::Uri = original.parse().unwrap();
             let path = uri.path().to_owned();

@@ -8,11 +8,150 @@ use serde_json::{Value, json};
 use std::{process::Stdio, sync::Arc, time::Duration};
 use tgdrive_backend_sdk::{Error, HostClient, Result};
 use tgdrive_contract::{ByteCount, error_code, files::*};
+use tokio::sync::watch;
 use tokio::{io::AsyncReadExt, process::Command};
 use tokio_util::sync::CancellationToken;
 
 pub const BYTE_LIMIT: u64 = 8 * 1024 * 1024;
 pub const IMAGE_LIMIT: usize = 256 * 1024;
+const PROBE_TASK_BUDGET: Duration = Duration::from_secs(15);
+
+#[derive(Clone)]
+enum ProbeFailure {
+    Cancelled,
+    Api(u16, tgdrive_contract::ApiError),
+    Other(String),
+}
+impl ProbeFailure {
+    fn from_error(error: Error) -> Self {
+        match error {
+            Error::Cancelled => Self::Cancelled,
+            Error::Api { status, error } => Self::Api(status, error),
+            error => Self::Other(error.code().into()),
+        }
+    }
+    fn error(&self) -> Error {
+        match self {
+            Self::Cancelled => Error::Cancelled,
+            Self::Api(status, error) => Error::Api {
+                status: *status,
+                error: error.clone(),
+            },
+            Self::Other(code) => Error::api(code, "媒体探测未完成，请稍后重试"),
+        }
+    }
+}
+type ProbeResult = std::result::Result<MediaInfo, ProbeFailure>;
+#[derive(Default)]
+struct FlightState {
+    requests: usize,
+    closed: bool,
+    finished: bool,
+}
+pub(crate) struct ProbeFlight {
+    result: watch::Sender<Option<Arc<ProbeResult>>>,
+    state: std::sync::Mutex<FlightState>,
+    cancel: CancellationToken,
+}
+impl ProbeFlight {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            result: watch::channel(None).0,
+            state: std::sync::Mutex::default(),
+            cancel: CancellationToken::new(),
+        })
+    }
+    fn subscribe(self: &Arc<Self>) -> Option<ProbeRequest> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed {
+            return None;
+        }
+        state.requests += 1;
+        Some(ProbeRequest {
+            flight: self.clone(),
+            result: self.result.subscribe(),
+        })
+    }
+    fn finish(&self, result: Result<MediaInfo>) {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .finished = true;
+        self.result
+            .send_replace(Some(Arc::new(result.map_err(ProbeFailure::from_error))));
+    }
+}
+struct ProbeRequest {
+    flight: Arc<ProbeFlight>,
+    result: watch::Receiver<Option<Arc<ProbeResult>>>,
+}
+impl ProbeRequest {
+    async fn wait(mut self, app: &Application, cancel: &CancellationToken) -> Result<MediaInfo> {
+        let read = async {
+            loop {
+                let ready = self.result.borrow_and_update().clone();
+                if let Some(ready) = ready {
+                    return ready
+                        .as_ref()
+                        .as_ref()
+                        .cloned()
+                        .map_err(ProbeFailure::error);
+                }
+                self.result.changed().await.map_err(|_| {
+                    Error::api(error_code::BACKEND_UNAVAILABLE, "媒体探测任务已结束")
+                })?;
+            }
+        };
+        tokio::select! { biased;
+            _=cancel.cancelled()=>Err(Error::Cancelled),
+            _=app.shutdown_token().cancelled()=>Err(Error::Cancelled),
+            result=tokio::time::timeout(PROBE_TASK_BUDGET,read)=>result.unwrap_or_else(|_|Err(Error::api(error_code::REQUEST_TIMEOUT,"媒体探测等待超过 15 秒总预算"))),
+        }
+    }
+}
+impl Drop for ProbeRequest {
+    fn drop(&mut self) {
+        let mut state = self.flight.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.requests -= 1;
+        if state.requests == 0 && !state.finished {
+            state.closed = true;
+            self.flight.cancel.cancel();
+        }
+    }
+}
+struct ProbeOwner {
+    app: Arc<Application>,
+    key: String,
+    flight: Arc<ProbeFlight>,
+}
+impl Drop for ProbeOwner {
+    fn drop(&mut self) {
+        let mut pending = self
+            .app
+            .pending_probes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if pending
+            .get(&self.key)
+            .is_some_and(|flight| Arc::ptr_eq(flight, &self.flight))
+        {
+            pending.remove(&self.key);
+        }
+        drop(pending);
+        let missing = self.flight.result.borrow().is_none();
+        if missing {
+            self.flight
+                .finish(Err(if self.app.shutdown_token().is_cancelled() {
+                    Error::Cancelled
+                } else {
+                    Error::api(
+                        error_code::BACKEND_UNAVAILABLE,
+                        "媒体探测任务已中断，请重试",
+                    )
+                }));
+        }
+    }
+}
 struct Input {
     host: Arc<dyn HostClient>,
     id: String,
@@ -84,7 +223,7 @@ impl Drop for Input {
     }
 }
 pub fn limits() -> Value {
-    json!({"probe_bytes":BYTE_LIMIT,"probe_seconds":10,"probe_concurrency":2,"probe_queue":0,"probe_output_bytes":128*1024,"probe_packets":64,"nfo_bytes":crate::nfo::MAX_BYTES,"poster_bytes":2*1024*1024,"subtitle_bytes":512*1024,"frame_pixels":16*1024*1024,"frame_edge":640,"frame_image_bytes":IMAGE_LIMIT})
+    json!({"probe_bytes":BYTE_LIMIT,"probe_seconds":10,"probe_task_seconds":PROBE_TASK_BUDGET.as_secs(),"probe_concurrency":2,"probe_queue":0,"probe_output_bytes":128*1024,"probe_packets":64,"nfo_bytes":crate::nfo::MAX_BYTES,"poster_bytes":2*1024*1024,"subtitle_bytes":512*1024,"frame_pixels":16*1024*1024,"frame_edge":640,"frame_image_bytes":IMAGE_LIMIT})
 }
 pub fn command(program: &str) -> Command {
     let mut command = Command::new(program);
@@ -109,20 +248,88 @@ pub async fn cached(app: &Application, entry: &Entry) -> Result<Option<MediaInfo
     cached_sync(app, entry)
 }
 pub async fn probe(
-    app: &Application,
+    app: &Arc<Application>,
     entry: &Entry,
     cancel: &CancellationToken,
 ) -> Result<MediaInfo> {
+    if cancel.is_cancelled() || app.shutdown_token().is_cancelled() {
+        return Err(Error::Cancelled);
+    }
     crate::index::authorized(app, &entry.file()).await?;
     if let Some(info) = cached(app, entry).await? {
         return Ok(info);
     }
     app.service.pause_background();
-    let _slot = app
-        .probe_slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| Error::api(error_code::RATE_LIMITED, "媒体探测正忙，请稍后重试"))?;
+    // 同文件及内容版本的起播接口共用任务，只有不同媒体才占用新的探测名额。
+    let (request, owner) = {
+        let mut pending = app.pending_probes.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(request) = pending
+            .get(&entry.media_guid)
+            .and_then(ProbeFlight::subscribe)
+        {
+            (request, None)
+        } else {
+            let slot =
+                app.probe_slots.clone().try_acquire_owned().map_err(|_| {
+                    Error::api(error_code::RATE_LIMITED, "媒体探测正忙，请稍后重试")
+                })?;
+            let flight = ProbeFlight::new();
+            let request = flight.subscribe().expect("新探测任务可以接受请求");
+            pending.insert(entry.media_guid.clone(), flight.clone());
+            (
+                request,
+                Some((
+                    ProbeOwner {
+                        app: app.clone(),
+                        key: entry.media_guid.clone(),
+                        flight,
+                    },
+                    slot,
+                )),
+            )
+        }
+    };
+    if let Some((owner, slot)) = owner {
+        let entry = entry.clone();
+        let mut jobs = app.probe_jobs.lock().unwrap_or_else(|e| e.into_inner());
+        while jobs.try_join_next().is_some() {}
+        if app.shutdown_token().is_cancelled() {
+            owner.flight.finish(Err(Error::Cancelled));
+        } else {
+            jobs.spawn(async move {
+                let _slot = slot;
+                let result = tokio::time::timeout(
+                    PROBE_TASK_BUDGET,
+                    probe_once(&owner.app, &entry, &owner.flight.cancel),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    Err(Error::api(
+                        error_code::REQUEST_TIMEOUT,
+                        "媒体探测任务超过 15 秒总预算",
+                    ))
+                });
+                owner.flight.finish(result);
+            });
+        }
+    }
+    let info = request.wait(app, cancel).await?;
+    crate::index::authorized(app, &entry.file()).await?;
+    if cancel.is_cancelled() || app.shutdown_token().is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    Ok(info)
+}
+
+async fn probe_once(
+    app: &Application,
+    entry: &Entry,
+    cancel: &CancellationToken,
+) -> Result<MediaInfo> {
+    if cancel.is_cancelled() || app.shutdown_token().is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    crate::index::authorized(app, &entry.file()).await?;
     if let Some(info) = cached(app, entry).await? {
         return Ok(info);
     }
@@ -153,6 +360,8 @@ pub async fn run_probe(program: &str, input: &str, entry: &Entry) -> Result<Medi
         .args([
             "-v",
             "error",
+            "-threads",
+            "1",
             "-protocol_whitelist",
             "http,tcp",
             "-format_whitelist",
