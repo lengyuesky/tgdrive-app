@@ -279,6 +279,75 @@
     },
     {
       "manifest": {
+        "id": "cinema",
+        "name": "影视",
+        "version": "1.0.4",
+        "contract": {
+          "major": 1,
+          "minor": 0
+        },
+        "description": "自建电影库和电视剧库，共用网页与飞牛客户端的收藏、已看标记和观看进度。网页支持文本字幕与 MKV 流式转封装；飞牛兼容服务须先配置独立连接账号，再由主人主动启动。",
+        "author": "tgdrive",
+        "files": {
+          "read": true,
+          "write": false
+        },
+        "page": {
+          "entry": "page/index.html"
+        },
+        "backend": {
+          "entry": "backend/app",
+          "run_mode": "resident",
+          "external_service": true,
+          "resources": {
+            "memory_bytes": "536870912",
+            "cache_bytes": "1073741824",
+            "database_bytes": "536870912",
+            "cpu_millis": 1000,
+            "pids": 64
+          }
+        },
+        "icon": "assets/icon.svg",
+        "required_capabilities": [
+          "backend.proxy",
+          "backend.external",
+          "files.local_url",
+          "read_leases"
+        ],
+        "open_with": {
+          "extensions": [
+            "mp4",
+            "m4v",
+            "mov",
+            "webm",
+            "ogv",
+            "mkv",
+            "avi",
+            "wmv",
+            "flv",
+            "ts",
+            "mts",
+            "m2ts",
+            "3gp"
+          ],
+          "directories": false
+        }
+      },
+      "packages": {
+        "linux-amd64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.4/cinema-1.0.4-linux-amd64.tgapp",
+          "sha256": "c1294c180eef62855ad70199c82131409ef95fcd2e3f64153ef1c9b46d3de203",
+          "size": "4739069"
+        },
+        "linux-arm64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.4/cinema-1.0.4-linux-arm64.tgapp",
+          "sha256": "eda5239911110619b2582037a127981e207206e85356170da61de5d62bcca3b8",
+          "size": "4645444"
+        }
+      }
+    },
+    {
+      "manifest": {
         "id": "media-scraper",
         "name": "影视刮削",
         "version": "1.0.0",
