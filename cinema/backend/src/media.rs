@@ -12,9 +12,15 @@ use tokio::sync::watch;
 use tokio::{io::AsyncReadExt, process::Command};
 use tokio_util::sync::CancellationToken;
 
-pub const BYTE_LIMIT: u64 = 8 * 1024 * 1024;
+/// 长片 MP4 的索引随时长增长，三小时 60 帧影片约 16 MiB，探测必须整段读完才能得到时长与轨道。
+pub const BYTE_LIMIT: u64 = 64 * 1024 * 1024;
 pub const IMAGE_LIMIT: usize = 256 * 1024;
-const PROBE_TASK_BUDGET: Duration = Duration::from_secs(15);
+/// FFprobe 自身的执行预算；截帧仍用 10 秒。
+pub const PROBE_BUDGET: Duration = Duration::from_secs(30);
+const FRAME_BUDGET: Duration = Duration::from_secs(10);
+const PROBE_TASK_BUDGET: Duration = Duration::from_secs(40);
+/// 本机地址与租约要覆盖探测任务总预算，结束时显式撤销。
+const INPUT_TTL_SECONDS: u16 = 45;
 
 #[derive(Clone)]
 enum ProbeFailure {
@@ -105,7 +111,7 @@ impl ProbeRequest {
         tokio::select! { biased;
             _=cancel.cancelled()=>Err(Error::Cancelled),
             _=app.shutdown_token().cancelled()=>Err(Error::Cancelled),
-            result=tokio::time::timeout(PROBE_TASK_BUDGET,read)=>result.unwrap_or_else(|_|Err(Error::api(error_code::REQUEST_TIMEOUT,"媒体探测等待超过 15 秒总预算"))),
+            result=tokio::time::timeout(PROBE_TASK_BUDGET,read)=>result.unwrap_or_else(|_|Err(Error::api(error_code::REQUEST_TIMEOUT,"媒体探测等待超过 40 秒总预算"))),
         }
     }
 }
@@ -163,13 +169,15 @@ impl Input {
     async fn open(app: &Application, entry: &Entry) -> Result<Self> {
         let lease = app
             .host
-            .create_read_lease(CreateReadLeaseRequest { ttl_seconds: 15 })
+            .create_read_lease(CreateReadLeaseRequest {
+                ttl_seconds: u32::from(INPUT_TTL_SECONDS),
+            })
             .await?;
         let local = match app
             .host
             .local_url(LocalFileUrlRequest {
                 file: entry.file(),
-                ttl_seconds: Some(15),
+                ttl_seconds: Some(INPUT_TTL_SECONDS),
                 byte_budget: Some(ByteCount(BYTE_LIMIT)),
                 request_budget: Some(32),
                 lease_id: Some(lease.id.clone()),
@@ -223,7 +231,7 @@ impl Drop for Input {
     }
 }
 pub fn limits() -> Value {
-    json!({"probe_bytes":BYTE_LIMIT,"probe_seconds":10,"probe_task_seconds":PROBE_TASK_BUDGET.as_secs(),"probe_concurrency":2,"probe_queue":0,"probe_output_bytes":128*1024,"probe_packets":64,"nfo_bytes":crate::nfo::MAX_BYTES,"poster_bytes":2*1024*1024,"subtitle_bytes":512*1024,"frame_pixels":16*1024*1024,"frame_edge":640,"frame_image_bytes":IMAGE_LIMIT})
+    json!({"probe_bytes":BYTE_LIMIT,"probe_seconds":PROBE_BUDGET.as_secs(),"probe_task_seconds":PROBE_TASK_BUDGET.as_secs(),"probe_concurrency":2,"probe_queue":0,"probe_output_bytes":128*1024,"probe_packets":64,"nfo_bytes":crate::nfo::MAX_BYTES,"poster_bytes":2*1024*1024,"subtitle_bytes":512*1024,"frame_pixels":16*1024*1024,"frame_edge":640,"frame_image_bytes":IMAGE_LIMIT})
 }
 pub fn command(program: &str) -> Command {
     let mut command = Command::new(program);
@@ -306,7 +314,7 @@ pub async fn probe(
                 .unwrap_or_else(|_| {
                     Err(Error::api(
                         error_code::REQUEST_TIMEOUT,
-                        "媒体探测任务超过 15 秒总预算",
+                        "媒体探测任务超过 40 秒总预算",
                     ))
                 });
                 owner.flight.finish(result);
@@ -381,7 +389,7 @@ pub async fn run_probe(
             "json",
         ])
         .arg(input);
-    let bytes = run(child, 128 * 1024, Some(cancel)).await?;
+    let bytes = run(child, 128 * 1024, PROBE_BUDGET, Some(cancel)).await?;
     let value: Value = tgdrive_contract::validation::parse_unique_json(&bytes)?;
     let duration = value["format"]["duration"]
         .as_str()
@@ -452,6 +460,7 @@ pub async fn run_probe(
 async fn run(
     mut command: Command,
     limit: usize,
+    budget: Duration,
     cancel: Option<&CancellationToken>,
 ) -> Result<Vec<u8>> {
     let mut child = command
@@ -507,9 +516,9 @@ async fn run(
         };
         tokio::select! { biased;
             _ = stopped => Err(Error::Cancelled),
-            result = tokio::time::timeout(Duration::from_secs(10), async {
+            result = tokio::time::timeout(budget, async {
                 tokio::try_join!(read_output, read_errors, wait)
-            }) => result.unwrap_or_else(|_| Err(Error::api(error_code::REQUEST_TIMEOUT, "媒体组件执行超过 10 秒预算"))),
+            }) => result.unwrap_or_else(|_| Err(Error::api(error_code::REQUEST_TIMEOUT, "媒体组件执行超过时间预算"))),
         }
     };
     if result.is_err() {
@@ -550,7 +559,7 @@ pub async fn frame(
     let result = tokio::select! {
         _=cancel.cancelled()=>Err(Error::Cancelled),
         _=app.shutdown_token().cancelled()=>Err(Error::Cancelled),
-        result=tokio::time::timeout(Duration::from_secs(10),frame_inner(app,entry,&input.url))=>result.unwrap_or_else(|_|Err(Error::api(error_code::REQUEST_TIMEOUT,"封面截帧超过 10 秒预算"))),
+        result=tokio::time::timeout(FRAME_BUDGET,frame_inner(app,entry,&input.url))=>result.unwrap_or_else(|_|Err(Error::api(error_code::REQUEST_TIMEOUT,"封面截帧超过 10 秒预算"))),
     };
     input.close().await;
     result
@@ -636,7 +645,7 @@ async fn frame_inner(app: &Application, entry: &Entry, input: &str) -> Result<Ve
                 "image2pipe",
                 "pipe:1",
             ]);
-        match run(child, 1024 * 1024, None).await {
+        match run(child, 1024 * 1024, FRAME_BUDGET, None).await {
             Ok(frame) => {
                 if let Some(jpeg) = encode_frame(frame).await? {
                     return Ok(jpeg);

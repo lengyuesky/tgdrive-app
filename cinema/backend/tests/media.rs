@@ -166,6 +166,78 @@ fn tail_index(bytes: Vec<u8>) -> Vec<u8> {
     }
 }
 
+/// 高帧率短片循环拷贝成长片：样本表按帧数增长，得到真实长片才有的大索引。
+fn long_index(tail: bool) -> Vec<u8> {
+    let directory = tempfile::tempdir().unwrap();
+    let unit = directory.path().join("unit.mp4");
+    let output = directory.path().join("long.mp4");
+    let status = std::process::Command::new(program("ffmpeg"))
+        .args(["-v", "error", "-nostdin", "-f", "lavfi", "-i"])
+        .arg("testsrc2=size=32x32:rate=240")
+        .args(["-t", "20", "-c:v", "libx264", "-preset", "ultrafast"])
+        .args(["-bf", "2", "-threads", "1", "-pix_fmt", "yuv420p"])
+        .arg(&unit)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let status = std::process::Command::new(program("ffmpeg"))
+        .args(["-v", "error", "-nostdin", "-stream_loop", "249", "-i"])
+        .arg(&unit)
+        .args(["-map", "0", "-c", "copy", "-movflags"])
+        .arg(if tail { "0" } else { "+faststart" })
+        .arg(&output)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::fs::read(output).unwrap()
+}
+
+fn index_size(bytes: &[u8]) -> usize {
+    let mut cursor = 0;
+    while cursor + 8 <= bytes.len() {
+        let size = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        assert!(size >= 8);
+        if &bytes[cursor + 4..cursor + 8] == b"moov" {
+            return size;
+        }
+        cursor += size;
+    }
+    panic!("合成视频缺少索引");
+}
+
+#[tokio::test]
+async fn long_videos_with_index_beyond_eight_mebibytes_probe_at_head_and_tail() {
+    for (name, tail) in [("long-head.mp4", false), ("long-tail.mp4", true)] {
+        let bytes = long_index(tail);
+        let index = index_size(&bytes);
+        assert!(index > 8 * 1024 * 1024, "{name}: 索引仅 {index} 字节");
+        let (app, host) = application(&bytes, name, None).await;
+        let entry = app.db.entry("3").unwrap().unwrap();
+        let info = media::probe(&app, &entry, &CancellationToken::new())
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{name}: {error}; 读取 {} 字节，{} 次请求",
+                    host.reads.load(Ordering::Relaxed),
+                    host.requests.load(Ordering::Relaxed)
+                )
+            });
+        assert!(
+            (4999.0..5001.0).contains(&info.duration),
+            "{name}: {}",
+            info.duration
+        );
+        assert!(info.video().is_some());
+        let read = host.reads.load(Ordering::Relaxed);
+        assert!(
+            read > index as u64 && read <= media::BYTE_LIMIT,
+            "{name}: {read}"
+        );
+        assert_eq!(host.active(), 0);
+        app.shutdown().await;
+    }
+}
+
 #[tokio::test]
 async fn valid_tail_index_fragmented_mp4_and_transport_streams_probe_with_bounded_input() {
     let original = video("testsrc2=size=160x90:rate=25", "1", "mp4");
@@ -599,7 +671,8 @@ async fn probe_has_zero_wait_queue_cancel_reaps_children_and_deadline_is_bounded
             .is_err()
     );
     assert!(
-        began.elapsed() >= Duration::from_secs(10) && began.elapsed() < Duration::from_secs(12)
+        began.elapsed() >= media::PROBE_BUDGET
+            && began.elapsed() < media::PROBE_BUDGET + Duration::from_secs(2)
     );
     assert_eq!(host.active(), 0);
     app.shutdown().await;
