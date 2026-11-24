@@ -9,7 +9,7 @@
       "manifest": {
         "id": "cinema",
         "name": "影视",
-        "version": "1.0.5",
+        "version": "1.0.6",
         "contract": {
           "major": 1,
           "minor": 0
@@ -56,14 +56,14 @@
       },
       "packages": {
         "linux-amd64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.5/cinema-1.0.5-linux-amd64.tgapp",
-          "sha256": "98f30e2d8894ba3ac7cc8157cc6d9dc2df6e2301c6f3d8d6bd809e4f659b9188",
-          "size": "4739106"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.6/cinema-1.0.6-linux-amd64.tgapp",
+          "sha256": "782e04cebe3e775aca46deeda66b1d05a8001ccf76f7d00a162fd0b26a6f3a67",
+          "size": "4736530"
         },
         "linux-arm64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.5/cinema-1.0.5-linux-arm64.tgapp",
-          "sha256": "1f4a255147764166c5beefaa36df837a9ed58c68686ac0b1634e1be80c37c9c5",
-          "size": "4645536"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.6/cinema-1.0.6-linux-arm64.tgapp",
+          "sha256": "82ba86a0150742017e84281fd2a44d763ca338f5295ca866a2fad4960c982ab1",
+          "size": "4642914"
         }
       }
     },
@@ -71,7 +71,7 @@
       "manifest": {
         "id": "media-scraper",
         "name": "影视刮削",
-        "version": "1.0.3",
+        "version": "1.0.4",
         "contract": {
           "major": 1,
           "minor": 0
@@ -104,14 +104,14 @@
       },
       "packages": {
         "linux-amd64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.3/media-scraper-1.0.3-linux-amd64.tgapp",
-          "sha256": "8d3393d22dcb2c5e846077859da5eae732792d13618ea62cd95765ae92b79756",
-          "size": "5512491"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.4/media-scraper-1.0.4-linux-amd64.tgapp",
+          "sha256": "e90dbb5db942abc55884d8ff69e2ca4b15f3c5d544bf0b706c21dd546ba78c43",
+          "size": "5509824"
         },
         "linux-arm64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.3/media-scraper-1.0.3-linux-arm64.tgapp",
-          "sha256": "408d55ed65e739bc1f876b60d89cb4df0d8df76802624d4319e29dc54b37ffce",
-          "size": "5337530"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.4/media-scraper-1.0.4-linux-arm64.tgapp",
+          "sha256": "1e4d7554134aad780d49d227cf41642c52694e6285c4581e368a4480e642c8a8",
+          "size": "5334086"
         }
       }
     },
@@ -119,7 +119,7 @@
       "manifest": {
         "id": "reader",
         "name": "阅读馆",
-        "version": "2.0.2",
+        "version": "2.0.3",
         "contract": {
           "major": 1,
           "minor": 0
@@ -169,9 +169,9 @@
       },
       "packages": {
         "web": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/reader-v2.0.2/reader-2.0.2.tgapp",
-          "sha256": "713106764af461c637bd850ca7ef4e4e6173f685a5f558fda8dd8d76a1e7facc",
-          "size": "2326492"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/reader-v2.0.3/reader-2.0.3.tgapp",
+          "sha256": "4a30207cedf813302c68352631f1638b04bc7335487d213461d8a17f17e7af93",
+          "size": "2326395"
         }
       }
     },
@@ -179,7 +179,7 @@
       "manifest": {
         "id": "shorts",
         "name": "短视频",
-        "version": "2.0.2",
+        "version": "2.0.3",
         "contract": {
           "major": 1,
           "minor": 0
@@ -233,9 +233,9 @@
       },
       "packages": {
         "web": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/shorts-v2.0.2/shorts-2.0.2.tgapp",
-          "sha256": "fe59b3f50b86f48775e5c9131ec2119c8db8945ffa057828d277d21e77d4e516",
-          "size": "35250"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/shorts-v2.0.3/shorts-2.0.3.tgapp",
+          "sha256": "9a7cd4fb43e8105706a2e49c52e406c610f40b0766890adf9e1c6f76eda17eba",
+          "size": "35154"
         }
       }
     }
