@@ -79,10 +79,11 @@ pub struct DataUsage {
     pub kv_bytes: ByteCount,
     pub kv_entry_limit: u32,
     pub kv_byte_limit: ByteCount,
+    /// 宿主代管的本应用可再生对象缓存占用，不含后端私有缓存与临时目录。
     pub cache_bytes: ByteCount,
     pub cache_byte_limit: ByteCount,
+    /// 带后端应用的数据库用量；页面应用为 null，不提供数据库上限。
     pub database_bytes: Option<ByteCount>,
-    pub database_byte_limit: Option<ByteCount>,
 }
 
 /// 仅用于 PUT 请求头：无 padding base64url(UTF-8 JSON CachePutMetadata)。
@@ -145,4 +146,38 @@ impl CacheHit {
 #[cfg_attr(feature = "types", derive(ts_rs::TS))]
 pub struct CacheLookupResponse {
     pub hits: Vec<CacheHit>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_usage_reports_database_usage_without_a_database_limit() {
+        for database_bytes in [Some(ByteCount(536_870_912)), None] {
+            let usage = DataUsage {
+                kv_entries: 1,
+                kv_bytes: ByteCount(32),
+                kv_entry_limit: crate::http::DEFAULT_KV_ENTRIES as u32,
+                kv_byte_limit: ByteCount(crate::http::DEFAULT_KV_BYTES),
+                cache_bytes: ByteCount(1024),
+                cache_byte_limit: ByteCount(crate::http::DEFAULT_CACHE_BYTES),
+                database_bytes,
+            };
+            let value = serde_json::to_value(&usage).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({
+                    "kv_entries": 1,
+                    "kv_bytes": "32",
+                    "kv_entry_limit": 100_000,
+                    "kv_byte_limit": "67108864",
+                    "cache_bytes": "1024",
+                    "cache_byte_limit": "1073741824",
+                    "database_bytes": database_bytes
+                })
+            );
+            assert_eq!(serde_json::from_value::<DataUsage>(value).unwrap(), usage);
+        }
+    }
 }

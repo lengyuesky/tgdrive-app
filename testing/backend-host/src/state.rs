@@ -517,15 +517,9 @@ impl State {
         let backend = self.config.has_backend.then_some(BackendResourceLimits {
             memory_bytes: ByteCount(0),
             cpu_millis: 0,
-            pids: DEFAULT_BACKEND_PIDS as u16,
-            open_files: DEFAULT_BACKEND_OPEN_FILES as u32,
-            cache_bytes: ByteCount(DEFAULT_BACKEND_CACHE_BYTES),
-            database_bytes: ByteCount(DEFAULT_BACKEND_DATABASE_BYTES),
             enforced: BackendLimitEnforcement {
                 memory: false,
                 cpu: false,
-                pids: false,
-                open_files: false,
             },
         });
         let is_page = caller == RuntimeCaller::Page;
@@ -547,11 +541,7 @@ impl State {
             cache_object_bytes: ByteCount(MAX_CACHE_OBJECT_BYTES),
             cache_metadata_bytes: ByteCount(MAX_CACHE_METADATA_BYTES),
             cache_lookup_limit: MAX_CACHE_LOOKUP_KEYS as u16,
-            cache_byte_limit: ByteCount(if self.config.has_backend {
-                DEFAULT_BACKEND_CACHE_BYTES
-            } else {
-                DEFAULT_PAGE_CACHE_BYTES
-            }),
+            cache_byte_limit: ByteCount(DEFAULT_CACHE_BYTES),
             control_concurrency: if is_page {
                 PAGE_CONTROL_CONCURRENCY
             } else {

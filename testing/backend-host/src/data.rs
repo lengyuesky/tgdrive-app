@@ -151,7 +151,6 @@ pub(crate) fn usage(state: &State, caller: RuntimeCaller) -> DataUsage {
         cache_bytes: ByteCount(state.cache.values().map(|object| object.entry.size.0).sum()),
         cache_byte_limit: limits.cache_byte_limit,
         database_bytes: limits.backend.as_ref().map(|_| ByteCount(0)),
-        database_byte_limit: limits.backend.map(|limits| limits.database_bytes),
     }
 }
 

@@ -212,7 +212,7 @@ TypeScript 生成类型表示 Rust 序列化后的规范化对象。请求中写
 | `open_with` | 可省略；extensions 为 0～64 个互不重复的小写后缀，directories 缺省 false；声明入口必须 read=true |
 | 其他字段 | 可选扩展，保留但无权限效力；不得与已定义字段重名 |
 
-应用不在清单里声明或请求资源。内存与 CPU 只有一组由主人在宿主设置里填写的总体限制，全部应用后端合计共用，不按应用分配；进程数、打开文件数、数据库与缓存容量是宿主对每个应用统一使用的固定值，见第 14 节。旧包清单里的 `backend.resources` 按普通扩展字段保留，没有任何效力。
+应用不在清单里声明或请求资源。内存与 CPU 只有一组由主人在宿主设置里填写的总体限制，全部应用后端合计共用，不按应用分配；宿主不对单个应用后端设置进程数、打开文件数、数据库或私有缓存/临时目录的上限，见第 14 节。清单里的 `backend.resources` 按普通扩展字段保留，没有任何效力。
 
 不提供宿主专用设置表、内容格式列表、内置爬取源、固定应用 ID 特权或应用专用迁移回调。配置、业务状态、SQLite/KV 的应用自身 schema 迁移都由应用实现。
 
@@ -609,7 +609,7 @@ ETag 为强标识：原文件表示为 `"v<content_version>"`；有窗口为 `"v
 | PUT `/admin/api/apps/v1/self/kv/{key}` | KvPutRequest={value,condition} | 200 新 KvRecord={key,value,revision,updated_at} | A；storage_conflict/quota_exceeded |
 | DELETE `/admin/api/apps/v1/self/kv/{key}` | JSON KvDeleteRequest={revision} | 204 | A；storage_conflict，包括期望存在但已被删除 |
 | POST `/admin/api/apps/v1/self/kv/list` | KvListRequest={prefix?,limit?,cursor?}，默认 prefix=""、limit=100，最多 200 | 200 KvPage={records,next_cursor} | A；invalid_cursor/cursor_expired |
-| GET `/admin/api/apps/v1/self/data/usage` | 无 | 200 DataUsage，KV 条数/字节/限额、缓存占用/限额、可选后端数据库占用/限额 | A |
+| GET `/admin/api/apps/v1/self/data/usage` | 无 | 200 DataUsage，KV 条数/字节/限额、对象缓存占用/淘汰线、可选后端数据库占用；不提供数据库上限 | A |
 
 下面四个接口属于已定义的**非必备 kv.device 扩展**。只有实际实现并声明 kv.device 的宿主提供，首版宿主不实现，原生客户端须先通过宿主原生能力宣告探测；不把 iOS 适配纳入本次切换。DeviceAppDataGrant 类型保留供该扩展使用。
 
@@ -654,7 +654,7 @@ key 与 KV 相同。单对象最多 2 MiB，metadata JSON 最多 4096 字节，s
 
 缓存票据的公网/套接字入口都只支持 GET/HEAD 与 If-None-Match，成功响应为 200/304，语义与各自的公网入口完全相同。缓存对象最大 2 MiB，不支持 Range 与 If-Range，不提供 206 或 416 响应，也不使用第 9.5 节的 Range/If-Range 解释。ETag 绑定缓存修订，200/304 均携带同一完整 CacheEntry 元信息响应头；HEAD 不读缓存正文，304 前仍核对票据与源有效性。
 
-缓存默认页面应用 256 MiB，带后端 1 GiB（与私有 cache 子目录共用总配额），按最近访问淘汰到上限 90%；新 PUT 对象本轮不淘汰。读取访问时间可以合并刷新，不每次写 SQLite。lookup URL TTL 为 300 秒，不超过创建者会话/源权限，缓存同键覆盖后旧票据作为未命中，不返回旧字节。
+宿主代管的可再生对象缓存每应用 1 GiB（DEFAULT_CACHE_BYTES），不区分页面应用与带后端应用，也不与后端私有缓存或临时目录合计；RuntimeLimits.cache_byte_limit 是该应用对象缓存的淘汰线。写满只按最近访问淘汰旧对象到上限 90%；新 PUT 对象本轮不淘汰。读取访问时间可以合并刷新，不每次写 SQLite。lookup URL TTL 为 300 秒，不超过创建者会话/源权限，缓存同键覆盖后旧票据作为未命中，不返回旧字节。
 
 宿主在该应用 `cache/objects/` 内用原子文件/可再生元数据管理 API 对象；应用后端自行生成的工作缓存放 `cache/work/`。不建任何内容类型的表、不用 base64 把所有二进制塞进 JSON 主库。应用不得直接修改 objects 的实现文件，但可以通过 API 操作；objects/work 都可随时丢失或清空，后端不能把业务状态放在缓存中。纯页面应用没有任意文件系统接口。
 
@@ -671,7 +671,7 @@ key 与 KV 相同。单对象最多 2 MiB，metadata JSON 最多 4096 字节，s
   state/                         # 本应用 UID 可写
     app.sqlite3                  # 唯一纳入备份的 SQLite 数据库
     app.sqlite3-wal / -shm        # SQLite 同库辅助文件，不单独当作业务库
-  cache/                         # 可再生，共用缓存配额
+  cache/                         # 可再生，不备份；objects 独立按容量淘汰
     objects/                     # 通用缓存 API 管理
     work/                        # 应用后端工作缓存
   tmp/                           # 本应用私有临时文件，不备份
@@ -728,9 +728,9 @@ run/host.sock 的目录由 root 管理、组访问绑定唯一应用 UID/GID；�
 
 启动后端必须满足的硬要求只有：每应用独立 UID/GID、文件权限隔离、专用套接字身份、清空宿主环境、按应用进程组回收全部子进程。无法满足这些要求时返回 capability_unavailable/backend_unavailable，不能假装隔离。
 
-资源限制**尽力而为**：内存/CPU 是宿主设置里的总体限制，设置在全部应用后端共同所在的 cgroup 上，各后端合计不超过它，0 表示不限制；主人修改后对运行中的后端立即生效。设了内存上限时同时禁止这些后端使用交换空间，合计超出时内核在这些后端里终止占用最多的进程。它在 cgroup v2 的相应控制器可写且实际设置成功时应用；cgroup 只读、不可用或设置失败时仍照常启动。PID 数用 RLIMIT_NPROC（独立 UID 使计数按应用生效），fd 用 RLIMIT_NOFILE，禁用 core dump。配置目标与实际强制分开：RuntimeInfo.limits.backend 和 BackendStartContext.limits 都必须带 `enforced={memory,cpu,pids,open_files}`，四项布尔值只在该轮实际强制成功时为 true，设为不限制的项为 false；失败记录告警并为 false，不把配置值冒充硬上限。
+资源限制**尽力而为**：内存/CPU 是宿主设置里的总体限制，设置在全部应用后端共同所在的 cgroup 上，各后端合计不超过它，0 表示不限制；主人修改后对运行中的后端立即生效。设了内存上限时同时禁止这些后端使用交换空间，合计超出时内核在这些后端里终止占用最多的进程。它在 cgroup v2 的相应控制器可写且实际设置成功时应用；cgroup 只读、不可用或设置失败时仍照常启动。后端进程继承宿主进程的进程数上限；打开文件数的软上限由宿主在启动时提到硬上限，并禁用 core dump。配置目标与实际强制分开：RuntimeInfo.limits.backend 和 BackendStartContext.limits 都必须带 `enforced={memory,cpu}`，两项布尔值只在该轮实际强制成功时为 true，设为不限制的项为 false；失败记录告警并为 false，不把配置值冒充硬上限。
 
-磁盘只有**监督式计量**：KV/API 缓存写入由宿主同步计量，cache/work、state、tmp 的后端文件写入由宿主监督统计，发现超限停止后端、阻止再启动直至主人清理/调整。数据库按 database_bytes 计量，cache/work/objects 与 tmp 合计按 cache_bytes 计量。监督可能短暂超额，**不是实时硬隔离保证**，不能静默删除 SQLite 业务数据；应用必须主动限制缓存和临时输出。
+宿主不对单个应用后端的数据库、私有缓存（cache/work）或临时目录设置容量上限，不因磁盘用量停止后端或阻止启动，BackendStatus 不报告磁盘超限导致的失败。DataUsage.database_bytes 仍报告带后端应用的数据库用量，但不提供数据库上限字段；页面应用该字段为 null。KV 写入仍由宿主同步检查条数与字节限额；宿主代管的可再生对象缓存只按第 11 节的容量淘汰旧对象，不与后端私有目录合计，不能静默删除 SQLite 业务数据。
 
 ## 13. 请求转发与浏览器安全
 
@@ -890,13 +890,13 @@ data: {"cursor":"events-2","occurred_at":2,"event":"files.changed","data":{"chan
 | 清单与名称 | 名称120/描述1600/作者160字节、版本80字节、能力名称80字节/必需列表64项、后缀40字节、MIME256字节、资源/路径/节点名沿用相应上限 |
 | 分发 | 仓库owner39/name100字节、架构目标名48字节/最多16目标、SHA256固定64位、包/图标/目录文件和条目限额沿用对应常量 |
 | 操作与默认 | operation_id64字节、幂等键16～128字节、Unix套接字路径107字节、文件/KV/随机默认200/100/20项、正数参数最小1 |
-| 资源与事件 | 后端数据库/缓存/PID/fd 的每应用固定值均导出；缓存淘汰目标90%、文件提示去抖250ms/最长1000ms亦统一导出 |
+| 资源与事件 | 后端总体内存/CPU 限制的默认值与可设置范围、每应用对象缓存 DEFAULT_CACHE_BYTES=1 GiB 均导出；缓存淘汰目标90%、文件提示去抖250ms/最长1000ms亦统一导出 |
 
 **响应预算核算与选择**：FileNode 的名字/路径禁止控制字符，UTF-8 JSON 仅引号等至多约2倍转义，不按每字节6倍或再次字符串化 JSON value 估算。按路径4096、名字255、修订/内容标识128、数值和字段名，单个 FileNode 保守上界10 KiB；未按字节截页时500节点加游标约5 MiB。KV单值的32 KiB已是序列化 JSON，放进 record.value 不再二次转义，200条连同键/修订约6.4 MiB。子树失效变更还包含旧路径，500项可接近10 MiB。这些大整页不适合把通用SDK预算放大到约14 MiB，因此选择512 KiB数组字节截页，而不是降低所有小记录的条数上限。
 
 字节截页后，目录/文件/变更/KV页面数组至多512 KiB，算入外层目录节点和最多两个4096字节游标（即使按JSON最坏6倍转义），完整响应仍低于约600 KiB。非分页 ScopeInfo/RuntimeInfo 最多128个授权根节点，再加声明/限额信息低于约1.5 MiB；缓存 lookup 最多64项，每项CacheEntry≤5 KiB、合法URL≤8192字节，即使URL按2倍JSON转义也低于约1.4 MiB。因此宿主应用能力 JSON 响应总上限定为**2 MiB（2097152字节）**。宿主在序列化前按数组累计预算选连续前缀，用 json_page_prefix_count/validate_json_page 与 validate_json_response 共用计数规则；不能先生成大响应，再因超过预算丢弃结果或断言小于limit即结束。计数校验不另分配完整JSON缓冲。
 
-除清单、包与查询已写明的上限外，以下默认值在 `http::LIMITS` 统一定义，RuntimeInfo 给出本调用方配置与实际强制状态。宿主接口自身的请求、并发与 KV/对象写入限额直接执行；后端 CPU/内存/PID/fd 为尽力而为，必须按 enforced 标明，后端磁盘为监督式计量。允许主人降低配额，不能把目标配置或缺失的强制措施冒充实际硬上限；增加配额不能改变数据类型边界。
+除清单、包与查询已写明的上限外，以下默认值在 `http::LIMITS` 统一定义，RuntimeInfo 给出本调用方配置与实际强制状态。宿主接口自身的请求、并发与 KV 写入限额直接执行，对象缓存容量通过淘汰旧对象维持；后端只有 CPU/内存这组总体限制，为尽力而为，必须按 enforced 标明。允许主人降低宿主接口配额，不能把目标配置或缺失的强制措施冒充实际硬上限；增加配额不能改变数据类型边界。
 
 | 项目 | v1 值 |
 |---|---|
@@ -913,9 +913,9 @@ data: {"cursor":"events-2","occurred_at":2,"event":"files.changed","data":{"chan
 | 每应用读租约 / 活跃媒体票据 / 未提交上传 | 256 / 8192 / 4；ticket/lease 到期清理，不能靠重试累积无界内存 |
 | 本机地址 | TTL 默认 60、最多 600 秒；16 MiB 默认累计预算、最多 1 GiB，按有界上游块共享扣减、不预留整段；32 默认请求、最多 256，计次不归还 |
 | KV | 10 万条、64 MiB、单值 32 KiB、键 128 字节、页最多 200 |
-| 页面缓存 / 后端缓存（含 tmp） | 256 MiB / 1 GiB，单 API 对象 2 MiB、metadata 4096 字节、lookup 最多 64 键 |
+| 宿主代管对象缓存 | 每应用 1 GiB，不含后端私有缓存或 tmp；单 API 对象 2 MiB、metadata 4096 字节、lookup 最多 64 键，写满淘汰旧对象到上限 90% |
 | 缓存元信息响应头 | CacheEntry 完整 JSON 5120 字节，base64url 无 padding 头值最多 6827 字节；与请求 CachePutMetadata 分开解释 |
-| 后端 SQLite / 缓存 / PID / fd | 每应用固定 512 MiB / 1 GiB / 64 / 1024，应用不能声明；磁盘监督，PID/fd 用 rlimit |
+| 后端 SQLite / 私有缓存与临时目录 / 进程数 / 打开文件数 | 宿主不设单应用上限；进程数继承宿主上限，打开文件软上限提到硬上限；不因磁盘用量停止后端或阻止启动 |
 | 后端内存 / CPU | 宿主设置里的总体限制，全部应用后端合计共用，默认 2 GiB / 不限制，0 为不限制；可写 cgroup 时强制，状态见 enforced |
 | 就绪 / 停止 / 按需空闲 | 30 / 10 / 300 秒 |
 | 重启 | 10 分钟最多 5 次，退避 1/2/4/8/16 秒 |
@@ -925,7 +925,7 @@ data: {"cursor":"events-2","occurred_at":2,"event":"files.changed","data":{"chan
 | 上传/变更回执保留 | 未提交上传 24 小时；创建幂等/已提交结果与元数据回执 7 天 |
 | 包上传 staging / 安装预览 | 1 小时 / 10 分钟；只保存已验证内容，失效要求重新预览 |
 
-宿主接口的限额冲突先拒绝，不静默截断结果或超预算缓冲；后端资源按上文的实际强制/监督状态处理，不因没有可写 cgroup 拒绝启动。可以合并只读请求/预取、缓存与事件去抖，但不合并有不同取消语义的写入、不替应用推断业务优先级或无限排队。
+宿主接口的请求、并发与持久写入限额冲突先拒绝，不静默截断结果或超预算缓冲；对象缓存容量不足时按第 11 节淘汰旧对象。后端内存/CPU 按上文的实际强制状态处理，不因没有可写 cgroup 拒绝启动。可以合并只读请求/预取、缓存与事件去抖，但不合并有不同取消语义的写入、不替应用推断业务优先级或无限排队。
 
 ## 15. 应用中心管理接口全集
 
@@ -970,7 +970,7 @@ InstalledApp 包含 manifest、generation、state_revision、enabled/pinned、Sc
 | 阅读馆 | 页面 files.query 按格式/名称/时间在大书库分页；directories-with-files 找直接有图片的目录；list 取单章直属图；bytes/限时 URL 有界读取 EPUB/PDF/归档，KV CAS 存进度/配置；cache.objects 缓存生成的小对象；变化用增量核对 | 格式支持、书籍元数据、作品组织、章节/页面/书签、PDF/归档解析、封面生成、阅读 UI |
 | 短视频 | 页面 files.random 在全部授权范围抽样并排除近期视频；stat/限时 URL 播放，原附件缩略图可选；KV 存偏好/应用收藏，变化重核来源；沉浸/关闭走 UI 消息 | 视频后缀集合、随机队列/历史策略、播放控件、手势、应用收藏 |
 
-必须具备的符合性测试至少包括：同 minor 新字段不拖垮旧应用；未来条目被单独跳过；两架构和完整清单/摘要绑定；路径/链接/ZIP 安全；none/读写声明/ID 祖先/重叠授权；撤权或移动祖先后旧票据和游标失效；大规模查询不截断/不使用 OFFSET；目录直属命中而非后代命中；随机不是前页洗牌且不全表扫描；KV CAS/ABA；条件整组移动/上传最终提交与崩溃回执；单 Range/窗口/HEAD/304/416；外部不能伪造 owner；后端崩溃撤销并回收子进程；无可写 cgroup 仍可启动并如实报告 enforced；在线备份辅助进程按应用 UID 读取；SSE 重启/缺口发 sync.required；根入口安全头；根地址/固定前缀按真实签名或令牌存储识别并剥除宿主 Bearer，不能按字符串猜测，应用自己的未命中凭据保留且请求仍为 external；页面/固定前缀双向全部 Cookie 隔离；根地址按宿主名称/保留前缀过滤、Set-Cookie 固定 Path=/ 并去除 Domain，任何 Path/Domain 都不能覆写宿主 Cookie。实现 kv.device 时另外验证设备 KV 隔离，不把未实现的扩展算作 v1 验收失败。
+必须具备的符合性测试至少包括：同 minor 新字段不拖垮旧应用；未来条目被单独跳过；两架构和完整清单/摘要绑定；路径/链接/ZIP 安全；none/读写声明/ID 祖先/重叠授权；撤权或移动祖先后旧票据和游标失效；大规模查询不截断/不使用 OFFSET；目录直属命中而非后代命中；随机不是前页洗牌且不全表扫描；KV CAS/ABA；条件整组移动/上传最终提交与崩溃回执；单 Range/窗口/HEAD/304/416；外部不能伪造 owner；后端崩溃撤销并回收子进程；无可写 cgroup 仍可启动并如实报告 enforced={memory,cpu}；后端数据库与私有缓存/临时用量不限制启动或触发停止；页面应用与带后端应用的对象缓存均按 1 GiB 淘汰到 90%；在线备份辅助进程按应用 UID 读取；SSE 重启/缺口发 sync.required；根入口安全头；根地址/固定前缀按真实签名或令牌存储识别并剥除宿主 Bearer，不能按字符串猜测，应用自己的未命中凭据保留且请求仍为 external；页面/固定前缀双向全部 Cookie 隔离；根地址按宿主名称/保留前缀过滤、Set-Cookie 固定 Path=/ 并去除 Domain，任何 Path/Domain 都不能覆写宿主 Cookie。实现 kv.device 时另外验证设备 KV 隔离，不把未实现的扩展算作 v1 验收失败。
 
 以下场景必须单独验收，不能只验证生成类型：
 

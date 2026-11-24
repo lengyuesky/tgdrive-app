@@ -89,6 +89,68 @@ fn query_request(limit: u16) -> FileQuery {
 }
 
 #[tokio::test]
+async fn cache_eviction_line_is_shared_and_database_usage_has_no_limit() {
+    for has_backend in [false, true] {
+        let host = MemoryHost::new(MemoryConfig {
+            app: AppIdentity {
+                id: "example".into(),
+                name: "测试应用".into(),
+                version: "1.0.0".into(),
+                generation: "g1".into(),
+            },
+            files: FilePermissions::default(),
+            scope: DirectoryScope::None,
+            nodes: vec![],
+            caller: RuntimeCaller::Page,
+            now: Timestamp(1),
+            has_backend,
+        })
+        .unwrap();
+        host.cache_put(
+            "shared".into(),
+            byte_stream(vec![1, 2]),
+            "application/octet-stream".into(),
+            CachePutMetadata {
+                metadata: serde_json::Value::Null,
+                sources: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        let callers = if has_backend {
+            &[RuntimeCaller::Page, RuntimeCaller::Backend][..]
+        } else {
+            &[RuntimeCaller::Page][..]
+        };
+        for &caller in callers {
+            let client = host.fork(caller);
+            let runtime = client.runtime_info().await.unwrap();
+            assert_eq!(runtime.limits.cache_byte_limit.0, DEFAULT_CACHE_BYTES);
+            let backend = has_backend.then(|| {
+                serde_json::json!({
+                    "memory_bytes": "0", "cpu_millis": 0,
+                    "enforced": { "memory": false, "cpu": false },
+                })
+            });
+            assert_eq!(
+                serde_json::to_value(&runtime.limits.backend).unwrap(),
+                serde_json::json!(backend)
+            );
+            assert_eq!(
+                serde_json::to_value(client.data_usage().await.unwrap()).unwrap(),
+                serde_json::json!({
+                    "kv_entries": 0, "kv_bytes": "0",
+                    "kv_entry_limit": DEFAULT_KV_ENTRIES,
+                    "kv_byte_limit": DEFAULT_KV_BYTES.to_string(),
+                    "cache_bytes": "2", "cache_byte_limit": DEFAULT_CACHE_BYTES.to_string(),
+                    "database_bytes": has_backend.then_some("0"),
+                }),
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn closing_one_page_preserves_other_pages_and_backend_capabilities() {
     let host = host();
     let page = host.fork(RuntimeCaller::Page);

@@ -55,7 +55,7 @@ export type BackendKeepaliveRequest = { ttl_seconds: number, };
  * 标明各项配置限额是否已在本轮启动中实际强制；不能把尽力而为的目标当成硬隔离。
  */
 
-export type BackendLimitEnforcement = { memory: boolean, cpu: boolean, pids: boolean, open_files: boolean, };
+export type BackendLimitEnforcement = { memory: boolean, cpu: boolean, };
 
 export type BackendManifest = { entry: string, run_mode: RunMode, external_service: boolean, } & ({ [key in string]?: number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null });
 
@@ -69,7 +69,7 @@ memory_bytes: ByteCount,
 /**
  * 全部应用后端合计每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU，0 表示不限制。
  */
-cpu_millis: number, pids: number, open_files: number, cache_bytes: ByteCount, database_bytes: ByteCount, enforced: BackendLimitEnforcement, };
+cpu_millis: number, enforced: BackendLimitEnforcement, };
 
 /**
  * 应用后端的唯一启动参数为 --tgdrive-context <此对象的 JSON 文件绝对路径>。
@@ -153,7 +153,15 @@ export type CreateReadLeaseRequest = { ttl_seconds: number, };
 
 export type CreateUploadRequest = { target: UploadTarget, size: ByteCount, sha256?: string | null, scope_revision: string, };
 
-export type DataUsage = { kv_entries: number, kv_bytes: ByteCount, kv_entry_limit: number, kv_byte_limit: ByteCount, cache_bytes: ByteCount, cache_byte_limit: ByteCount, database_bytes: ByteCount | null, database_byte_limit: ByteCount | null, };
+export type DataUsage = { kv_entries: number, kv_bytes: ByteCount, kv_entry_limit: number, kv_byte_limit: ByteCount,
+/**
+ * 宿主代管的本应用可再生对象缓存占用，不含后端私有缓存与临时目录。
+ */
+cache_bytes: ByteCount, cache_byte_limit: ByteCount,
+/**
+ * 带后端应用的数据库用量；页面应用为 null，不提供数据库上限。
+ */
+database_bytes: ByteCount | null, };
 
 /**
  * kv.device 可选能力的设备授权，由主人配对/设置保存；不授予目录或主人管理接口的权限。
@@ -458,7 +466,11 @@ export type RuntimeInfo = { contract: ContractVersion, app: AppIdentity, caller:
  */
 external_service?: ExternalServiceInfo | null, };
 
-export type RuntimeLimits = { json_request_bytes: ByteCount, json_response_bytes: ByteCount, json_page_bytes: ByteCount, file_page_limit: number, query_root_limit: number, extension_limit: number, mutation_operation_limit: number, mutation_assertion_limit: number, random_limit: number, random_exclusion_limit: number, kv_key_bytes: number, kv_value_bytes: ByteCount, kv_entry_limit: number, kv_byte_limit: ByteCount, cache_object_bytes: ByteCount, cache_metadata_bytes: ByteCount, cache_lookup_limit: number, cache_byte_limit: ByteCount, control_concurrency: number, byte_stream_concurrency: number, control_requests_per_second: number, control_burst: number, read_lease_limit: number, media_ticket_limit: number, upload_limit: number, backend: BackendResourceLimits | null, };
+export type RuntimeLimits = { json_request_bytes: ByteCount, json_response_bytes: ByteCount, json_page_bytes: ByteCount, file_page_limit: number, query_root_limit: number, extension_limit: number, mutation_operation_limit: number, mutation_assertion_limit: number, random_limit: number, random_exclusion_limit: number, kv_key_bytes: number, kv_value_bytes: ByteCount, kv_entry_limit: number, kv_byte_limit: ByteCount, cache_object_bytes: ByteCount, cache_metadata_bytes: ByteCount, cache_lookup_limit: number,
+/**
+ * 本应用可再生对象缓存的淘汰线，不含后端私有缓存与临时目录。
+ */
+cache_byte_limit: ByteCount, control_concurrency: number, byte_stream_concurrency: number, control_requests_per_second: number, control_burst: number, read_lease_limit: number, media_ticket_limit: number, upload_limit: number, backend: BackendResourceLimits | null, };
 
 /**
  * 仅由页面界面消息请求主人授权；不是应用后端的 HTTP 能力。
@@ -725,10 +737,7 @@ export const LIMITS = {
   "CATALOG_MIN_CHECK_SECONDS": 30,
   "CATALOG_TIMEOUT_SECONDS": 10,
   "CONTROL_TIMEOUT_SECONDS": 30,
-  "DEFAULT_BACKEND_CACHE_BYTES": 1073741824,
-  "DEFAULT_BACKEND_DATABASE_BYTES": 536870912,
-  "DEFAULT_BACKEND_OPEN_FILES": 1024,
-  "DEFAULT_BACKEND_PIDS": 64,
+  "DEFAULT_CACHE_BYTES": 1073741824,
   "DEFAULT_FILE_PAGE_LIMIT": 200,
   "DEFAULT_KV_BYTES": 67108864,
   "DEFAULT_KV_ENTRIES": 100000,
@@ -737,7 +746,6 @@ export const LIMITS = {
   "DEFAULT_LOCAL_REQUEST_BUDGET": 32,
   "DEFAULT_LOCAL_TICKET_SECONDS": 60,
   "DEFAULT_MEDIA_TICKET_SECONDS": 900,
-  "DEFAULT_PAGE_CACHE_BYTES": 268435456,
   "DEFAULT_RANDOM_LIMIT": 20,
   "DEFAULT_SHARED_BACKEND_CPU_MILLIS": 0,
   "DEFAULT_SHARED_BACKEND_MEMORY_BYTES": 2147483648,

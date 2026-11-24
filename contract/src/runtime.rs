@@ -49,8 +49,6 @@ pub enum RuntimeCaller {
 pub struct BackendLimitEnforcement {
     pub memory: bool,
     pub cpu: bool,
-    pub pids: bool,
-    pub open_files: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,10 +58,6 @@ pub struct BackendResourceLimits {
     pub memory_bytes: ByteCount,
     /// 全部应用后端合计每秒最多占用的 CPU 毫秒；1000 等于一个逻辑 CPU，0 表示不限制。
     pub cpu_millis: u32,
-    pub pids: u16,
-    pub open_files: u32,
-    pub cache_bytes: ByteCount,
-    pub database_bytes: ByteCount,
     pub enforced: BackendLimitEnforcement,
 }
 
@@ -87,6 +81,7 @@ pub struct RuntimeLimits {
     pub cache_object_bytes: ByteCount,
     pub cache_metadata_bytes: ByteCount,
     pub cache_lookup_limit: u16,
+    /// 本应用可再生对象缓存的淘汰线，不含后端私有缓存与临时目录。
     pub cache_byte_limit: ByteCount,
     pub control_concurrency: u16,
     pub byte_stream_concurrency: u16,
@@ -409,22 +404,20 @@ mod tests {
         let limits = BackendResourceLimits {
             memory_bytes: ByteCount(536_870_912),
             cpu_millis: 1000,
-            pids: 64,
-            open_files: 1024,
-            cache_bytes: ByteCount(1_073_741_824),
-            database_bytes: ByteCount(536_870_912),
             enforced: BackendLimitEnforcement {
                 memory: false,
                 cpu: false,
-                pids: true,
-                open_files: true,
             },
         };
         let value = serde_json::to_value(&limits).unwrap();
-        assert_eq!(value["memory_bytes"], "536870912");
-        assert_eq!(value["enforced"]["memory"], false);
-        assert_eq!(value["enforced"]["cpu"], false);
-        assert_eq!(value["enforced"]["pids"], true);
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "memory_bytes": "536870912",
+                "cpu_millis": 1000,
+                "enforced": {"memory": false, "cpu": false}
+            })
+        );
         assert_eq!(
             serde_json::from_value::<BackendResourceLimits>(value).unwrap(),
             limits
@@ -495,17 +488,20 @@ mod tests {
     }
 
     #[test]
-    fn enforcement_flags_must_be_explicit() {
-        let incomplete = serde_json::json!({
-            "memory_bytes":"536870912", "cpu_millis":1000, "pids":64, "open_files":1024,
-            "cache_bytes":"1073741824", "database_bytes":"536870912"
+    fn backend_resource_limits_and_enforcement_flags_must_be_explicit() {
+        let complete = serde_json::json!({
+            "memory_bytes": "536870912", "cpu_millis": 1000,
+            "enforced": {"memory": false, "cpu": false}
         });
-        assert!(serde_json::from_value::<BackendResourceLimits>(incomplete).is_err());
-        assert!(
-            serde_json::from_value::<BackendLimitEnforcement>(serde_json::json!({
-                "memory":false, "cpu":false, "pids":true
-            }))
-            .is_err()
-        );
+        for field in ["memory_bytes", "cpu_millis", "enforced"] {
+            let mut incomplete = complete.clone();
+            incomplete.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<BackendResourceLimits>(incomplete).is_err());
+        }
+        for field in ["memory", "cpu"] {
+            let mut incomplete = complete["enforced"].clone();
+            incomplete.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<BackendLimitEnforcement>(incomplete).is_err());
+        }
     }
 }

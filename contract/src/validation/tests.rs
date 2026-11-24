@@ -83,7 +83,7 @@ fn legacy_backend_resource_request_is_an_inert_extension() {
         "id":"sample","name":"示例","version":"1.0.0","contract":{"major":1,"minor":0},
         "description":"测试","author":"开发者","files":{"read":true,"write":false},
         "backend":{"entry":"backend/app","run_mode":"resident","external_service":true,
-            "resources":{"memory_bytes":"536870912","cpu_millis":1000,"pids":64}}
+            "resources":{"memory_bytes":"536870912","cpu_millis":1000}}
     }"#;
     let manifest = parse_manifest(raw.as_bytes()).unwrap();
     let backend = manifest.backend.as_ref().unwrap();

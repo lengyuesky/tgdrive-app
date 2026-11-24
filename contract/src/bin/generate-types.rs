@@ -568,6 +568,38 @@ mod tests {
     }
 
     #[test]
+    fn shared_backend_limits_and_object_cache_capacity_are_exported_without_per_app_caps() {
+        let generated = generate().unwrap();
+        let declarations = registry().declarations;
+        let enforcement = &declarations["BackendLimitEnforcement"];
+        assert!(enforcement.contains("memory: boolean"));
+        assert!(enforcement.contains("cpu: boolean"));
+        for removed in ["pids:", "open_files:"] {
+            assert!(!enforcement.contains(removed));
+        }
+        let backend = &declarations["BackendResourceLimits"];
+        assert!(backend.contains("memory_bytes: ByteCount"));
+        assert!(backend.contains("cpu_millis: number"));
+        assert!(backend.contains("enforced: BackendLimitEnforcement"));
+        for removed in ["pids:", "open_files:", "cache_bytes:", "database_bytes:"] {
+            assert!(!backend.contains(removed));
+        }
+        let usage = &declarations["DataUsage"];
+        assert!(usage.contains("database_bytes: ByteCount | null"));
+        assert!(!usage.contains("database_byte_limit:"));
+        assert!(generated.contains("\"DEFAULT_CACHE_BYTES\": 1073741824"));
+        for removed in [
+            "DEFAULT_PAGE_CACHE_BYTES",
+            "DEFAULT_BACKEND_CACHE_BYTES",
+            "DEFAULT_BACKEND_DATABASE_BYTES",
+            "DEFAULT_BACKEND_PIDS",
+            "DEFAULT_BACKEND_OPEN_FILES",
+        ] {
+            assert!(!generated.contains(removed));
+        }
+    }
+
+    #[test]
     fn documentation_and_all_public_wire_types_are_covered() {
         let generated = generate().unwrap();
         assert!(generated.contains("export type FileBytesQuery"));

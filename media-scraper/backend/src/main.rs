@@ -18,13 +18,6 @@ async fn main() -> tgdrive_backend_sdk::Result<()> {
     connection
         .pragma_update(None, "cache_size", -4096)
         .map_err(|_| Error::Protocol("数据库缓存预算设置失败"))?;
-    connection
-        .pragma_update(
-            None,
-            "max_page_count",
-            (start.context.limits.database_bytes.0 / 4096).max(1) as i64,
-        )
-        .map_err(|_| Error::Protocol("数据库容量预算设置失败"))?;
     let app = Arc::new(Application::new(
         Arc::new(UnixHostClient::new(&start)),
         connection,

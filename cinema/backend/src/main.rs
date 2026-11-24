@@ -13,14 +13,6 @@ async fn main() -> tgdrive_backend_sdk::Result<()> {
     }
     let connection = rusqlite::Connection::open(&start.context.database_path)
         .map_err(|_| Error::api(error_code::STORAGE_UNAVAILABLE, "无法打开影视应用数据库"))?;
-    // 主动控制数据库页缓存与主库增长；宿主仍监督 WAL、缓存和临时目录的实际用量。
-    connection
-        .pragma_update(
-            None,
-            "max_page_count",
-            (start.context.limits.database_bytes.0 / 4096).max(1) as i64,
-        )
-        .map_err(|_| Error::Protocol("影视数据库预算设置失败"))?;
     connection
         .pragma_update(None, "cache_size", -8192)
         .map_err(|_| Error::Protocol("影视数据库缓存设置失败"))?;

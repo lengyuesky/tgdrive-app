@@ -161,17 +161,13 @@ limits! {
     FILE_EVENT_DEBOUNCE_MILLIS => 250,
     MAX_FILE_EVENT_DELAY_MILLIS => 1000,
     CACHE_TICKET_SECONDS => 300,
-    DEFAULT_PAGE_CACHE_BYTES => 256 * 1024 * 1024,
-    DEFAULT_BACKEND_CACHE_BYTES => 1024 * 1024 * 1024,
-    DEFAULT_BACKEND_DATABASE_BYTES => 512 * 1024 * 1024,
-    DEFAULT_BACKEND_PIDS => 64,
+    DEFAULT_CACHE_BYTES => 1024 * 1024 * 1024,
     DEFAULT_SHARED_BACKEND_MEMORY_BYTES => 2 * 1024 * 1024 * 1024,
     DEFAULT_SHARED_BACKEND_CPU_MILLIS => 0,
     MIN_SHARED_BACKEND_MEMORY_BYTES => 64 * 1024 * 1024,
     MAX_SHARED_BACKEND_MEMORY_BYTES => 1024 * 1024 * 1024 * 1024,
     MIN_SHARED_BACKEND_CPU_MILLIS => 100,
     MAX_SHARED_BACKEND_CPU_MILLIS => 256_000,
-    DEFAULT_BACKEND_OPEN_FILES => 1024,
     PAGE_CONTROL_CONCURRENCY => 16,
     BACKEND_CONTROL_CONCURRENCY => 32,
     PAGE_BYTE_CONCURRENCY => 8,
@@ -340,6 +336,14 @@ endpoints! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_cache_has_one_capacity_and_evicts_to_ninety_percent() {
+        let limits: std::collections::BTreeMap<_, _> = LIMITS.iter().copied().collect();
+        assert_eq!(DEFAULT_CACHE_BYTES, 1_073_741_824);
+        assert_eq!(limits["DEFAULT_CACHE_BYTES"], DEFAULT_CACHE_BYTES);
+        assert_eq!(CACHE_EVICTION_TARGET_PERCENT, 90);
+    }
 
     #[test]
     fn cache_is_required_and_device_kv_is_an_independent_extension() {

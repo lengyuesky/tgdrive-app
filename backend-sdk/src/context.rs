@@ -191,7 +191,7 @@ pub fn parse_forward_context(
 mod tests {
     use super::*;
     fn start() -> StartContext {
-        let raw = serde_json::json!({"contract":{"major":1,"minor":2},"app":{"id":"example","name":"示例","version":"1.0.0","generation":"g1"},"run_id":"run1","host_socket":"/tmp/host.sock","listen_socket":"/tmp/backend.sock","data_dir":"/tmp/data","database_path":"/tmp/data/state/app.sqlite3","cache_dir":"/tmp/data/cache","temp_dir":"/tmp/data/tmp","ffmpeg_path":"/bin/ffmpeg","ffprobe_path":"/bin/ffprobe","limits":{"memory_bytes":"536870912","cpu_millis":1000,"pids":64,"open_files":1024,"cache_bytes":"1073741824","database_bytes":"536870912","enforced":{"memory":false,"cpu":false,"pids":true,"open_files":true}}});
+        let raw = serde_json::json!({"contract":{"major":1,"minor":2},"app":{"id":"example","name":"示例","version":"1.0.0","generation":"g1"},"run_id":"run1","host_socket":"/tmp/host.sock","listen_socket":"/tmp/backend.sock","data_dir":"/tmp/data","database_path":"/tmp/data/state/app.sqlite3","cache_dir":"/tmp/data/cache","temp_dir":"/tmp/data/tmp","ffmpeg_path":"/bin/ffmpeg","ffprobe_path":"/bin/ffprobe","limits":{"memory_bytes":"536870912","cpu_millis":1000,"enforced":{"memory":false,"cpu":false}}});
         StartContext::parse(&serde_json::to_vec(&raw).unwrap(), CONTRACT_VERSION).unwrap()
     }
     #[test]

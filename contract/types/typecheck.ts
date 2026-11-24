@@ -5,6 +5,7 @@ import type {
   StreamDirective, KvPutRequest, UiMessage, HostEvent, KnownHostEvent, CachePutMetadata, CacheEntry,
   ForwardContext, PageBootstrap, BackendResourceLimits, ScopeAuthorizationRequest, RuntimeLimits,
   ExternalServiceInfo, RuntimeInfo, MediaUrl, CacheLookupResponse, LocalFileUrl,
+  BackendLimitEnforcement, DataUsage,
 } from './contract'
 import {
   CONTRACT_VERSION, UI_CHANNEL, ENDPOINTS, ERROR_CODES, LIMITS, CAPABILITY_REQUIREMENTS,
@@ -103,13 +104,22 @@ export const cacheRequired: true = CAPABILITY_REQUIREMENTS['cache.objects']
 export const deviceOptional: false = CAPABILITY_REQUIREMENTS['kv.device']
 export const scopeAuthorization: ScopeAuthorizationRequest = { reason: '选择取材目录', preferred_access: 'read_only' }
 export const backendLimits: BackendResourceLimits = {
-  memory_bytes: '536870912', cpu_millis: 1000, pids: 64, open_files: 1024,
-  cache_bytes: '1073741824', database_bytes: '536870912',
-  enforced: { memory: false, cpu: false, pids: true, open_files: true },
+  memory_bytes: '536870912', cpu_millis: 1000,
+  enforced: { memory: false, cpu: false },
 }
 
 // @ts-expect-error 必须如实提供限额是否强制的标志，不能只发送配置目标。
-export const invalidBackendLimits: BackendResourceLimits = { memory_bytes: '536870912', cpu_millis: 1000, pids: 64, open_files: 1024, cache_bytes: '1073741824', database_bytes: '536870912' }
+export const invalidBackendLimits: BackendResourceLimits = { memory_bytes: '536870912', cpu_millis: 1000 }
+
+export const cacheByteLimit: 1073741824 = LIMITS.DEFAULT_CACHE_BYTES
+export const pageDataUsage: DataUsage = {
+  kv_entries: 0, kv_bytes: '0', kv_entry_limit: 100000, kv_byte_limit: '67108864',
+  cache_bytes: '0', cache_byte_limit: '1073741824', database_bytes: null,
+}
+export const backendDataUsage: DataUsage = { ...pageDataUsage, database_bytes: '536870912' }
+
+// @ts-expect-error 必须分别提供内存和 CPU 是否实际强制的标志。
+export const invalidBackendEnforcement: BackendLimitEnforcement = { memory: false }
 
 // @ts-expect-error 字节数量必须是字符串，不能因 JSON 大整数损失精度。
 export const invalidBytes: ByteCount = 9007199254740993

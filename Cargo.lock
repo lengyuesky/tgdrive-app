@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "tgdrive-cinema"
-version = "1.0.5"
+version = "1.0.6"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "tgdrive-media-scraper"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "bytes",
  "futures-util",
