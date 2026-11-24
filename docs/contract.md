@@ -808,7 +808,7 @@ X-Frame-Options: DENY
 
 iframe 带 `sandbox="allow-scripts allow-downloads"`，不得加入 allow-same-origin、allow-forms、allow-popups、allow-top-navigation。allow-downloads 用于应用明确由主人点击的限时 attachment 下载，应用不得后台自动发起下载；这是页面行为规则，浏览器并非可靠的用户手势/下载频率隔离器。资源响应也附同样的 CSP sandbox 约束，防止直接访问静态入口变成宿主同源页面。
 
-资源响应的 CSP 使用 Rust 常量 PAGE_CSP，可直接使用 `'self'`，包括 `connect-src 'self'`；CSP 的 self 按文档 URL 的源匹配，不因 iframe 的不透明源而失效。宿主不为 CSP 增加公开地址配置，也不把任意 Host 原样拼入策略。允许同源的包资源、自己的后端代理/限时媒体与缓存、必要 blob worker 和 data/blob 图像/媒体；禁止外站 fetch/XHR/WebSocket、外站脚本/图像/字体/worker、frame、object、表单、Service Worker、eval 和任意 inline script。可允许 inline style；建议 default-src 'none'，script-src/connect-src/font-src 为 'self'，base-uri/form-action/object-src/frame-src 'none'，frame-ancestors 'self'。同源访问仍逐请求校验应用身份、能力和目录授权，不靠 CSP 代替接口授权。public_base_url 与启动上下文的 host_origin 按请求及可信代理配置推导，用于链接/消息绑定，不是额外的 CSP 地址设置。
+资源响应的 CSP 以 Rust 常量 PAGE_CSP 为模板。脚本、样式、图像、媒体和字体的 `'self'` 按文档 URL 的源匹配，不因 iframe 的不透明源而失效；**`connect-src` 例外**：WebKit（含 iOS 上的全部浏览器）在网络进程检查 fetch、XHR 与 EventSource 时按请求方的源求 `'self'`，不透明源下什么都匹配不上，页面访问宿主接口的请求会全部被拦。宿主因此在 `connect-src 'self'` 之后追加本次请求推导出的公开源（与 public_base_url 相同的推导：Host 及可信代理头），它就是浏览器取这份文档所用的地址，含义与 `'self'` 相同；协议无法确知时推导为 http，http 来源同样匹配同主机同端口的 https 请求。宿主不为 CSP 增加公开地址配置；只写入策略语法能表达的来源（http/https、字母数字与连字符组成的主机标签、可选端口），IPv6 字面量、带下划线等写不出的主机不写入，此时只有 `'self'`。允许同源的包资源、自己的后端代理/限时媒体与缓存、必要 blob worker 和 data/blob 图像/媒体；禁止外站 fetch/XHR/WebSocket、外站脚本/图像/字体/worker、frame、object、表单、Service Worker、eval 和任意 inline script。可允许 inline style；建议 default-src 'none'，script-src/connect-src/font-src 为 'self'，base-uri/form-action/object-src/frame-src 'none'，frame-ancestors 'self'。同源访问仍逐请求校验应用身份、能力和目录授权，不靠 CSP 代替接口授权。public_base_url 与启动上下文的 host_origin 按请求及可信代理配置推导，用于链接/消息绑定，不是额外的 CSP 地址设置。
 
 沙箱的不透明源上不能依赖浏览器持久存储、读取宿主 DOM/Cookie 或注册宿主 Service Worker。包内的 EPUB/HTML 等不可信内容仍需由应用清洗，不能假定它是应用脚本。
 
@@ -818,7 +818,7 @@ iframe 带 `sandbox="allow-scripts allow-downloads"`，不得加入 allow-same-o
 
 ### 14.1 页面启动与界面消息
 
-主人通过应用中心 launch 取得 LaunchPageResponse={frame_url,bootstrap}。宿主将 bootstrap JSON 以无 padding base64url 放在 iframe URL **片段** `#tgdrive=<内容>`，不会进入服务器请求/Referer；不是查询参数或内联脚本。页面解析后移除片段，只在内存保留 PageBootstrap：contract、app、session_token、expires_at、host_origin、api_base、backend_base?、ui_nonce、theme、launch（browse 或 open{file}）。open 文件必须已经过目录授权确认；用户取消授权则不向应用交付未授权文件详情。
+主人通过应用中心 launch 取得 LaunchPageResponse={frame_url,bootstrap}。frame_url 是入口资源地址加查询参数 `policy=<页面策略修订>`（见第 15 节静态资源）：策略一变地址随之改变，浏览器不会沿用带旧策略的缓存文档；应用不得依赖该参数。宿主将 bootstrap JSON 以无 padding base64url 放在 iframe URL **片段** `#tgdrive=<内容>`，不会进入服务器请求/Referer；不是查询参数或内联脚本。页面解析后移除片段，只在内存保留 PageBootstrap：contract、app、session_token、expires_at、host_origin、api_base、backend_base?、ui_nonce、theme、launch（browse 或 open{file}）。open 文件必须已经过目录授权确认；用户取消授权则不向应用交付未授权文件详情。
 
 postMessage 没有 HTTP/RPC/字节传输桥，也不提供 MessagePort 数据面。UiMessage 通道固定 `tgdrive.ui.v1`，每条带 bootstrap.ui_nonce。页面只接受 source===window.parent、origin===host_origin 的消息；宿主只接受当前 iframe.contentWindow、origin 为其沙箱不透明源、nonce 匹配的消息，不能只检查 origin=null。页面发送 targetOrigin=host_origin，宿主发给不透明 iframe 时只能 `*`，靠 source/nonce 绑定。不得在消息中允许任意方法名、URL、文件正文或应用会话续签。
 
@@ -955,7 +955,7 @@ data: {"cursor":"events-2","occurred_at":2,"event":"files.changed","data":{"chan
 
 InstalledApp 包含 manifest、generation、state_revision、enabled/pinned、ScopeInfo、实际 target/摘要/大小、可选 BackendStatus、安装/更新时间。更新只接受同 ID 更高稳定版本（同版本同内容可返回已安装，不能改内容），已确认的旧 state_revision 不匹配则重新预览。切换包、generation、写权限降级和撤销旧运行必须原子协调；失败不留下半个新安装。
 
-静态资源：GET/HEAD `/admin/apps/assets/{app_id}/{sha256}/{path}`，只提供当前已启用包的 page/assets 中资源及入口，禁止暴露 backend、app.json/package.json、内部运行目录/许可证之外任意宿主文件。该路径按摘要不可变，ETag 绑定摘要+路径+表示编码，支持 304，private,max-age=31536000,immutable。返回第 13.4 节沙箱 CSP，包资源本身不授予应用会话，不要求 Bearer。已缓存旧资源也不能得到有效新 generation 能力。
+静态资源：GET/HEAD `/admin/apps/assets/{app_id}/{sha256}/{path}`，只提供当前已启用包的 page/assets 中资源及入口，禁止暴露 backend、app.json/package.json、内部运行目录/许可证之外任意宿主文件。该路径按摘要不可变，ETag 绑定摘要+路径+表示编码，支持 304，private,max-age=31536000,immutable。返回第 13.4 节沙箱 CSP，包资源本身不授予应用会话，不要求 Bearer。**HTML 文档例外**：浏览器把文档连同其 CSP 一起缓存，且不会用 304 更新已缓存文档的策略头，所以 HTML 只有在请求地址带查询参数 `policy=<当前页面策略修订>` 时才按上述方式长期缓存；没有该参数或修订不符时每次完整返回 200、`Cache-Control: no-store`，不回 304。修订是当前 CSP 头值的摘要（16 位十六进制），随宿主策略或推导出的公开源变化；宿主不信任该参数的取值，任何地址得到的都是当前策略。已缓存旧资源也不能得到有效新 generation 能力。
 
 宿主管理、网盘 REST、WebDAV、分享、健康检查与管理静态资源全部在 `/admin` 下；本契约不重定义它们的内容 API，也不提供旧 `/api`、`/dav`、`/s` 等别名。
 
