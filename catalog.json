@@ -71,7 +71,7 @@
       "manifest": {
         "id": "media-scraper",
         "name": "影视刮削",
-        "version": "1.0.4",
+        "version": "1.0.5",
         "contract": {
           "major": 1,
           "minor": 0
@@ -104,14 +104,14 @@
       },
       "packages": {
         "linux-amd64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.4/media-scraper-1.0.4-linux-amd64.tgapp",
-          "sha256": "e90dbb5db942abc55884d8ff69e2ca4b15f3c5d544bf0b706c21dd546ba78c43",
-          "size": "5509824"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.5/media-scraper-1.0.5-linux-amd64.tgapp",
+          "sha256": "5711039d069a2d4e95c84e79080f81eaf0e8422aa3f5ce057e38af5f2f01cd5f",
+          "size": "5534760"
         },
         "linux-arm64": {
-          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.4/media-scraper-1.0.4-linux-arm64.tgapp",
-          "sha256": "1e4d7554134aad780d49d227cf41642c52694e6285c4581e368a4480e642c8a8",
-          "size": "5334086"
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.5/media-scraper-1.0.5-linux-arm64.tgapp",
+          "sha256": "4a8f4ded820bd4c7b5be456c8e11d92f23098adbc030c11f75d118d9e0a862a5",
+          "size": "5355159"
         }
       }
     },

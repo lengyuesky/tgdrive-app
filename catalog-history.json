@@ -715,6 +715,54 @@
     },
     {
       "manifest": {
+        "id": "media-scraper",
+        "name": "影视刮削",
+        "version": "1.0.5",
+        "contract": {
+          "major": 1,
+          "minor": 0
+        },
+        "description": "选择授权目录后，由应用后端整理番号视频并补齐 NFO、2:3 JPEG 海报与可用演员资料；关页面不停，重启不自动续跑。",
+        "author": "tgdrive",
+        "files": {
+          "read": true,
+          "write": true
+        },
+        "page": {
+          "entry": "page/index.html"
+        },
+        "backend": {
+          "entry": "backend/app",
+          "run_mode": "on_demand",
+          "external_service": false
+        },
+        "icon": "assets/icon.svg",
+        "required_capabilities": [
+          "backend.proxy",
+          "backend.keepalive",
+          "files.mutate",
+          "files.upload"
+        ],
+        "open_with": {
+          "extensions": [],
+          "directories": true
+        }
+      },
+      "packages": {
+        "linux-amd64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.5/media-scraper-1.0.5-linux-amd64.tgapp",
+          "sha256": "5711039d069a2d4e95c84e79080f81eaf0e8422aa3f5ce057e38af5f2f01cd5f",
+          "size": "5534760"
+        },
+        "linux-arm64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/media-scraper-v1.0.5/media-scraper-1.0.5-linux-arm64.tgapp",
+          "sha256": "4a8f4ded820bd4c7b5be456c8e11d92f23098adbc030c11f75d118d9e0a862a5",
+          "size": "5355159"
+        }
+      }
+    },
+    {
+      "manifest": {
         "id": "reader",
         "name": "阅读馆",
         "version": "2.0.0",
