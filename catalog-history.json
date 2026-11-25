@@ -472,6 +472,68 @@
     },
     {
       "manifest": {
+        "id": "cinema",
+        "name": "影视",
+        "version": "1.0.7",
+        "contract": {
+          "major": 1,
+          "minor": 0
+        },
+        "description": "自建电影库和电视剧库，同目录同番号影片合并为一个条目，网页可选版本并分别续播；共用网页与飞牛客户端的收藏、已看标记和观看进度。网页支持文本字幕与 MKV 流式转封装；飞牛兼容服务须先配置独立连接账号，再由主人主动启动。",
+        "author": "tgdrive",
+        "files": {
+          "read": true,
+          "write": false
+        },
+        "page": {
+          "entry": "page/index.html"
+        },
+        "backend": {
+          "entry": "backend/app",
+          "run_mode": "resident",
+          "external_service": true
+        },
+        "icon": "assets/icon.svg",
+        "required_capabilities": [
+          "backend.proxy",
+          "backend.external",
+          "files.local_url",
+          "read_leases"
+        ],
+        "open_with": {
+          "extensions": [
+            "mp4",
+            "m4v",
+            "mov",
+            "webm",
+            "ogv",
+            "mkv",
+            "avi",
+            "wmv",
+            "flv",
+            "ts",
+            "mts",
+            "m2ts",
+            "3gp"
+          ],
+          "directories": false
+        }
+      },
+      "packages": {
+        "linux-amd64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.7/cinema-1.0.7-linux-amd64.tgapp",
+          "sha256": "9358ee4e284b9bc58b8388f75c9743427a0f5fb92f713821b8d7267982dea309",
+          "size": "4762030"
+        },
+        "linux-arm64": {
+          "url": "https://github.com/lengyuesky/tgdrive-app/releases/download/cinema-v1.0.7/cinema-1.0.7-linux-arm64.tgapp",
+          "sha256": "ecebc577b603ce368dfc088c6acd2d3ee6f0f194dab9585f8b88a1c7a80552ab",
+          "size": "4669178"
+        }
+      }
+    },
+    {
+      "manifest": {
         "id": "media-scraper",
         "name": "影视刮削",
         "version": "1.0.0",
