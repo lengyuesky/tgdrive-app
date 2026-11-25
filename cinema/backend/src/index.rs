@@ -427,6 +427,7 @@ async fn build_entry(
         timestamp: node.modified_at.0,
         added_at: node.created_at.0,
         title: basename.replace(['.', '_'], " "),
+        version_name: basename.into(),
         overview: String::new(),
         year: String::new(),
         number: String::new(),
@@ -464,6 +465,7 @@ async fn build_entry(
     if reuse {
         let old = old.unwrap();
         entry.title = old.title;
+        entry.version_name = old.version_name;
         entry.overview = old.overview;
         entry.year = old.year;
         entry.number = old.number;
@@ -476,6 +478,9 @@ async fn build_entry(
     {
         entry.actors = actors(app, library, &text, source, nfo_node.unwrap().modified_at.0)?;
         if let Some(title) = nfo::text(&text, "title") {
+            if let Some((_, label)) = nfo::version_label(&title) {
+                entry.version_name = label.into();
+            }
             entry.title = title;
         }
         entry.overview = nfo::text(&text, "plot").unwrap_or_default();
@@ -538,6 +543,15 @@ async fn build_entry(
             entry.show_nfo = Some(source);
         }
     }
+    if entry.metadata.is_some()
+        && let Some(item_guid) = numbered_movie_guid(library, parent_id, &entry.number)
+    {
+        // 一个文件也先采用组身份，后来增删版本或改名不会让影片条目换号。
+        entry.guid = item_guid;
+        if let Some((title, _)) = nfo::version_label(&entry.title) {
+            entry.title = title.into();
+        }
+    }
     // 即使描述内容复用，人物图像仍按本次扫描的最新路径和内容版本刷新。
     for actor in entry.actors.iter_mut().chain(entry.show_actors.iter_mut()) {
         actor.portrait = nfo::local_actor_path(parent(&actor.metadata.path), &actor.data.thumb)
@@ -582,7 +596,11 @@ pub async fn authorized(app: &Application, file: &ContentRef) -> Result<FileNode
 pub fn state(app: &Application) -> Result<serde_json::Value> {
     app.db.with(|db| {
         let (count,): (i64,) = db
-            .query_row("SELECT count(*) FROM entries", [], |r| Ok((r.get(0)?,)))
+            .query_row(
+                "SELECT count(*) FROM catalog WHERE kind NOT IN ('TV','Season')",
+                [],
+                |r| Ok((r.get(0)?,)),
+            )
             .app()?;
         let status: Option<String> = db
             .query_row(

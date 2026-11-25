@@ -768,3 +768,270 @@ async fn unproven_authx_prefix_cookie_and_explicit_login_budget_stay_closed() {
     }
     assert!(app.service.login_budget().is_err());
 }
+
+#[tokio::test]
+async fn one_movie_exposes_three_files_and_every_media_guid_selects_its_own_playback() {
+    let (app, host, token) = configured(numbered_versions(), "movie").await;
+    let item = app.db.entry("3").unwrap().unwrap().guid;
+    let listed = list(
+        &app,
+        &token,
+        json!({"ancestor_guid":LIBRARY,"page":1,"page_size":50}),
+    )
+    .await;
+    assert_eq!(listed["total"], 1);
+    assert_eq!(listed["list"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["list"][0]["guid"], item);
+    let (status, response) = body(
+        wire(
+            &app,
+            false,
+            "GET",
+            &format!("/v/api/v1/stream/list/{item}"),
+            Some(&token),
+            Value::Null,
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{response}");
+    let streams = &response["data"];
+    assert_eq!(streams["files"].as_array().unwrap().len(), 3);
+    assert_eq!(streams["video_streams"].as_array().unwrap().len(), 3);
+    assert_eq!(streams["audio_streams"].as_array().unwrap().len(), 3);
+    assert_eq!(streams["subtitle_streams"].as_array().unwrap().len(), 3);
+    let (_, initial) = body(
+        wire(
+            &app,
+            false,
+            "POST",
+            "/v/api/v1/play/info",
+            Some(&token),
+            json!({"item_guid":item}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        initial["data"]["media_guid"],
+        app.db.entry("3").unwrap().unwrap().media_guid
+    );
+
+    for (position, id) in ["3", "4", "5"].iter().enumerate() {
+        let entry = app.db.entry(id).unwrap().unwrap();
+        assert_eq!(streams["files"][position]["guid"], entry.media_guid);
+        assert_eq!(streams["files"][position]["file_name"], entry.filename);
+        for kind in ["video_streams", "audio_streams", "subtitle_streams"] {
+            assert_eq!(streams[kind][position]["media_guid"], entry.media_guid);
+        }
+        let video = streams["video_streams"][position]["guid"].clone();
+        let audio = streams["audio_streams"][position]["guid"].clone();
+        let (status, info) = body(
+            wire(
+                &app,
+                false,
+                "POST",
+                "/v/api/v1/play/info",
+                Some(&token),
+                json!({"item_guid":item,"media_guid":entry.media_guid,"video_guid":video}),
+                &[],
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, 200, "{info}");
+        assert_eq!(info["data"]["media_guid"], entry.media_guid);
+        assert_eq!(info["data"]["video_guid"], video);
+        assert_eq!(info["data"]["item"]["file_name"], entry.filename);
+        assert_eq!(info["data"]["item"]["title"], "ABC-123 代表片名");
+        let (status, stream) = body(wire(&app,false,"POST","/v/api/v1/stream",Some(&token),json!({"item_guid":item,"media_guid":entry.media_guid,"video_guid":video,"audio_guid":audio}),&[]).await).await;
+        assert_eq!(status, 200, "{stream}");
+        assert_eq!(stream["data"]["file_stream"]["guid"], entry.media_guid);
+        assert_eq!(stream["data"]["file_stream"]["path"], entry.path);
+        let (status, played) = body(
+            wire(
+                &app,
+                false,
+                "POST",
+                "/v/api/v1/play/play",
+                Some(&token),
+                json!({"media_guid":entry.media_guid,"video_guid":video,"audio_guid":audio}),
+                &[],
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, 200, "{played}");
+        assert!(played["data"]["play_link"].is_string());
+        let other_audio = streams["audio_streams"][(position + 1) % 3]["guid"].clone();
+        assert_eq!(
+            wire(
+                &app,
+                false,
+                "POST",
+                "/v/api/v1/stream",
+                Some(&token),
+                json!({"media_guid":entry.media_guid,"audio_guid":other_audio}),
+                &[]
+            )
+            .await
+            .status(),
+            400
+        );
+        start(&app, &host, &token, id).await;
+        assert_eq!(
+            record(
+                &app,
+                &token,
+                id,
+                &format!("version-{id}"),
+                (position + 1) as f64 * 30.0
+            )
+            .await,
+            200
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    for (position, id) in ["3", "4", "5"].iter().enumerate() {
+        let entry = app.db.entry(id).unwrap().unwrap();
+        let (_, info) = body(
+            wire(
+                &app,
+                false,
+                "POST",
+                "/v/api/v1/play/info",
+                Some(&token),
+                json!({"item_guid":item,"media_guid":entry.media_guid}),
+                &[],
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(info["data"]["ts"], ((position + 1) * 30) as u64);
+    }
+    let (_, history) = body(
+        wire(
+            &app,
+            false,
+            "GET",
+            "/v/api/v1/play/list",
+            Some(&token),
+            Value::Null,
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(history["data"].as_array().unwrap().len(), 1);
+    assert_eq!(history["data"][0]["ts"], 90);
+    let last = app.db.entry("5").unwrap().unwrap();
+    assert_eq!(history["data"][0]["media_guid"], last.media_guid);
+    let (_, detail) = body(
+        wire(
+            &app,
+            false,
+            "GET",
+            &format!("/v/api/v1/item/{item}"),
+            Some(&token),
+            Value::Null,
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(detail["data"]["media_guid"], last.media_guid);
+    assert_eq!(detail["data"]["guid"], item);
+    assert_eq!(detail["data"]["title"], "ABC-123 代表片名");
+    let (_, default) = body(
+        wire(
+            &app,
+            false,
+            "POST",
+            "/v/api/v1/play/info",
+            Some(&token),
+            json!({"item_guid":item}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(default["data"]["media_guid"], last.media_guid);
+    assert_eq!(
+        wire(
+            &app,
+            false,
+            "POST",
+            "/v/api/v1/play/info",
+            Some(&token),
+            json!({"item_guid":item,"media_guid":"ffffffffffffffffffffffffffffffff"}),
+            &[]
+        )
+        .await
+        .status(),
+        404
+    );
+}
+
+#[tokio::test]
+async fn tv_show_media_selection_and_inherited_watched_progress_stay_unchanged() {
+    let (app, _, token) = configured(
+        vec![
+            root(),
+            seed("3", "2", "剧", NodeKind::Directory, b""),
+            seed("4", "3", "剧.S01E01.mp4", NodeKind::File, b"video"),
+        ],
+        "tv",
+    )
+    .await;
+    let episode = app.db.entry("4").unwrap().unwrap();
+    let (status, info) = body(
+        wire(
+            &app,
+            false,
+            "POST",
+            "/v/api/v1/play/info",
+            Some(&token),
+            json!({"item_guid":episode.show_guid,"media_guid":episode.media_guid}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{info}");
+    assert_eq!(info["data"]["guid"], episode.guid);
+    assert_eq!(info["data"]["media_guid"], episode.media_guid);
+    let serial = app.db.activate(&episode.media_guid).unwrap();
+    app.db
+        .save_progress(
+            &episode.media_guid,
+            serial,
+            &tgdrive_cinema::model::Progress {
+                ts: 42.0,
+                duration: 300.0,
+                updated_at: 1,
+                completed: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    app.db
+        .set_flag(&episode.season_guid(), false, true)
+        .unwrap();
+    let (_, record) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/storage/get",
+            None,
+            json!({"key":"progress:4"}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(record["value"]["completed"], true);
+    assert_eq!(record["value"]["seconds"].as_f64(), Some(42.0));
+}

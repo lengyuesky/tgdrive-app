@@ -1,4 +1,4 @@
-//! 官方客户端实测的影视 JSON 表示；时间戳为毫秒，观看位置固定为整数秒。
+//! 飞牛影视 JSON 表示；沿用已实测的单文件字段，多文件数组依据公开客户端模型，尚未官方客户端实测。
 use crate::{Application, model::*};
 use serde_json::{Value, json};
 use tgdrive_backend_sdk::Result;
@@ -58,8 +58,10 @@ pub fn item(app: &Application, entry: &Entry, info: Option<&MediaInfo>) -> Resul
     } else {
         library_id.into()
     };
-    let poster = poster(entry);
-    let mut value = json!({"guid":entry.guid,"title":entry.title,"type":entry.kind,"lan":"zh-CN","tv_title":entry.show_title,"parent_title":"","original_title":"","imdb_id":"","trim_id":"","poster":poster,"posters":poster,"backdrops":"","vote_average":"0","genres":[],"release_date":entry.year,"overview":entry.overview,"is_favorite":u8::from(favorite),"is_watched":u8::from(watched),"watched":u8::from(watched),"watched_ts":progress.ts as u64,"season_number":entry.season,"episode_number":entry.episode,"number_of_seasons":0,"number_of_episodes":0,"local_number_of_episodes":0,"local_number_of_seasons":0});
+    let representative = app.db.representative_entry(&entry.guid, "")?;
+    let metadata = representative.as_ref().unwrap_or(entry);
+    let poster = poster(metadata);
+    let mut value = json!({"guid":entry.guid,"title":metadata.title,"type":entry.kind,"lan":"zh-CN","tv_title":entry.show_title,"parent_title":"","original_title":"","imdb_id":"","trim_id":"","poster":poster,"posters":poster,"backdrops":"","vote_average":"0","genres":[],"release_date":metadata.year,"overview":metadata.overview,"is_favorite":u8::from(favorite),"is_watched":u8::from(watched),"watched":u8::from(watched),"watched_ts":progress.ts as u64,"season_number":entry.season,"episode_number":entry.episode,"number_of_seasons":0,"number_of_episodes":0,"local_number_of_episodes":0,"local_number_of_seasons":0});
     value.as_object_mut().unwrap().extend(json!({"can_play":1,"play_error":"","parent_guid":parent,"grand_guid":entry.show_guid,"ancestor_guid":library_id,"ancestor_name":library.as_ref().map(|l|l.name.as_str()).unwrap_or(""),"ancestor_category":library.as_ref().map(|l|if l.kind=="movie"{"Movie"}else{"TV"}).unwrap_or(""),"play_item_guid":entry.guid,"media_guid":entry.media_guid,"duration":info.map(|m|m.duration.round()as u64).unwrap_or(0),"logic_type":0,"single_child_guid":"","file_name":entry.filename,"create_time":entry.added_at,"update_time":entry.timestamp,"first_air_date":"","last_air_date":"","air_date":"","status":"","douban_id":0,"poster_list":if poster.is_empty(){Vec::<String>::new()}else{vec![poster]},"media_stream":{"resolutions":info.map(resolution).filter(|s|!s.is_empty()).into_iter().collect::<Vec<_>>(),"audio_type":null,"color_range_type":info.map(color).filter(|s|!s.is_empty()).into_iter().collect::<Vec<_>>()}}).as_object().unwrap().clone());
     Ok(value)
 }
@@ -67,11 +69,20 @@ pub fn catalog_item(app: &Application, reference: &str) -> Result<Option<Value>>
     let Some(catalog) = app.db.catalog(reference)? else {
         return Ok(None);
     };
-    let Some(entry) = app.db.entry(&catalog.representative)? else {
+    let entry = if matches!(catalog.kind.as_str(), "TV" | "Season") {
+        app.db.entry(&catalog.representative)?
+    } else {
+        app.db.default_entry(&catalog.guid, "")?
+    };
+    let Some(entry) = entry else {
         return Ok(None);
     };
     let info = crate::media::cached_sync(app, &entry)?;
     let mut value = item(app, &entry, info.as_ref())?;
+    value["guid"] = json!(catalog.guid);
+    value["title"] = json!(catalog.title);
+    value["create_time"] = json!(catalog.added_at);
+    value["update_time"] = json!(catalog.modified_at);
     if matches!(catalog.kind.as_str(), "TV" | "Season") {
         let representative=app.db.with(|db|{use crate::database::SqlResult;use rusqlite::OptionalExtension;let group=if catalog.kind=="TV"{"show_guid"}else{"season_guid"};db.query_row(&format!("SELECT e.node_id FROM entries e JOIN cover_states c ON c.media_guid=e.media_guid WHERE e.{group}=?1 AND c.state='ready' ORDER BY e.season,e.episode,e.guid LIMIT 1"),[reference],|r|r.get::<_,String>(0)).optional().app()})?;
         let image = representative

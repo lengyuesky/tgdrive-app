@@ -1,4 +1,4 @@
-//! 影视条目与网盘文件严格分开；持久身份只使用节点 ID 和内容版本。
+//! 影片条目与媒体文件分开：条目可按媒体库、目录和番号归组，文件身份只使用节点与内容版本。
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -51,6 +51,11 @@ pub struct Library {
     pub kind: String,
     pub root_id: String,
 }
+pub fn numbered_movie_guid(library: &Library, parent_id: &str, number: &str) -> Option<String> {
+    let number = number.trim().to_lowercase();
+    (library.kind == "movie" && !number.is_empty())
+        .then(|| guid(&["numbered-movie", &library.id, parent_id, &number]))
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Source {
     pub id: String,
@@ -88,6 +93,7 @@ pub struct Actor {
     pub updated_at: i64,
     pub portrait: Option<Source>,
 }
+/// 一个可播放的媒体文件；guid 是当前媒体库中的影片条目，media_guid 才是文件身份。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Entry {
     pub node_id: String,
@@ -100,6 +106,7 @@ pub struct Entry {
     pub timestamp: i64,
     pub added_at: i64,
     pub title: String,
+    pub version_name: String,
     pub overview: String,
     pub year: String,
     pub number: String,
@@ -220,4 +227,35 @@ pub fn episode_name(name: &str) -> Option<(String, u32, u32)> {
         return Some((title, season, episode));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn movie_group_key_only_uses_library_parent_and_normalized_nonempty_number() {
+        let mut library = Library {
+            id: "1".repeat(32),
+            name: "电影".into(),
+            kind: "movie".into(),
+            root_id: "2".into(),
+        };
+        let first = numbered_movie_guid(&library, "10", " ABC-123 ").unwrap();
+        assert_eq!(
+            numbered_movie_guid(&library, "10", "abc-123").unwrap(),
+            first
+        );
+        assert_ne!(
+            numbered_movie_guid(&library, "20", "ABC-123").unwrap(),
+            first
+        );
+        library.id = "2".repeat(32);
+        assert_ne!(
+            numbered_movie_guid(&library, "10", "ABC-123").unwrap(),
+            first
+        );
+        assert!(numbered_movie_guid(&library, "10", " \n ").is_none());
+        library.kind = "tv".into();
+        assert!(numbered_movie_guid(&library, "10", "ABC-123").is_none());
+    }
 }

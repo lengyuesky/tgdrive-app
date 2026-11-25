@@ -106,6 +106,67 @@ pub async fn configured(
 pub fn root() -> SeedNode {
     seed("2", "1", "影视", NodeKind::Directory, b"")
 }
+pub fn numbered_versions() -> Vec<SeedNode> {
+    let mut nodes = vec![root()];
+    for (id, name, title, number) in [
+        (
+            "3",
+            "A-4K",
+            "ABC-123 代表片名 [4K 中字]",
+            "<num> ABC-123 </num>",
+        ),
+        (
+            "4",
+            "B-1080P-part1",
+            "ABC-123 另一片名 [1080P 第1段]",
+            "<num>abc-123</num>",
+        ),
+        (
+            "5",
+            "B-1080P-part2",
+            "ABC-123 另一片名 [1080P 第2段]",
+            "<num> </num><uniqueid type='number'> AbC-123 </uniqueid>",
+        ),
+    ] {
+        nodes.push(seed(
+            id,
+            "2",
+            &format!("{name}.mp4"),
+            NodeKind::File,
+            name.as_bytes(),
+        ));
+        let nfo = format!(
+            "<movie><title>{title}</title>{number}<plot>{name} 的完整简介</plot><year>2024</year><actor><name>{name} 演员</name></actor></movie>"
+        );
+        nodes.push(seed(
+            &(id.parse::<u64>().unwrap() + 10).to_string(),
+            "2",
+            &format!("{name}.nfo"),
+            NodeKind::File,
+            nfo.as_bytes(),
+        ));
+        nodes.push(seed(
+            &(id.parse::<u64>().unwrap() + 20).to_string(),
+            "2",
+            &format!("{name}.srt"),
+            NodeKind::File,
+            b"1\n00:00:00,000 --> 00:00:01,000\nsubtitle",
+        ));
+        let mut image = Vec::new();
+        use image::ImageEncoder;
+        image::codecs::jpeg::JpegEncoder::new(&mut image)
+            .write_image(&[120, 30, 40], 1, 1, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        nodes.push(seed(
+            &(id.parse::<u64>().unwrap() + 30).to_string(),
+            "2",
+            &format!("{name}.jpg"),
+            NodeKind::File,
+            &image,
+        ));
+    }
+    nodes
+}
 pub fn context(owner: bool) -> ForwardContext {
     ForwardContext {
         contract: tgdrive_contract::CONTRACT_VERSION,

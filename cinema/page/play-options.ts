@@ -1,3 +1,18 @@
+import type { CinemaVersion, CinemaVersions } from './client'
+
+/** 默认版本由后端按最近播放记录决定；明确选择时只接受当前条目里仍存在的媒体文件。 */
+export function selectedVersion(page: CinemaVersions, mediaGuid = page.default_media_guid): CinemaVersion {
+  const version = page.versions.find(version => version.media_guid === mediaGuid)
+  if (!version) throw new Error('所选版本已不存在，请重新打开影片')
+  return version
+}
+export function renderVersionOptions(select: HTMLSelectElement, page: CinemaVersions, mediaGuid?: string) {
+  const selected = selectedVersion(page, mediaGuid)
+  select.replaceChildren(...page.versions.map(version => new Option(version.name, version.media_guid)))
+  select.value = selected.media_guid; select.disabled = page.versions.length < 2
+  return selected
+}
+
 export interface SeriesOptions { schemaVersion: 1; intro: number; outro: number }
 export function seriesOptions(raw: unknown): SeriesOptions {
   if (raw === null || raw === undefined) return { schemaVersion: 1, intro: 0, outro: 0 }

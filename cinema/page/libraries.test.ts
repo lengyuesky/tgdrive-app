@@ -128,3 +128,16 @@ describe('收藏历史的页面消费', () => {
   })
 })
 // 旧存储版本迁移、路径规范化别名和页面固定限速不再保留；真实离库／回库、覆盖与全部授权核对由 Rust 后端和宿主替身回归覆盖。
+
+it('番号影片的全局记录保留所属库，重叠根不能切到另一个库的收藏条目', async () => {
+  const test = await setup(), child = { ...movie, id: '3'.repeat(32), name: '子库', root_id: '20', path: '/影视/子库' }
+  await test.host.addNode({ id: '20', parent_id: '2', name: '子库', kind: 'directory' })
+  await test.host.addNode({ id: '21', parent_id: '20', name: 'ABC-123.mp4', kind: 'file', bytes: [1, 2, 3] })
+  const file = await test.host.stat({ by: 'id', id: '21' })
+  test.state.records = [{ key: 'favorite:' + 'a'.repeat(32), value: { file }, revision: 'r1', library_id: movie.id }]
+  const page = await test.access.savedPage<CinemaFavorite>([movie, child], 'favorite:', null, 48, test.signal)
+  expect(page.entries[0]!.library.id).toBe(movie.id)
+  delete test.state.records[0]!.library_id
+  const plain = await test.access.savedPage<CinemaFavorite>([movie, child], 'favorite:', null, 48, test.signal)
+  expect(plain.entries[0]!.library.id).toBe(child.id)
+})

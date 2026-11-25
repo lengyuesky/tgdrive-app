@@ -99,7 +99,7 @@ export class ServiceManager {
       this.text('service-prefix', address.prefix ? `固定前缀：${address.prefix}（仅供支持路径前缀的客户端使用）` : '固定前缀尚未确认')
       this.text('service-account-state', config.account_configured ? `已配置影视连接账号：${config.username}` : '尚未配置影视连接账号；这不是宿主登录账号')
       const indexState: Record<string, string> = { idle: '等待建库', scanning: '正在整理', ready: '就绪', failed: '失败' }
-      this.text('service-index', `索引：${indexState[status.index.state] ?? '尚未确认'} · ${status.index.entries} 个视频${status.index.error ? ` · ${status.index.error}` : ''}`)
+      this.text('service-index', `索引：${indexState[status.index.state] ?? '尚未确认'} · ${status.index.entries} 个条目${status.index.error ? ` · ${status.index.error}` : ''}`)
       this.renderCovers(status)
       if (initial) this.message.textContent = ''
     } catch (error) { this.error(error) }

@@ -62,3 +62,32 @@ describe('影视后端进度与播放权威', () => {
     test.store.mark(test.progress(3)); await test.store.close(); expect(test.calls).toHaveLength(1)
   })
 })
+
+it('两个版本的进度与播放会话分别保存，退出一个版本不会覆盖另一个', async () => {
+  const records = new Map<string, CinemaRecord<CinemaProgress>>(), plays = new Map<string, string>()
+  let serial = 0
+  const { host, cinema } = await fixture(request => {
+    const value = body(request), key = String(value.key)
+    if (request.path === '/owner/storage/get') return json(records.get(key) ?? null)
+    if (request.path === '/owner/play/start') { const play = `play-${++serial}`; plays.set(String(value.id), play); return json({ play_id: play }) }
+    if (request.path === '/owner/play/quit') return json({ ok: true })
+    if (request.path === '/owner/storage/set') {
+      const id = key.slice('progress:'.length)
+      if (plays.get(id) !== value.play_id) return failure()
+      const record = { key, value: value.value as CinemaProgress, revision: `saved-${serial}` }
+      records.set(key, record); return json(record)
+    }
+    return json(null)
+  }, [{ id: '4', parent_id: '2', name: '同影片的第2段.mp4', kind: 'file', bytes: [4, 3, 2, 1] }])
+  const first = await host.stat({ by: 'id', id: '3' }), second = await host.stat({ by: 'id', id: '4' })
+  const a = new ProgressStore(cinema, first, vi.fn()), b = new ProgressStore(cinema, second, vi.fn())
+  await Promise.all([a.load(), b.load()]); await Promise.all([a.restored(), b.restored()])
+  a.mark({ file: first, seconds: 12, duration: 100, completed: false, audio: 0, subtitle: 'file:13' })
+  b.mark({ file: second, seconds: 37, duration: 100, completed: false, audio: 1, subtitle: 'file:14' })
+  a.mark({ file: second, seconds: 99, duration: 100, completed: false })
+  await a.close(); await b.close()
+  expect(records.get('progress:3')!.value).toMatchObject({ file: { id: '3' }, seconds: 12, audio: 0, subtitle: 'file:13' })
+  expect(records.get('progress:4')!.value).toMatchObject({ file: { id: '4' }, seconds: 37, audio: 1, subtitle: 'file:14' })
+  const restored = new ProgressStore(cinema, first, vi.fn())
+  expect((await restored.load())!.seconds).toBe(12); await restored.close()
+})

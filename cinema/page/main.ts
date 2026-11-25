@@ -2,11 +2,11 @@ import { createPageApp } from '@tgdrive/page-sdk'
 import '@tgdrive/ui/base.css'
 import { icon as sharedIcon, type IconName } from '@tgdrive/ui/icons'
 import type { FileNode } from '@tgdrive/page-sdk/contract'
-import { seriesOptions, SleepTimer, type SeriesOptions } from './play-options'
+import { renderVersionOptions, selectedVersion, seriesOptions, SleepTimer, type SeriesOptions } from './play-options'
 import './style.css'
 import './libraries.css'
 import './settings.css'
-import { CinemaClient, type CinemaRecord } from './client'
+import { CinemaClient, type CinemaRecord, type CinemaVersions } from './client'
 import { VIDEO_EXTENSIONS, contentRef, extension, isVideo, isNumberedMovie, parentPath, posterHue, preferences, sizeText, timeText, title, validProgress, type CinemaFavorite, type CinemaPreferences, type CinemaProgress } from './model'
 import { RangeFile, isAbort } from './io'
 import { Library, ArtLoader } from './library'
@@ -73,6 +73,7 @@ let navigationGeneration = 0, directory: string | null = null, directoryMode = f
 const libraryProblems = new Map<string, string>(), knownPaths = new Map<string, string>()
 let cursors: (string | null)[] = [null], pageIndex = 0, nextCursor: string | null = null
 let currentFiles: FileNode[] = [], heroFile: FileNode | undefined, selected: FileNode | undefined
+let detailVersions: CinemaVersions | undefined, playingVersions: CinemaVersions | undefined, detailVersionGeneration = 0, detailYear = ''
 let episodes: FileNode[] = [], episodePage = 0, episodeCursors: (string | null)[] = [null], nextEpisodeCursor: string | null = null, episodesLoading = false
 let pref = preferences(null), prefRecord: CinemaRecord<CinemaPreferences> | null = null, prefSaving = Promise.resolve()
 let favoriteRecord: CinemaRecord<CinemaFavorite> | null = null
@@ -132,14 +133,14 @@ const manager = new LibraryManager(app.ui, librariesStore, access, async snapsho
 }, toast, confirmAction)
 const settings = new ServiceManager(cinema, app.ui, async () => { library.clear(); descriptions.clear(); resetPages(); await loadPage() }, toast)
 
-function poster(file: FileNode, removable?: () => unknown, progress?: CinemaProgress) {
+function poster(file: FileNode, removable?: () => unknown, progress?: CinemaProgress, libraryId?: string) {
   const card = element('article', 'poster-card'), button = element('button', 'poster-button'), image = element('div', 'poster-art')
   image.style.setProperty('--hue', String(posterHue(file))); image.append(element('span', 'poster-initial', title(file.name).slice(0, 4)))
   image.append(element('span', 'poster-format', (file.kind === 'directory') ? '合集目录' : extension(file.name).toUpperCase()))
   const hover = element('span', 'poster-play'); hover.append(icon((file.kind === 'directory') ? 'folder' : 'play')); image.append(hover)
   button.append(image, element('h3', '', (file.kind === 'directory') ? file.name : title(file.name)), element('p', '', (file.kind === 'directory') ? '打开目录，发现更多' : `${sizeText(file.size)} · ${parentPath(file.path).split('/').pop() || '网盘'}`))
   button.title = file.path; button.setAttribute('aria-label', `${(file.kind === 'directory') ? '打开目录' : '查看影视'}：${file.name}`)
-  button.onclick = () => handle((file.kind === 'directory') ? browseDirectory(file.path) : openDetail(file))
+  button.onclick = () => handle((file.kind === 'directory') ? browseDirectory(file.path) : openDetail(file, libraryId))
   card.append(button)
   if (!(file.kind === 'directory')) {
     const signal = pageController.signal
@@ -253,7 +254,7 @@ async function loadPage() {
     for (let i = 0; i < currentFiles.length; i++) {
       const file = currentFiles[i], record = records[i]?.record
       const progress = record && validProgress(record.value) && record.value.file.content_version === file.content_version ? record.value : undefined
-      $('items').append(poster(file, record ? async () => { await cinema.delete(record.key, record.revision, signal); signal.throwIfAborted(); await loadPage() } : undefined, progress))
+      $('items').append(poster(file, record ? async () => { await cinema.delete(record.key, record.revision, signal); signal.throwIfAborted(); await loadPage() } : undefined, progress, records[i]?.library.id))
     }
     if (!currentFiles.length && nextCursor) notes.push(recordView ? '本页没有媒体库内的记录，可以继续翻页；库外记录仅隐藏，未删除。' : '本页没有视频，可以继续翻页查找。')
     text('list-status', notes.join(' ')); show('empty', !currentFiles.length && !nextCursor)
@@ -305,13 +306,14 @@ async function downloadVideo(file: FileNode, requiredId: string | undefined, sig
   signal.throwIfAborted()
   const link = document.createElement('a'); link.href = ticket.url; link.download = current.file.name; link.rel = 'noreferrer'; link.click()
 }
-async function openDetail(file: FileNode) {
+async function openDetail(file: FileNode, libraryId?: string) {
   const navigation = navigationGeneration
   await closingPlayback.catch(() => {})
   if (navigation !== navigationGeneration) return
   detailController.abort(); detailController = new AbortController(); detailArt?.clear()
   const signal = detailController.signal
-  selected = file; detailLibraryId = activeLibraryId ?? undefined; episodes = []; episodePage = 0; episodeCursors = [null]; nextEpisodeCursor = null; favoriteRecord = null; watchedFlag = undefined
+  selected = file; detailVersions = undefined; detailVersionGeneration++; detailYear = ''; show('detail-versions', false)
+  detailLibraryId = libraryId ?? activeLibraryId ?? undefined; episodes = []; episodePage = 0; episodeCursors = [null]; nextEpisodeCursor = null; favoriteRecord = null; watchedFlag = undefined
   previousFocus = document.activeElement as HTMLElement
   if (!detail.open) detail.showModal()
   text('detail-title', title(file.name)); text('detail-meta', `${extension(file.name).toUpperCase()} · ${sizeText(file.size)}`); text('detail-path', file.path)
@@ -333,23 +335,47 @@ async function openDetail(file: FileNode) {
     if (description?.title) text('detail-title', description.title)
     if (description?.year) text('detail-meta', `${description.year} · ${extension(current.name).toUpperCase()} · ${sizeText(current.size)}`)
     if (description?.overview) { text('detail-overview', description.overview); show('detail-overview', true) }
-    for (const id of ['detail-play', 'detail-restart', 'detail-download']) $<HTMLButtonElement>(id).disabled = false
-    const [progress, favorite, flag] = await Promise.all([cinema.progress(current.id, signal), cinema.record<CinemaFavorite>(`favorite:${current.id}`, signal), cinema.flags(current.id, signal)])
+    const versions = await cinema.versions(current.id, root.id, signal)
+    signal.throwIfAborted(); detailVersions = versions; detailYear = description?.year ?? ''
+    await chooseDetailVersion(versions.default_media_guid)
+    const [favorite, flag] = await Promise.all([cinema.record<CinemaFavorite>(`favorite:${versions.item_guid}`, signal), cinema.flags(versions.item_guid, signal)])
     signal.throwIfAborted(); favoriteRecord = favorite; watchedFlag = flag; updateFavorite(); updateWatched()
-    const p = progress?.value
-    const resumable = validProgress(p) && p.file.content_version === current.content_version && !p.completed && p.seconds > 0
-    $('detail-play').querySelector('span:last-child')!.textContent = resumable ? '继续观看' : '立即播放'
-    text('detail-progress', resumable ? `上次看到 ${timeText(p.seconds)} · 总时长 ${timeText(p.duration)}` : validProgress(p) && p.completed ? '已看完 · 可以再次回味' : '')
-    const list = await library.playlist(current, root.id, null, signal)
+    const list = await library.playlist(selected!, root.id, null, signal)
     signal.throwIfAborted(); episodes = list.items; nextEpisodeCursor = list.next_cursor
     text('detail-status', nextEpisodeCursor ? '选集按页读取，自动连播可跨页，不会遍历或截断整个目录。' : '')
-    text('episode-count', `${list.total} 个视频`); renderEpisodes()
+    text('episode-count', `${list.total} 个条目`); renderEpisodes()
   } catch (error) { if (!signal.aborted) { text('detail-status', `文件不可用或加载失败：${(error as Error).message}`); show('detail-retry', true) } }
+}
+async function chooseDetailVersion(mediaGuid: string) {
+  if (!detailVersions || !detailLibraryId) return
+  const versions = detailVersions, choice = ++detailVersionGeneration, signal = detailController.signal
+  const version = renderVersionOptions($<HTMLSelectElement>('detail-version'), versions, mediaGuid)
+  selected = version.file; show('detail-versions', versions.versions.length > 1)
+  $<HTMLSelectElement>('detail-version').disabled = true
+  for (const id of ['detail-play', 'detail-restart', 'detail-download']) $<HTMLButtonElement>(id).disabled = true
+  try {
+    const { file } = await scopedVideo(version.file, signal, detailLibraryId)
+    signal.throwIfAborted()
+    if (choice !== detailVersionGeneration) return
+    if (file.content_version !== version.file.content_version) throw new Error('该版本内容已更新，请重新打开影片')
+    selected = file
+    text('detail-meta', [detailYear, versions.versions.length > 1 ? version.name : '', extension(file.name).toUpperCase(), sizeText(file.size)].filter(Boolean).join(' · ')); text('detail-path', file.path)
+    const progress = await cinema.progress(file.id, signal)
+    signal.throwIfAborted()
+    if (choice !== detailVersionGeneration) return
+    const p = progress?.value, resumable = validProgress(p) && p.file.content_version === file.content_version && !p.completed && p.seconds > 0
+    $('detail-play').querySelector('span:last-child')!.textContent = resumable ? '继续观看' : '立即播放'
+    text('detail-progress', resumable ? `上次看到 ${timeText(p.seconds)} · 总时长 ${timeText(p.duration)}` : validProgress(p) && p.completed ? '已看完 · 可以再次回味' : '')
+    for (const id of ['detail-play', 'detail-restart', 'detail-download']) $<HTMLButtonElement>(id).disabled = false
+    renderEpisodes()
+  } finally {
+    if (!signal.aborted && choice === detailVersionGeneration) $<HTMLSelectElement>('detail-version').disabled = versions.versions.length < 2
+  }
 }
 function renderEpisodes() {
   $('episodes').replaceChildren()
   for (const file of episodes) {
-    const button = element('button', file.id === selected?.id ? 'selected' : '', file.name)
+    const button = element('button', file.id === selected?.id || detailVersions?.versions.some(version => version.file.id === file.id) ? 'selected' : '', file.name)
     button.title = file.path; button.onclick = () => handle(startPlayback(file)); $('episodes').append(button)
   }
   show('episodes-prev', episodePage > 0); show('episodes-next', !!nextEpisodeCursor)
@@ -369,17 +395,17 @@ function updateFavorite() {
   button.setAttribute('aria-pressed', String(!!favoriteRecord)); button.querySelector('span:last-child')!.textContent = favoriteRecord ? '已收藏' : '收藏'
 }
 async function toggleFavorite() {
-  if (!selected) return
-  const original = selected, button = $<HTMLButtonElement>('detail-favorite'), previous = favoriteRecord, signal = detailController.signal
+  if (!selected || !detailVersions) return
+  const original = selected, itemGuid = detailVersions.item_guid, button = $<HTMLButtonElement>('detail-favorite'), previous = favoriteRecord, signal = detailController.signal
   button.disabled = true
   try {
     const { file } = await scopedVideo(original, signal, detailLibraryId)
     if (previous) { await cinema.delete(previous.key, previous.revision, signal); signal.throwIfAborted(); favoriteRecord = null }
-    else { const saved = await cinema.save(`favorite:${file.id}`, { file }, null, signal); signal.throwIfAborted(); favoriteRecord = saved }
-    watchedFlag = await cinema.flags(file.id, signal); updateWatched()
+    else { const saved = await cinema.save(`favorite:${itemGuid}`, { file }, null, signal); signal.throwIfAborted(); favoriteRecord = saved }
+    watchedFlag = await cinema.flags(itemGuid, signal); updateWatched()
   } catch (error) {
     if (!signal.aborted && (error as { code?: string }).code === 'storage_conflict') {
-      const saved = await cinema.record<CinemaFavorite>(`favorite:${original.id}`, signal); signal.throwIfAborted(); favoriteRecord = saved
+      const saved = await cinema.record<CinemaFavorite>(`favorite:${itemGuid}`, signal); signal.throwIfAborted(); favoriteRecord = saved
     }
     throw error
   } finally { if (!signal.aborted && selected?.id === original.id) updateFavorite() }
@@ -390,15 +416,15 @@ function updateWatched() {
   button.setAttribute('aria-pressed', String(!!watchedFlag?.watched)); button.querySelector('span:last-child')!.textContent = watchedFlag?.watched ? '标记未看' : '标记已看'
 }
 async function toggleWatched() {
-  if (!selected || !watchedFlag) return
-  const file = selected, previous = watchedFlag, signal = detailController.signal
+  if (!selected || !watchedFlag || !detailVersions) return
+  const file = selected, itemGuid = detailVersions.item_guid, previous = watchedFlag, signal = detailController.signal
   $<HTMLButtonElement>('detail-watched').disabled = true
   try {
     await scopedVideo(file, signal, detailLibraryId)
-    await cinema.watched(file.id, !previous.watched, previous.revision, signal)
-    watchedFlag = await cinema.flags(file.id, signal)
+    await cinema.watched(itemGuid, !previous.watched, previous.revision, signal)
+    watchedFlag = await cinema.flags(itemGuid, signal)
   } catch (error) {
-    if (!signal.aborted && (error as { code?: string }).code === 'storage_conflict') watchedFlag = await cinema.flags(file.id, signal)
+    if (!signal.aborted && (error as { code?: string }).code === 'storage_conflict') watchedFlag = await cinema.flags(itemGuid, signal)
     throw error
   } finally { if (!signal.aborted && selected?.id === file.id) updateWatched() }
 }
@@ -434,7 +460,7 @@ async function immersive() {
   return hostShell.update({ mobile: !!mobileQuery?.matches, playing: !player.hidden, dark })
 }
 async function leaveHost() { await hostShell?.dispose() }
-async function startPlayback(file: FileNode, restart = false) {
+async function startPlayback(file: FileNode, restart = false, mediaGuid?: string) {
   const intent = ++startIntent, requiredId = playing ? playingLibraryId : detail.open ? detailLibraryId : activeLibraryId ?? undefined
   navigationGeneration++
   await closePlayer(false, true)
@@ -442,7 +468,8 @@ async function startPlayback(file: FileNode, restart = false) {
   const active = ++playGeneration
   playController = new AbortController(); const signal = playController.signal
   playing = file; playingLibraryId = requiredId; playingRoot = null; previousVideo = null; nextVideo = null; restored = false; duration = 0; selectedSubtitle = ''; restoredAudio = undefined; subtitleTracks = []; subtitleExplicit = false; failedPlayback = false
-  numberedMovie = false
+  numberedMovie = false; playingVersions = undefined; show('player-versions', false)
+  $<HTMLSelectElement>('player-version').replaceChildren(); $<HTMLSelectElement>('player-version').disabled = true
   closeDetail(); art?.clear(); pageController.abort(); showPlayer(true); player.focus()
   text('playing-title', title(file.name)); text('play-mode', '正在准备播放…'); text('play-message', '正在读取视频信息…'); show('play-message', true)
   show('big-play', false); show('play-options', false); syncStatus('', false); text('current-time', '0:00'); text('duration', '0:00'); $<HTMLInputElement>('seek').value = '0'
@@ -452,8 +479,16 @@ async function startPlayback(file: FileNode, restart = false) {
   $<HTMLFieldSetElement>('series-options').disabled = true; text('series-status', '正在读取本剧设置…')
   try {
     await immersive(); signal.throwIfAborted()
-    const { file: current, library: root } = await scopedVideo(file, signal, requiredId)
-    signal.throwIfAborted(); playing = current; playingRoot = root; playingLibraryId = root.id; text('playing-title', title(current.name))
+    const scoped = await scopedVideo(file, signal, requiredId), root = scoped.library
+    let current = scoped.file
+    const versions = await cinema.versions(current.id, root.id, signal), version = selectedVersion(versions, mediaGuid)
+    signal.throwIfAborted()
+    if (current.id !== version.file.id) current = (await scopedVideo(version.file, signal, root.id)).file
+    signal.throwIfAborted()
+    if (current.content_version !== version.file.content_version) throw new Error('所选版本内容已更新，请重新打开影片')
+    playing = current; playingVersions = versions; playingRoot = root; playingLibraryId = root.id
+    renderVersionOptions($<HTMLSelectElement>('player-version'), versions, version.media_guid); show('player-versions', versions.versions.length > 1)
+    text('playing-title', title(current.name))
     const description = await descriptions.load(current, signal, true)
     signal.throwIfAborted(); numberedMovie = isNumberedMovie(current, description)
     if (description?.title) text('playing-title', description.title)
@@ -470,7 +505,7 @@ async function startPlayback(file: FileNode, restart = false) {
       const key = 'series:' + directory.id, record = await cinema.record<SeriesOptions>(key, signal)
       signal.throwIfAborted(); series = seriesOptions(record?.value); seriesRecord = record; seriesKey = key
       $<HTMLInputElement>('skip-intro').value = String(series.intro); $<HTMLInputElement>('skip-outro').value = String(series.outro)
-      $<HTMLFieldSetElement>('series-options').disabled = numberedMovie; text('series-status', numberedMovie ? '同番号版本与分段独立播放，请手动切换视频。' : '0 表示不跳过；设置适用于同文件夹内的视频')
+      $<HTMLFieldSetElement>('series-options').disabled = numberedMovie; text('series-status', numberedMovie ? '同番号影片的版本与分段均独立播放，请使用版本选择手动切换。' : '0 表示不跳过；设置适用于同文件夹内的视频')
       if (numberedMovie) series = seriesOptions(null)
     } catch { signal.throwIfAborted(); text('series-status', '设置读取失败，重新打开影片可重试') }
     const target = !restart && progress && !progress.completed ? progress.seconds : 0
@@ -481,7 +516,7 @@ async function startPlayback(file: FileNode, restart = false) {
       note: message => { if (active === playGeneration) toast(message) },
     })
     applyPreferences(); updateSubtitleOptions()
-    void Promise.all([cinema.neighbor(current.id, root.id, -1, signal), cinema.neighbor(current.id, root.id, 1, signal)]).then(([previous, next]) => {
+    if (!numberedMovie) void Promise.all([cinema.neighbor(current.id, root.id, -1, signal), cinema.neighbor(current.id, root.id, 1, signal)]).then(([previous, next]) => {
       if (signal.aborted || active !== playGeneration) return
       previousVideo = previous; nextVideo = next; $<HTMLButtonElement>('previous-episode').disabled = !previous; $<HTMLButtonElement>('next-episode').disabled = !next
     }).catch(error => { if (!signal.aborted) report(error) })
@@ -551,7 +586,7 @@ async function closePlayer(reload = true, keepIntent = false) {
   session?.stop(); session = undefined; captions.clear(); oldStore?.stop(); store = undefined
   if (document.pictureInPictureElement) await document.exitPictureInPicture().catch(() => {})
   if (document.fullscreenElement) await document.exitFullscreen().catch(() => {})
-  showPlayer(false); show('play-options', false); player.classList.remove('css-fullscreen'); playing = undefined; playingRoot = null; playingLibraryId = undefined
+  showPlayer(false); show('play-options', false); show('player-versions', false); player.classList.remove('css-fullscreen'); playing = undefined; playingVersions = undefined; playingRoot = null; playingLibraryId = undefined
   closingPlayback = (async () => {
     await Promise.all([oldStore?.close(), immersive()])
     if (reload) { await loadPage(); $('main').focus() }
@@ -561,7 +596,7 @@ async function closePlayer(reload = true, keepIntent = false) {
 async function togglePlay() {
   cancelNext()
   if (sleep.stopped) sleep.set(0)
-  if ((!session || failedPlayback || video.error) && playing) return startPlayback(playing)
+  if ((!session || failedPlayback || video.error) && playing) return startPlayback(playing, false, playingVersions ? value('player-version') : undefined)
   if (video.paused) await session?.play(); else video.pause()
 }
 async function goEpisode(delta: number) { if (!playing || !playingLibraryId) return; const file = await cinema.neighbor(playing.id, playingLibraryId, delta, playController.signal); if (file) await startPlayback(file) }
@@ -625,7 +660,7 @@ on('search-toggle', 'click', () => {
   if (searchOpen) $('search').focus()
 })
 on('list-retry', 'click', loadPage)
-on('detail-retry', 'click', () => selected && openDetail(selected))
+on('detail-retry', 'click', () => selected && openDetail(selected, detailLibraryId))
 on('directory-mode', 'click', () => { if (!currentRoot) return; directoryMode = !directoryMode; directory = currentRoot.path; resetPages(); return loadPage() })
 function searchInLibrary() { if (!currentRoot) return; query = value('search').trim(); format = value('format'); directoryMode = false; resetPages(); return loadPage() }
 on('search-submit', 'click', searchInLibrary)
@@ -642,8 +677,14 @@ on('detail-show-file', 'click', async () => {
   navigationGeneration++; view = 'library'; activeLibraryId = current.library.id; currentRoot = current.library; directoryMode = true; directory = parentPath(current.file.path); query = ''; format = ''; resetPages(); await loadPage()
 })
 on('detail-file-info', 'click', async () => { if (selected) { const { file } = await scopedVideo(selected, detailController.signal, detailLibraryId); toast(`${file.name}\n${file.path}\n${sizeText(file.size)} · 文件 ID ${file.id}`) } })
-on('detail-play', 'click', () => selected && startPlayback(selected))
-on('detail-restart', 'click', () => selected && startPlayback(selected, true))
+on('detail-play', 'click', () => selected && startPlayback(selected, false, value('detail-version')))
+on('detail-restart', 'click', () => selected && startPlayback(selected, true, value('detail-version')))
+on('detail-version', 'change', () => chooseDetailVersion(value('detail-version')))
+on('player-version', 'change', () => {
+  if (!playingVersions || !playing) return
+  const version = selectedVersion(playingVersions, value('player-version'))
+  if (version.file.id !== playing.id) return startPlayback(version.file, false, version.media_guid)
+})
 on('detail-favorite', 'click', toggleFavorite); on('detail-watched', 'click', toggleWatched)
 on('detail-download', 'click', () => selected && downloadVideo(selected, detailLibraryId, detailController.signal))
 on('episodes-prev', 'click', () => { if (episodePage) return loadEpisodes(episodePage - 1) })

@@ -407,3 +407,233 @@ async fn indexing_does_not_queue_byte_requests_or_owner_shutdown_behind_a_full_s
         204
     );
 }
+
+#[tokio::test]
+async fn owner_grid_versions_history_and_favorites_follow_one_movie_and_file_progress() {
+    let (app, host, _) = configured(numbered_versions(), "movie").await;
+    let item = app.db.entry("3").unwrap().unwrap().guid;
+    let (status, catalog) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/catalog",
+            None,
+            json!({"ancestor":LIBRARY,"raw_files":true,"limit":48}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{catalog}");
+    assert_eq!(catalog["total"], 1);
+    assert_eq!(catalog["items"].as_array().unwrap().len(), 1);
+    assert_eq!(catalog["items"][0]["id"], "3");
+    assert_eq!(catalog["descriptions"]["3"]["title"], "ABC-123 代表片名");
+    let directory = page_files::directory(&app, "/影视", LIBRARY, 48, None)
+        .await
+        .unwrap();
+    assert_eq!(directory.total, 1);
+    assert_eq!(
+        page_files::playlist(&app, "5", LIBRARY, 100, None)
+            .await
+            .unwrap()
+            .total,
+        1
+    );
+    assert!(
+        page_files::neighbor(&app, "4", LIBRARY, 1)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let (status, initial) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/versions",
+            None,
+            json!({"id":"4","library_id":LIBRARY}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{initial}");
+    assert_eq!(initial["item_guid"], item);
+    assert_eq!(initial["versions"].as_array().unwrap().len(), 3);
+    assert_eq!(initial["versions"][1]["name"], "1080P 第1段");
+    assert_eq!(initial["versions"][2]["name"], "1080P 第2段");
+    assert_eq!(
+        initial["default_media_guid"],
+        initial["representative_media_guid"]
+    );
+
+    for (position, id) in ["3", "4", "5"].iter().enumerate() {
+        let (status, started) = body(
+            wire(
+                &app,
+                true,
+                "POST",
+                "/owner/play/start",
+                None,
+                json!({"id":id}),
+                &[],
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, 200, "{started}");
+        let entry = app.db.entry(id).unwrap().unwrap();
+        let play_id = started["play_id"].as_str().unwrap();
+        assert_eq!(
+            app.page_plays.lock().unwrap().get(play_id).unwrap().0,
+            entry.media_guid
+        );
+        let (status, progress) = body(wire(&app,true,"POST","/owner/storage/set",None,json!({"key":format!("progress:{id}"),"play_id":play_id,"value":{"seconds":(position+1)*25,"completed":false,"audio":0,"subtitle":format!("file:{}", entry.subtitles[0].id)}}),&[]).await).await;
+        assert_eq!(status, 200, "{progress}");
+        assert_eq!(progress["value"]["file"]["id"], *id);
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    let (_, versions) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/versions",
+            None,
+            json!({"id":item,"library_id":LIBRARY}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        versions["default_media_guid"],
+        app.db.entry("5").unwrap().unwrap().media_guid
+    );
+    let (_, recent) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/storage/list",
+            None,
+            json!({"prefix":"progress:","library_id":LIBRARY,"limit":48}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(recent["total"], 1);
+    assert_eq!(recent["records"].as_array().unwrap().len(), 1);
+    assert_eq!(recent["records"][0]["value"]["file"]["id"], "5");
+    assert_eq!(recent["records"][0]["library_id"], LIBRARY);
+    assert_eq!(
+        recent["records"][0]["value"]["seconds"].as_f64(),
+        Some(75.0)
+    );
+    for (position, id) in ["3", "4", "5"].iter().enumerate() {
+        let (_, progress) = body(
+            wire(
+                &app,
+                true,
+                "POST",
+                "/owner/storage/get",
+                None,
+                json!({"key":format!("progress:{id}")}),
+                &[],
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(
+            progress["value"]["seconds"].as_f64(),
+            Some(((position + 1) * 25) as f64)
+        );
+        let (_, description) = body(
+            wire(
+                &app,
+                true,
+                "POST",
+                "/owner/description",
+                None,
+                json!({"id":id}),
+                &[],
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(description["title"], "ABC-123 代表片名");
+        assert_eq!(
+            description["subtitles"][0]["id"],
+            (id.parse::<u64>().unwrap() + 20).to_string()
+        );
+    }
+    let (status, actors) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/actors",
+            None,
+            json!({"id":"5"}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{actors}");
+    assert_eq!(actors["list"][0]["name"], "A-4K 演员");
+    let (status, favorite) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/storage/set",
+            None,
+            json!({"key":format!("favorite:{item}"),"value":{"file":catalog["items"][0]}}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{favorite}");
+    app.db.set_flag(&item, false, true).unwrap();
+    let (_, progress) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/storage/get",
+            None,
+            json!({"key":"progress:4"}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(progress["value"]["completed"], false);
+    host.add_node(seed("99", "1", "库外", NodeKind::Directory, b""))
+        .unwrap();
+    host.change_node("3".into(), Some("99".into()), None, None, None)
+        .unwrap();
+    app.synchronize(false).await.unwrap();
+    let (_, favorites) = body(
+        wire(
+            &app,
+            true,
+            "POST",
+            "/owner/storage/list",
+            None,
+            json!({"prefix":"favorite:","library_id":LIBRARY,"limit":48}),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(favorites["total"], 1);
+    assert_eq!(favorites["records"][0]["key"], format!("favorite:{item}"));
+    assert_eq!(favorites["records"][0]["value"]["file"]["id"], "4");
+}

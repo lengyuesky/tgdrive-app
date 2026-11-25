@@ -131,7 +131,7 @@ fn remember_image(app: &Application, id: &str, path: &str) -> Result<()> {
     Ok(())
 }
 async fn cast_actors(app: &Application, reference: &str) -> Result<Vec<Actor>> {
-    if let Some(mut entry) = app.db.entry(reference)? {
+    if let Some(mut entry) = app.db.representative_entry(reference, "")? {
         let show = entry.actors.is_empty();
         let mut rows = if show {
             std::mem::take(&mut entry.show_actors)

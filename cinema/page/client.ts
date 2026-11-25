@@ -13,7 +13,9 @@ export interface ServiceStatus {
   covers: { ready: number; pending: number; failed: number; retrying: number; errors: Array<{ title: string; reason: string; retry_at: number }> }
   limits: Record<string, number>
 }
-export interface CinemaRecord<T> { key: string; value: T; revision: string }
+export interface CinemaRecord<T> { key: string; value: T; revision: string; library_id?: string }
+export interface CinemaVersion { media_guid: string; name: string; file: FileNode }
+export interface CinemaVersions { item_guid: string; representative_media_guid: string; default_media_guid: string; versions: CinemaVersion[] }
 export interface FilePage { items: FileNode[]; next_cursor: string | null; total: number }
 export interface CatalogPage extends FilePage { descriptions: Record<string, MovieDescription> }
 export interface RecordPage<T> { records: Array<CinemaRecord<T>>; next_cursor: string | null; total: number }
@@ -60,6 +62,7 @@ export class CinemaClient {
   directory(path: string, library_id: string, cursor: string | null, signal?: AbortSignal) { return this.request<FilePage>('/owner/files/list', { path, library_id, cursor, limit: 48 }, signal) }
   playlist(id: string, library_id: string, cursor: string | null, signal?: AbortSignal) { return this.request<FilePage>('/owner/playlist', { id, library_id, cursor, limit: 100 }, signal) }
   neighbor(id: string, library_id: string, delta: number, signal?: AbortSignal) { return this.request<{ file: FileNode | null }>('/owner/play/neighbor', { id, library_id, delta }, signal).then(value => value.file) }
+  versions(id: string, library_id: string, signal?: AbortSignal) { return this.request<CinemaVersions>('/owner/versions', { id, library_id }, signal) }
   description(id: string, signal?: AbortSignal) { return this.request<MovieDescription>('/owner/description', { id }, signal) }
   cover(id: string, signal?: AbortSignal) { return this.request<{ key: string | null }>('/owner/cover', { id }, signal) }
   record<T>(key: string, signal?: AbortSignal) { return this.request<CinemaRecord<T> | null>('/owner/storage/get', { key }, signal) }

@@ -59,7 +59,12 @@ fn record(app: &Application, key: &str) -> Result<Value> {
             .optional()
             .app()
         })?;
-        let completed = wire::watched(app, &e)?;
+        // 番号电影的完成状态属于版本；其余电影和电视剧沿用原有的已看标记语义。
+        let completed = if e.kind == "Movie" && !e.number.trim().is_empty() {
+            p.as_ref().is_some_and(|progress| progress.completed)
+        } else {
+            wire::watched(app, &e)?
+        };
         let Some(p) = p else {
             return Ok(Value::Null);
         };
@@ -83,7 +88,7 @@ fn record(app: &Application, key: &str) -> Result<Value> {
             })
             .unwrap_or_default();
         return Ok(
-            json!({"key":key,"revision":revision,"value":{"file":app.db.node(id)?,"seconds":p.ts,"duration":p.duration,"completed":completed,"audio":audio,"subtitle":subtitle}}),
+            json!({"key":key,"revision":revision,"value":{"file":app.db.node(&e.node_id)?,"seconds":p.ts,"duration":p.duration,"completed":completed,"audio":audio,"subtitle":subtitle}}),
         );
     }
     if let Some(id) = key.strip_prefix("favorite:") {
@@ -100,7 +105,9 @@ fn record(app: &Application, key: &str) -> Result<Value> {
             )
             .app()
         })?;
-        return Ok(json!({"key":key,"revision":revision,"value":{"file":app.db.node(id)?}}));
+        return Ok(
+            json!({"key":key,"revision":revision,"value":{"file":app.db.node(&e.node_id)?}}),
+        );
     }
     if key == "preferences" || key.starts_with("series:") {
         return app.db.preference_record(key);
@@ -215,12 +222,40 @@ pub async fn request(
                 &json!({"file":crate::page_files::neighbor(&app,text(value,"id"),text(value,"library_id"),value["delta"].as_i64().unwrap_or(0)).await?}),
             );
         }
-        ("POST", "/owner/description") => {
-            let e = entry(&app, text(value, "id"))?;
-            index::authorized(&app, &e.file()).await?;
+        ("POST", "/owner/versions") => {
+            let id = text(value, "id");
+            let library = text(value, "library_id");
+            let representative = app
+                .db
+                .representative_entry(id, library)?
+                .ok_or_else(|| Error::api(error_code::NOT_FOUND, "影片版本不存在"))?;
+            let default = app
+                .db
+                .default_entry(&representative.guid, library)?
+                .ok_or_else(|| Error::api(error_code::NOT_FOUND, "影片默认版本不存在"))?;
+            let mut versions = Vec::new();
+            for entry in app.db.versions(&representative.guid, library)? {
+                let file = index::authorized(&app, &entry.file()).await?;
+                versions.push(
+                    json!({"media_guid":entry.media_guid,"name":entry.version_name,"file":file}),
+                );
+            }
             return json_response(
                 200,
-                &json!({"title":e.title,"overview":e.overview,"year":e.year,"number":e.number,"kind":if e.kind=="Movie"{"movie"}else if e.kind=="Episode"{"episodedetails"}else{"video"},"cover_key":e.cover,"subtitles":e.subtitles}),
+                &json!({"item_guid":representative.guid,"representative_media_guid":representative.media_guid,"default_media_guid":default.media_guid,"versions":versions}),
+            );
+        }
+        ("POST", "/owner/description") => {
+            let e = entry(&app, text(value, "id"))?;
+            let representative = app
+                .db
+                .representative_entry(text(value, "id"), text(value, "library_id"))?
+                .ok_or_else(|| Error::api(error_code::NOT_FOUND, "影视条目不存在"))?;
+            index::authorized(&app, &e.file()).await?;
+            index::authorized(&app, &representative.file()).await?;
+            return json_response(
+                200,
+                &json!({"title":representative.title,"overview":representative.overview,"year":representative.year,"number":representative.number,"kind":if representative.kind=="Movie"{"movie"}else if representative.kind=="Episode"{"episodedetails"}else{"video"},"cover_key":representative.cover,"subtitles":e.subtitles}),
             );
         }
         ("POST", "/owner/media") => {
@@ -228,11 +263,17 @@ pub async fn request(
             return json_response(200, &media::probe(&app, &e, app.shutdown_token()).await?);
         }
         ("POST", "/owner/cover") => {
-            let e = entry(&app, text(value, "id"))?;
+            let e = app
+                .db
+                .representative_entry(text(value, "id"), text(value, "library_id"))?
+                .ok_or_else(|| Error::api(error_code::NOT_FOUND, "影视条目封面不存在"))?;
             return json_response(200, &json!({"key":covers::page_key(&app,&e).await?}));
         }
         ("POST", "/owner/flags/get") => {
-            let e = entry(&app, text(value, "id"))?;
+            let e = app
+                .db
+                .default_entry(text(value, "id"), text(value, "library_id"))?
+                .ok_or_else(|| Error::api(error_code::NOT_FOUND, "影视观看标记不存在"))?;
             index::authorized(&app, &e.file()).await?;
             let revision: Option<String> = app.db.with(|db| {
                 db.query_row(
@@ -301,11 +342,26 @@ pub async fn request(
             let page = catalog::list(&app, &query, 0)?;
             let mut records = Vec::new();
             for id in page.ids {
-                let e = entry(&app, &id)?;
+                let e = if prefix == "progress:" {
+                    app.db
+                        .default_entry(&id, text(value, "library_id"))?
+                        .ok_or_else(|| Error::api(error_code::NOT_FOUND, "影片观看记录不存在"))?
+                } else {
+                    entry(&app, &id)?
+                };
                 let node = index::authorized(&app, &e.file()).await?;
-                let mut r = record(&app, &format!("{prefix}{}", e.node_id))?;
+                let key = if prefix == "favorite:" {
+                    &e.guid
+                } else {
+                    &e.node_id
+                };
+                let mut r = record(&app, &format!("{prefix}{key}"))?;
                 if !r.is_null() {
                     r["value"]["file"] = serde_json::to_value(node)?;
+                    if e.kind == "Movie" && !e.number.trim().is_empty() {
+                        // 全局记录保留番号条目所属的库，不能因重叠根而切到另一个库的同号条目。
+                        r["library_id"] = json!(e.libraries[0]);
+                    }
                     records.push(r);
                 }
             }

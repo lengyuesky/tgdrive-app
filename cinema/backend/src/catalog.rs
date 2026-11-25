@@ -115,7 +115,11 @@ pub fn list(app: &Application, query: &Query, skip: usize) -> Result<Page> {
             .catalog(&value.guid)?
             .ok_or_else(|| Error::api(error_code::INVALID_CURSOR, "影视分页锚点不存在"))?;
         value.title = anchor.title;
-        value.timestamp = anchor.added_at;
+        value.timestamp = if query.history {
+            app.db.recent_at(&value.guid)?
+        } else {
+            anchor.added_at
+        };
         Some(value)
     } else {
         None
@@ -152,7 +156,7 @@ pub fn list(app: &Application, query: &Query, skip: usize) -> Result<Page> {
     }
     if !query.q.is_empty() {
         if query.raw_files {
-            conditions.push("(instr(c.folded_title,?)>0 OR EXISTS(SELECT 1 FROM entries e JOIN nodes n ON n.id=e.node_id WHERE e.guid=c.guid AND instr(lower(json_extract(n.document,'$.name')),?)>0))".into());
+            conditions.push("(instr(c.folded_title,?)>0 OR EXISTS(SELECT 1 FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id JOIN nodes n ON n.id=e.node_id WHERE l.item_guid=c.guid AND instr(lower(json_extract(n.document,'$.name')),?)>0))".into());
             parameters.extend([
                 SqlValue::Text(query.q.to_lowercase()),
                 SqlValue::Text(query.q.to_ascii_lowercase()),
@@ -175,29 +179,35 @@ pub fn list(app: &Application, query: &Query, skip: usize) -> Result<Page> {
             .push("EXISTS(SELECT 1 FROM flags f WHERE f.target=c.guid AND f.favorite=1)".into());
     }
     if query.history {
-        conditions.push("EXISTS(SELECT 1 FROM entries e JOIN progress p ON p.media_guid=e.media_guid WHERE e.guid=c.guid AND p.updated_at>0)".into());
+        conditions.push("EXISTS(SELECT 1 FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id JOIN progress p ON p.media_guid=e.media_guid WHERE l.item_guid=c.guid AND p.updated_at>0)".into());
     }
     if !query.person.is_empty() {
-        conditions.push("(EXISTS(SELECT 1 FROM entries e JOIN person_records p ON p.node_id=e.node_id WHERE e.guid=c.guid AND p.person_id=?) OR (c.kind='TV' AND EXISTS(SELECT 1 FROM entries e JOIN person_records p ON p.node_id=e.node_id WHERE e.show_guid=c.guid AND p.person_id=?)))".into());
+        conditions.push("(EXISTS(SELECT 1 FROM person_records p WHERE p.node_id=c.representative AND c.kind!='TV' AND p.person_id=?) OR (c.kind='TV' AND EXISTS(SELECT 1 FROM entries e JOIN person_records p ON p.node_id=e.node_id WHERE e.show_guid=c.guid AND p.person_id=?)))".into());
         parameters.extend([
             SqlValue::Text(query.person.clone()),
             SqlValue::Text(query.person.clone()),
         ]);
     }
     if !query.extensions.is_empty() {
-        conditions.push(format!("EXISTS(SELECT 1 FROM entries e JOIN nodes n ON n.id=e.node_id WHERE e.guid=c.guid AND n.extension IN ({}))", vec!["?"; query.extensions.len()].join(",")));
+        conditions.push(format!("EXISTS(SELECT 1 FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id JOIN nodes n ON n.id=e.node_id WHERE l.item_guid=c.guid AND n.extension IN ({}))", vec!["?"; query.extensions.len()].join(",")));
         parameters.extend(query.extensions.iter().cloned().map(SqlValue::Text));
     }
     let filter = conditions.join(" AND ");
-    let added = query.sort_column == "create_time";
-    let primary = if added { "c.added_at" } else { "c.title" };
-    let order = if query.descending { "DESC" } else { "ASC" };
+    let added = query.sort_column == "create_time" || query.history;
+    let timestamp = if query.history {
+        "(SELECT max(p.updated_at) FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id JOIN progress p ON p.media_guid=e.media_guid WHERE l.item_guid=c.guid)"
+    } else {
+        "c.added_at"
+    };
+    let primary = if added { timestamp } else { "c.title" };
+    let descending = query.descending || query.history;
+    let order = if descending { "DESC" } else { "ASC" };
     let mut seek = String::new();
     if let Some(cursor) = &cursor {
-        let compare = if query.descending { "<" } else { ">" };
+        let compare = if descending { "<" } else { ">" };
         if added {
             seek = format!(
-                " AND (c.added_at {compare} ? OR (c.added_at=? AND (c.title>? OR (c.title=? AND c.guid>?))))"
+                " AND ({timestamp} {compare} ? OR ({timestamp}=? AND (c.title>? OR (c.title=? AND c.guid>?))))"
             );
             parameters.extend([
                 SqlValue::Integer(cursor.timestamp),
@@ -217,7 +227,7 @@ pub fn list(app: &Application, query: &Query, skip: usize) -> Result<Page> {
     }
     let sort = format!("{primary} {order},c.title ASC,c.guid ASC");
     let sql = format!(
-        "SELECT c.guid,c.title,c.added_at FROM catalog c WHERE {filter}{seek} ORDER BY {sort}"
+        "SELECT c.guid,c.title,{timestamp} FROM catalog c WHERE {filter}{seek} ORDER BY {sort}"
     );
     let count_parameters = parameters[..parameters.len()
         - cursor

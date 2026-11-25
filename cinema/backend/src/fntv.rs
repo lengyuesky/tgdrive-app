@@ -245,7 +245,7 @@ async fn library(app: &Application, reference: &str) -> Result<Option<Value>> {
             .find(|l| l["id"] == reference && l["authorized"] == true)
     });
     Ok(found.map(|library|{
-        let posters=app.db.with(|db|{use crate::database::SqlResult;let mut s=db.prepare("SELECT c.cache_key FROM cover_states c JOIN entries e ON e.media_guid=c.media_guid JOIN entry_libraries l ON l.node_id=e.node_id WHERE l.library_id=?1 AND c.state='ready' ORDER BY e.season,e.episode,e.guid LIMIT 4").app()?;s.query_map([reference],|r|r.get::<_,String>(0)).app()?.collect::<rusqlite::Result<Vec<_>>>().app()}).unwrap_or_default();
+        let posters=app.db.with(|db|{use crate::database::SqlResult;let mut s=db.prepare("SELECT c.cache_key FROM cover_states c JOIN entries e ON e.media_guid=c.media_guid JOIN catalog i ON i.representative=e.node_id AND i.kind NOT IN ('TV','Season') JOIN catalog_libraries l ON l.guid=i.guid WHERE l.library_id=?1 AND c.state='ready' ORDER BY e.season,e.episode,i.guid LIMIT 4").app()?;s.query_map([reference],|r|r.get::<_,String>(0)).app()?.collect::<rusqlite::Result<Vec<_>>>().app()}).unwrap_or_default();
         json!({"guid":reference,"title":library["name"],"category":if library["kind"]=="movie"{"Movie"}else{"TV"},"view_type":0,"posters":posters.iter().map(|key|format!("/tgdrive-poster/{key}")).collect::<Vec<_>>()})
     }))
 }
@@ -292,7 +292,7 @@ async fn read_request(
                 let count = app.db.with(|db| {
                     use crate::database::SqlResult;
                     db.query_row(
-                        "SELECT count(*) FROM entry_libraries WHERE library_id=?1",
+                        "SELECT count(DISTINCT item_guid) FROM entry_libraries WHERE library_id=?1",
                         [&l.id],
                         |r| r.get::<_, i64>(0),
                     )
@@ -303,11 +303,23 @@ async fn read_request(
             return envelope(value);
         }
         "/v/api/v1/play/list" => {
-            let ids=app.db.with(|db|{use crate::database::SqlResult;let mut s=db.prepare("SELECT e.guid FROM progress p JOIN entries e ON e.media_guid=p.media_guid WHERE p.updated_at>0 ORDER BY p.updated_at DESC,e.guid LIMIT 100").app()?;s.query_map([],|r|r.get::<_,String>(0)).app()?.collect::<rusqlite::Result<Vec<_>>>().app()})?;
+            let page = catalog::list(
+                &app,
+                &Query {
+                    history: true,
+                    raw_files: true,
+                    limit: 100,
+                    ..Default::default()
+                },
+                0,
+            )?;
             let mut list = Vec::new();
-            for id in ids {
+            for id in page.ids {
                 if let Some(mut row) = wire::catalog_item(&app, &id)? {
-                    let e = required_entry(&app, &id, false)?;
+                    let e = app
+                        .db
+                        .default_entry(&id, "")?
+                        .ok_or_else(|| Error::api(error_code::NOT_FOUND, "最近播放的影片不存在"))?;
                     row["ts"] = json!(app.db.progress(&e)?.ts as u64);
                     list.push(row);
                 }
@@ -374,11 +386,21 @@ async fn read_request(
         }
     }
     if let Some(id) = path.strip_prefix("/v/api/v1/stream/list/") {
-        let entry = required_entry(&app, id, true)?;
-        let info = media::probe(&app, &entry, &session.cancel).await?;
-        let (videos, audios, subtitles) = wire::streams(&entry, &info);
+        let representative = required_entry(&app, id, true)?;
+        let entries = app.db.versions(&representative.guid, "")?;
+        let (mut files, mut videos, mut audios, mut subtitles) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        // 文件列表与三类流都覆盖整个条目，各流的 media_guid 明确指向自己的文件。
+        for entry in entries {
+            let info = media::probe(&app, &entry, &session.cancel).await?;
+            files.push(wire::file(&entry));
+            let (video, audio, subtitle) = wire::streams(&entry, &info);
+            videos.extend(video);
+            audios.extend(audio);
+            subtitles.extend(subtitle);
+        }
         return envelope(
-            json!({"files":[wire::file(&entry)],"video_streams":videos,"audio_streams":audios,"subtitle_streams":subtitles}),
+            json!({"files":files,"video_streams":videos,"audio_streams":audios,"subtitle_streams":subtitles}),
         );
     }
     if let Some(id) = path.strip_prefix("/v/api/v1/media/range/") {
@@ -577,7 +599,16 @@ async fn post_request(
             .set_flag(&target, favorite, *method != Method::DELETE)?;
         return envelope(json!(true));
     }
-    let entry = required_entry(&app, reference, path == "/v/api/v1/play/info")?;
+    let entry = match app
+        .db
+        .select_entry(string(value, "item_guid"), string(value, "media_guid"))?
+    {
+        Some(entry) => entry,
+        None if string(value, "media_guid").is_empty() && path == "/v/api/v1/play/info" => {
+            required_entry(&app, string(value, "item_guid"), true)?
+        }
+        None => return Err(Error::api(error_code::NOT_FOUND, "影视播放版本不存在")),
+    };
     let info = media::probe(&app, &entry, &session.cancel).await?;
     let (videos, audios, subtitles) = wire::streams(&entry, &info);
     match path {
@@ -595,6 +626,7 @@ async fn post_request(
             )
         }
         "/v/api/v1/play/play" => {
+            validate_tracks(value, &videos, &audios, &subtitles)?;
             app.service.select(token, &entry.media_guid)?;
             envelope(json!({"play_link":random_id()}))
         }

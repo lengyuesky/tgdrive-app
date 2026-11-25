@@ -167,10 +167,11 @@ async fn list(
             })?
             .ok_or_else(|| Error::api(error_code::INVALID_CURSOR, "选集锚点已不存在"))?;
     }
+    let video = "EXISTS(SELECT 1 FROM catalog c WHERE c.kind NOT IN ('TV','Season') AND c.representative=n.id AND (?2='' OR EXISTS(SELECT 1 FROM catalog_libraries cl WHERE cl.guid=c.guid AND cl.library_id=?2)))";
     let filter = if videos_only {
-        "EXISTS(SELECT 1 FROM entries e WHERE e.node_id=n.id)"
+        video.to_owned()
     } else {
-        "(n.kind='directory' OR EXISTS(SELECT 1 FROM entries e WHERE e.node_id=n.id))"
+        format!("(n.kind='directory' OR {video})")
     };
     let membership = "(?2='' OR EXISTS(SELECT 1 FROM node_libraries l WHERE l.node_id=n.id AND l.library_id=?2))";
     let (total, mut ids) = app.db.with(|db| {
@@ -226,6 +227,10 @@ pub async fn neighbor(
         .entry(id)?
         .ok_or_else(|| Error::api(error_code::NOT_FOUND, "选集视频不可用"))?;
     index::authorized(app, &entry.file()).await?;
+    if entry.kind == "Movie" && !entry.number.trim().is_empty() {
+        // 番号电影的分段和版本只能明确选择，不能通过相邻文件查询触发连播。
+        return Ok(None);
+    }
     let compare = if delta > 0 { ">" } else { "<" };
     let order = if delta > 0 { "ASC" } else { "DESC" };
     let next: Option<String> = app.db.with(|db| db.query_row(&format!("SELECT n.id FROM nodes n WHERE n.parent_id=?1 AND EXISTS(SELECT 1 FROM entries e WHERE e.node_id=n.id) AND (?2='' OR EXISTS(SELECT 1 FROM node_libraries l WHERE l.node_id=n.id AND l.library_id=?2)) AND (n.name_key,n.id){compare}(?3,?4) ORDER BY n.name_key {order},n.id {order} LIMIT 1"), params![node.parent_id,library_id,name_key(&node.name),node.id], |row| row.get(0)).optional().app())?;

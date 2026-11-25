@@ -37,10 +37,42 @@ pub struct Database {
     connection: Mutex<Option<Connection>>,
 }
 impl Database {
-    pub fn new(connection: Connection) -> Result<Self> {
+    pub fn new(mut connection: Connection) -> Result<Self> {
         connection
             .busy_timeout(std::time::Duration::from_secs(2))
             .app()?;
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .app()?;
+        if version > 2 {
+            return Err(Error::api(
+                error_code::STORAGE_UNAVAILABLE,
+                "影视数据库版本较新，不能降级打开",
+            ));
+        }
+        if version < 2 {
+            // 数据版本不兼容时直接重建全部应用数据，不迁移或保留旧索引、设置和观看状态。
+            let tables = {
+                let mut statement = connection
+                    .prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                    .app()?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .app()?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .app()?
+            };
+            connection
+                .pragma_update(None, "foreign_keys", false)
+                .app()?;
+            let transaction = connection.transaction().app()?;
+            for table in tables {
+                transaction
+                    .execute_batch(&format!("DROP TABLE \"{}\"", table.replace('"', "\"\"")))
+                    .app()?;
+            }
+            transaction.commit().app()?;
+        }
         connection.execute_batch(include_str!("schema.sql")).app()?;
         connection
             .execute(
@@ -245,7 +277,7 @@ impl Database {
             let tx = db.transaction().app()?;
             let revision: String = tx.query_row("SELECT revision FROM settings WHERE id=1", [], |r| r.get(0)).app()?;
             if revision != expected { return Err(Error::api(error_code::STORAGE_CONFLICT, "扫描期间影视设置发生改变")); }
-            tx.execute_batch("DELETE FROM node_libraries WHERE library_id IN (SELECT id FROM scan_libraries); DELETE FROM entry_libraries WHERE library_id IN (SELECT id FROM scan_libraries); INSERT INTO node_libraries SELECT library_id,id FROM scan_nodes; INSERT INTO entry_libraries SELECT library_id,node_id FROM scan_entries;").app()?;
+            tx.execute_batch("DELETE FROM node_libraries WHERE library_id IN (SELECT id FROM scan_libraries); DELETE FROM entry_libraries WHERE library_id IN (SELECT id FROM scan_libraries); INSERT INTO node_libraries SELECT library_id,id FROM scan_nodes; INSERT INTO entry_libraries SELECT library_id,node_id,json_extract(document,'$.guid') FROM scan_entries;").app()?;
             tx.execute_batch("INSERT INTO nodes SELECT id,parent_id,path,kind,extension,name_key,document FROM scan_nodes WHERE library_id=(SELECT min(n.library_id) FROM scan_nodes n WHERE n.id=scan_nodes.id) ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,path=excluded.path,kind=excluded.kind,extension=excluded.extension,name_key=excluded.name_key,document=excluded.document;").app()?;
             {
                 let mut read = tx.prepare("SELECT document FROM scan_entries WHERE library_id=(SELECT min(e.library_id) FROM scan_entries e WHERE e.node_id=scan_entries.node_id) ORDER BY node_id").app()?;
@@ -270,28 +302,29 @@ impl Database {
     }
     pub fn entry(&self, reference: &str) -> Result<Option<Entry>> {
         self.with(|db| {
-            let raw = db
+            let record = db
                 .query_row(
-                    "SELECT document FROM entries WHERE node_id=?1 OR guid=?1 OR media_guid=?1",
+                    "SELECT e.document,COALESCE(c.guid,(SELECT l.item_guid FROM entry_libraries l WHERE l.node_id=e.node_id ORDER BY l.library_id LIMIT 1)) FROM entries e LEFT JOIN catalog c ON c.guid=?1 AND c.kind NOT IN ('TV','Season') AND c.representative=e.node_id WHERE e.node_id=?1 OR e.media_guid=?1 OR c.guid=?1 LIMIT 1",
                     [reference],
-                    |r| r.get::<_, String>(0),
+                    |r| Ok((r.get::<_, String>(0)?,r.get::<_, String>(1)?)),
                 )
                 .optional()
                 .app()?;
-            let Some(raw) = raw else {
+            let Some((raw, item_guid)) = record else {
                 return Ok(None);
             };
             let mut entry: Entry = json(&raw)?;
+            entry.guid = item_guid;
             let mut actors = db.prepare("SELECT p.is_show,a.document FROM person_records p JOIN actor_records a ON a.key=p.document WHERE p.node_id=?1 ORDER BY p.is_show,p.position").app()?;
             let rows = actors.query_map([&entry.node_id],|row|Ok((row.get::<_,bool>(0)?,row.get::<_,String>(1)?))).app()?;
             for row in rows { let (is_show,raw) = row.app()?; let actor = json(&raw)?; if is_show { entry.show_actors.push(actor); } else { entry.actors.push(actor); } }
             let mut s = db
                 .prepare(
-                    "SELECT library_id FROM entry_libraries WHERE node_id=?1 ORDER BY library_id",
+                    "SELECT DISTINCT library_id FROM entry_libraries WHERE item_guid=?1 ORDER BY library_id",
                 )
                 .app()?;
             entry.libraries = s
-                .query_map([&entry.node_id], |r| r.get(0))
+                .query_map([&entry.guid], |r| r.get(0))
                 .app()?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .app()?;
@@ -306,6 +339,106 @@ impl Database {
             entry.cover = key.filter(|(fingerprint,_,kind)|fingerprint == &crate::covers::fingerprint_for(&entry,kind)).map(|(_,key,_)|key);
             Ok(Some(entry))
         })
+    }
+    pub fn item_guid(&self, reference: &str, library: &str) -> Result<Option<String>> {
+        self.with(|db| {
+            db.query_row(
+                "SELECT l.item_guid FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id WHERE (l.item_guid=?1 OR e.node_id=?1 OR e.media_guid=?1) AND (?2='' OR l.library_id=?2) ORDER BY l.library_id,l.item_guid LIMIT 1",
+                params![reference, library],
+                |row| row.get(0),
+            ).optional().app()
+        })
+    }
+    pub fn representative_entry(&self, reference: &str, library: &str) -> Result<Option<Entry>> {
+        match self.item_guid(reference, library)? {
+            Some(item) => self.entry(&item),
+            None => Ok(None),
+        }
+    }
+    pub fn default_entry(&self, reference: &str, library: &str) -> Result<Option<Entry>> {
+        let Some(item) = self.item_guid(reference, library)? else {
+            return Ok(None);
+        };
+        let recent: Option<String> = self.with(|db| {
+            db.query_row(
+                "SELECT e.node_id FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id JOIN progress p ON p.media_guid=e.media_guid JOIN nodes n ON n.id=e.node_id WHERE l.item_guid=?1 AND p.updated_at>0 ORDER BY p.updated_at DESC,n.name_key,json_extract(n.document,'$.name'),e.node_id LIMIT 1",
+                [&item], |row| row.get(0),
+            ).optional().app()
+        })?;
+        let mut entry = self.entry(recent.as_deref().unwrap_or(&item))?;
+        if let Some(entry) = &mut entry {
+            entry.guid = item.clone();
+            entry.libraries = self.item_libraries(&item)?;
+        }
+        Ok(entry)
+    }
+    fn item_libraries(&self, item: &str) -> Result<Vec<String>> {
+        self.with(|db| {
+            let mut statement = db.prepare("SELECT DISTINCT library_id FROM entry_libraries WHERE item_guid=?1 ORDER BY library_id").app()?;
+            statement.query_map([item], |row| row.get(0)).app()?.collect::<rusqlite::Result<Vec<_>>>().app()
+        })
+    }
+    pub fn versions(&self, reference: &str, library: &str) -> Result<Vec<Entry>> {
+        let Some(item) = self.item_guid(reference, library)? else {
+            return Ok(Vec::new());
+        };
+        let ids = self.with(|db| {
+            let mut statement = db.prepare("SELECT DISTINCT node_id FROM entry_libraries WHERE item_guid=?1 ORDER BY node_id").app()?;
+            statement.query_map([&item], |row| row.get::<_, String>(0)).app()?.collect::<rusqlite::Result<Vec<_>>>().app()
+        })?;
+        let libraries = self.item_libraries(&item)?;
+        let mut versions = Vec::with_capacity(ids.len());
+        for id in ids {
+            let mut entry = self
+                .entry(&id)?
+                .ok_or_else(|| Error::api(error_code::NOT_FOUND, "影视版本不存在"))?;
+            entry.guid = item.clone();
+            entry.libraries = libraries.clone();
+            versions.push(entry);
+        }
+        // 版本标签的数字采用自然排序；同标签再按原文件名和节点身份稳定破同值。
+        versions.sort_by_key(|entry| {
+            (
+                crate::page_files::name_key(&entry.version_name),
+                crate::page_files::name_key(&entry.filename),
+                entry.filename.clone(),
+                entry.node_id.clone(),
+            )
+        });
+        Ok(versions)
+    }
+    pub fn select_entry(&self, item: &str, media: &str) -> Result<Option<Entry>> {
+        if media.is_empty() {
+            return self.default_entry(item, "");
+        }
+        let Some(mut entry) = self.entry(media)?.filter(|entry| entry.media_guid == media) else {
+            return Ok(None);
+        };
+        if !item.is_empty() {
+            let belongs = self.with(|db| db.query_row("SELECT EXISTS(SELECT 1 FROM entry_libraries WHERE node_id=?1 AND item_guid=?2)", params![entry.node_id,item], |row| row.get::<_,bool>(0)).app())?;
+            if !belongs {
+                let group = self.catalog(item)?;
+                let tv_member = entry.kind == "Episode"
+                    && group.is_some_and(|group| {
+                        group.kind == "TV" && entry.show_guid == group.guid
+                            || group.kind == "Season" && entry.season_guid() == group.guid
+                    });
+                if tv_member {
+                    // 剧／季选择仍定位到原有单集身份，不把电视剧改成电影版本条目。
+                    return Ok(Some(entry));
+                }
+                return Err(Error::api(
+                    error_code::INVALID_REQUEST,
+                    "媒体文件不属于请求的影片条目",
+                ));
+            }
+            entry.guid = item.into();
+            entry.libraries = self.item_libraries(item)?;
+        }
+        Ok(Some(entry))
+    }
+    pub fn recent_at(&self, item: &str) -> Result<i64> {
+        self.with(|db| db.query_row("SELECT COALESCE(max(p.updated_at),0) FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id JOIN progress p ON p.media_guid=e.media_guid WHERE l.item_guid=?1",[item],|row|row.get(0)).app())
     }
     pub fn entries_for_group(&self, reference: &str) -> Result<Vec<Entry>> {
         let ids = self.with(|db| {
@@ -469,19 +602,17 @@ fn rebuild_catalog(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     tx.execute_batch("DELETE FROM catalog_libraries; DELETE FROM catalog;")
         .app()?;
     {
-        let mut s = tx
-            .prepare("SELECT document FROM entries ORDER BY node_id")
-            .app()?;
+        let mut s = tx.prepare("SELECT item_guid,document,library_id,added,modified FROM (SELECT l.item_guid,e.document,l.library_id,min(e.added_at) OVER(PARTITION BY l.item_guid) AS added,max(e.modified_at) OVER(PARTITION BY l.item_guid) AS modified,row_number() OVER(PARTITION BY l.item_guid ORDER BY n.name_key,json_extract(n.document,'$.name'),n.id,l.library_id) AS position FROM entry_libraries l JOIN entries e ON e.node_id=l.node_id JOIN nodes n ON n.id=e.node_id) WHERE position=1 ORDER BY item_guid").app()?;
         let mut rows = s.query([]).app()?;
         while let Some(row) = rows.next().app()? {
-            let e: Entry = json(&row.get::<_, String>(0).app()?)?;
-            let library:String=tx.query_row("SELECT library_id FROM entry_libraries WHERE node_id=?1 ORDER BY library_id LIMIT 1",[&e.node_id],|r|r.get(0)).app()?;
+            let e: Entry = json(&row.get::<_, String>(1).app()?)?;
+            let library: String = row.get(2).app()?;
             let item = CatalogItem {
-                guid: e.guid.clone(),
+                guid: row.get(0).app()?,
                 kind: e.kind.clone(),
                 title: e.title.clone(),
-                added_at: e.added_at,
-                modified_at: e.timestamp,
+                added_at: row.get(3).app()?,
+                modified_at: row.get(4).app()?,
                 parent_guid: if e.kind == "Episode" {
                     e.season_guid()
                 } else {
@@ -542,10 +673,10 @@ fn rebuild_catalog(tx: &rusqlite::Transaction<'_>) -> Result<()> {
             )?;
         }
     }
-    tx.execute_batch("INSERT INTO catalog_libraries SELECT e.guid,l.library_id FROM entries e JOIN entry_libraries l ON l.node_id=e.node_id UNION SELECT e.show_guid,l.library_id FROM entries e JOIN entry_libraries l ON l.node_id=e.node_id WHERE e.kind='Episode' UNION SELECT e.season_guid,l.library_id FROM entries e JOIN entry_libraries l ON l.node_id=e.node_id WHERE e.kind='Episode';").app()?;
+    tx.execute_batch("INSERT INTO catalog_libraries SELECT item_guid,library_id FROM entry_libraries UNION SELECT e.show_guid,l.library_id FROM entries e JOIN entry_libraries l ON l.node_id=e.node_id WHERE e.kind='Episode' UNION SELECT e.season_guid,l.library_id FROM entries e JOIN entry_libraries l ON l.node_id=e.node_id WHERE e.kind='Episode';").app()?;
     Ok(())
 }
 fn insert_catalog(tx: &rusqlite::Transaction<'_>, c: &CatalogItem) -> Result<()> {
-    tx.execute("INSERT INTO catalog(guid,kind,title,folded_title,added_at,modified_at,parent_guid,show_guid,season,episode,document) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![c.guid,c.kind,c.title,c.title.to_lowercase(),c.added_at,c.modified_at,c.parent_guid,c.show_guid,c.season,c.episode,serde_json::to_string(c)?]).app()?;
+    tx.execute("INSERT INTO catalog(guid,kind,title,folded_title,added_at,modified_at,parent_guid,show_guid,season,episode,representative,document) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![c.guid,c.kind,c.title,c.title.to_lowercase(),c.added_at,c.modified_at,c.parent_guid,c.show_guid,c.season,c.episode,c.representative,serde_json::to_string(c)?]).app()?;
     Ok(())
 }

@@ -33,6 +33,7 @@
     "test:pictures:browser": "npm run build --workspace @tgdrive/page-sdk && playwright test --config tests/standalone/readers.config.ts",
     "test:shorts": "npm run sdk:check && vitest run shorts",
     "test:media-scraper:browser": "node ./media-scraper/page/browser-runner.mjs",
+    "test:cinema:browser": "node ./cinema/page/browser-runner.mjs",
     "test:readers": "npm run sdk:check && vitest run reader"
   },
   "dependencies": {

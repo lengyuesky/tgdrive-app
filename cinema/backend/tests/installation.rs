@@ -1,4 +1,4 @@
-//! 更新真实应用数据库后重建安装游标，保留媒体库、连接账号与用户观看状态。
+//! 同一数据版本的普通升级保留业务状态；不兼容的数据版本直接重建全部应用数据。
 mod common;
 
 use common::{LIBRARY, memory, root, seed};
@@ -222,4 +222,50 @@ async fn fresh_checkpoint_failure_is_reported_without_an_unbounded_retry() {
         .expect("全新 checkpoint 失败后不得反复重试");
     assert_eq!(result.unwrap_err().code(), error_code::SCOPE_CHANGED);
     assert_eq!(requests.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn incompatible_data_version_is_rebuilt_without_old_settings_index_or_progress() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch("PRAGMA user_version=1; CREATE TABLE settings(id INTEGER PRIMARY KEY,username TEXT); INSERT INTO settings VALUES(1,'旧账号'); CREATE TABLE libraries(id TEXT PRIMARY KEY,name TEXT); INSERT INTO libraries VALUES('old','旧媒体库'); CREATE TABLE progress(media_guid TEXT PRIMARY KEY,document TEXT); INSERT INTO progress VALUES('old-media','旧进度'); CREATE TABLE old_index(guid TEXT); INSERT INTO old_index VALUES('old-item');").unwrap();
+    let database = tgdrive_cinema::database::Database::new(connection).unwrap();
+    assert!(database.settings().unwrap().username.is_empty());
+    assert!(!database.settings().unwrap().running);
+    assert!(database.libraries().unwrap().is_empty());
+    assert!(database.entry("old-item").unwrap().is_none());
+    assert!(
+        database
+            .get::<Progress>("progress", "old-media")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        database
+            .with(|db| Ok(db
+                .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+                .unwrap()))
+            .unwrap(),
+        2
+    );
+    assert!(
+        !database
+            .with(|db| Ok(db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='old_index')",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap()))
+            .unwrap()
+    );
+}
+
+#[test]
+fn newer_data_version_is_rejected_without_downgrading() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.pragma_update(None, "user_version", 3).unwrap();
+    let error = tgdrive_cinema::database::Database::new(connection)
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), error_code::STORAGE_UNAVAILABLE);
 }

@@ -15,12 +15,16 @@ CREATE INDEX IF NOT EXISTS nodes_parent_name ON nodes(parent_id,name_key,id);
 CREATE INDEX IF NOT EXISTS nodes_path ON nodes(path);
 CREATE TABLE IF NOT EXISTS node_libraries(library_id TEXT NOT NULL,node_id TEXT NOT NULL,PRIMARY KEY(library_id,node_id));
 CREATE INDEX IF NOT EXISTS node_membership ON node_libraries(node_id,library_id);
-CREATE TABLE IF NOT EXISTS entries(node_id TEXT PRIMARY KEY,guid TEXT NOT NULL UNIQUE,media_guid TEXT NOT NULL UNIQUE,kind TEXT NOT NULL,title TEXT NOT NULL,folded_title TEXT NOT NULL,added_at INTEGER NOT NULL,modified_at INTEGER NOT NULL,show_guid TEXT NOT NULL,season_guid TEXT NOT NULL,season INTEGER NOT NULL,episode INTEGER NOT NULL,document TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS entries(node_id TEXT PRIMARY KEY,guid TEXT NOT NULL,media_guid TEXT NOT NULL UNIQUE,kind TEXT NOT NULL,title TEXT NOT NULL,folded_title TEXT NOT NULL,added_at INTEGER NOT NULL,modified_at INTEGER NOT NULL,show_guid TEXT NOT NULL,season_guid TEXT NOT NULL,season INTEGER NOT NULL,episode INTEGER NOT NULL,document TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS entries_item ON entries(guid,node_id);
 CREATE INDEX IF NOT EXISTS entries_show ON entries(show_guid,season,episode,guid);
 CREATE INDEX IF NOT EXISTS entries_season ON entries(season_guid,episode,guid);
-CREATE TABLE IF NOT EXISTS entry_libraries(library_id TEXT NOT NULL,node_id TEXT NOT NULL,PRIMARY KEY(library_id,node_id));
+-- 同一文件可属于不同媒体库；番号归组身份属于这段库内关系，不属于文件本身。
+CREATE TABLE IF NOT EXISTS entry_libraries(library_id TEXT NOT NULL,node_id TEXT NOT NULL,item_guid TEXT NOT NULL,PRIMARY KEY(library_id,node_id));
 CREATE INDEX IF NOT EXISTS entry_membership ON entry_libraries(node_id,library_id);
-CREATE TABLE IF NOT EXISTS catalog(guid TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,folded_title TEXT NOT NULL,added_at INTEGER NOT NULL,modified_at INTEGER NOT NULL,parent_guid TEXT NOT NULL,show_guid TEXT NOT NULL,season INTEGER NOT NULL,episode INTEGER NOT NULL,document TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS item_files ON entry_libraries(item_guid,node_id);
+CREATE TABLE IF NOT EXISTS catalog(guid TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,folded_title TEXT NOT NULL,added_at INTEGER NOT NULL,modified_at INTEGER NOT NULL,parent_guid TEXT NOT NULL,show_guid TEXT NOT NULL,season INTEGER NOT NULL,episode INTEGER NOT NULL,representative TEXT NOT NULL,document TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS catalog_representative ON catalog(representative,guid);
 CREATE INDEX IF NOT EXISTS catalog_title ON catalog(title,guid);
 CREATE INDEX IF NOT EXISTS catalog_added_asc ON catalog(added_at,title,guid);
 CREATE INDEX IF NOT EXISTS catalog_added_desc ON catalog(added_at DESC,title,guid);
@@ -60,4 +64,4 @@ CREATE TRIGGER IF NOT EXISTS preferences_updated AFTER UPDATE ON preferences WHE
 CREATE TRIGGER IF NOT EXISTS cover_inserted AFTER INSERT ON cover_states BEGIN UPDATE settings SET data_revision=lower(hex(randomblob(16))) WHERE id=1; END;
 CREATE TRIGGER IF NOT EXISTS cover_updated AFTER UPDATE ON cover_states BEGIN UPDATE settings SET data_revision=lower(hex(randomblob(16))) WHERE id=1; END;
 CREATE TRIGGER IF NOT EXISTS cover_deleted AFTER DELETE ON cover_states BEGIN UPDATE settings SET data_revision=lower(hex(randomblob(16))) WHERE id=1; END;
-PRAGMA user_version=1;
+PRAGMA user_version=2;

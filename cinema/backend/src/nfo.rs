@@ -42,16 +42,20 @@ pub fn text(xml: &str, tag: &str) -> Option<String> {
 pub fn number(xml: &str) -> Option<String> {
     let doc = document(xml)?;
     let root = doc.root_element();
-    root.children()
-        .find(|n| n.has_tag_name("num"))
-        .or_else(|| {
-            root.children()
-                .find(|n| n.has_tag_name("uniqueid") && n.attribute("type") == Some("number"))
-        })
-        .and_then(|n| n.text())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
+    node_text(root, "num").or_else(|| {
+        root.children()
+            .filter(|n| n.has_tag_name("uniqueid") && n.attribute("type") == Some("number"))
+            .filter_map(|n| n.text().map(str::trim).filter(|s| !s.is_empty()))
+            .next()
+            .map(str::to_owned)
+    })
+}
+/// 只认标题末尾非空的方括号标签，不把片名中间的括号误当版本。
+pub fn version_label(title: &str) -> Option<(&str, &str)> {
+    let (title, label) = title.trim().strip_suffix(']')?.rsplit_once('[')?;
+    let title = title.trim_end();
+    let label = label.trim();
+    (!title.is_empty() && !label.is_empty()).then_some((title, label))
 }
 /// 原始顺序与角色属于作品关系；同名或来源身份的归并由人物索引处理。
 pub fn actors(xml: &str) -> Vec<Actor> {
@@ -169,6 +173,34 @@ mod tests {
         assert_eq!(rows[0].order, Some(2));
         assert_eq!(rows[0].biography, bio);
         assert_eq!(rows[1].order, None);
+    }
+    #[test]
+    fn number_uses_nonempty_num_or_number_uniqueid() {
+        assert_eq!(
+            number("<movie><num> AbC-123 </num></movie>").as_deref(),
+            Some("AbC-123")
+        );
+        assert_eq!(
+            number("<movie><num> </num><uniqueid type='number'> ABC-123 </uniqueid></movie>")
+                .as_deref(),
+            Some("ABC-123")
+        );
+        assert!(number("<movie><uniqueid type='imdb'>ABC-123</uniqueid></movie>").is_none());
+        assert!(number("<movie><num> </num></movie>").is_none());
+    }
+    #[test]
+    fn version_labels_only_use_the_final_nonempty_brackets() {
+        assert_eq!(
+            version_label("ABC-123 片名 [1080P 第2段]  "),
+            Some(("ABC-123 片名", "1080P 第2段"))
+        );
+        assert_eq!(
+            version_label("ABC-123 [片名] [ 4K 中字 ]"),
+            Some(("ABC-123 [片名]", "4K 中字"))
+        );
+        for title in ["ABC-123 [片名] 后记", "ABC-123 []", "[4K]", "ABC-123 片名"] {
+            assert!(version_label(title).is_none());
+        }
     }
     #[test]
     fn actor_paths_stay_in_metadata_directory() {

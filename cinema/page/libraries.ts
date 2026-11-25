@@ -104,7 +104,8 @@ export class LibraryAccess {
     const page = await this.cinema.records<T>(prefix, roots.length === 1 ? roots[0].id : '', cursor, limit, signal)
     signal.throwIfAborted()
     const entries = page.records.flatMap(record => {
-      const file = record.value.file, library = libraryForFile(file, roots)
+      const file = record.value.file, candidates = record.library_id ? roots.filter(root => root.id === record.library_id) : roots
+      const library = libraryForFile(file, candidates)
       if (!library || prefix === 'progress:' && !validProgress(record.value)) return []
       return [{ record, file, library }]
     })
