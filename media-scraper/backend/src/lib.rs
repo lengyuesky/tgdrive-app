@@ -10,6 +10,7 @@ pub mod nfo;
 mod page_api;
 pub mod planner;
 pub mod scan;
+pub mod variant;
 pub mod writes;
 
 pub use application::Application;

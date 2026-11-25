@@ -22,7 +22,7 @@ let browser, origin = ''
 const endpoint = name => ENDPOINTS.find(item => item.name === name).path
 const send = (response, value, status = 200) => { response.statusCode = status; response.setHeader('Content-Type', 'application/json'); response.end(value === null ? undefined : JSON.stringify(value)) }
 function populated(fake, run, current = false) {
-  const items = Array.from({ length: 124 }, (_, position) => fake.makeItem(run, position, current ? position < 10 ? 'done' : position < 15 ? 'skipped' : position < 17 ? 'failed' : position === 17 ? 'processing' : 'pending' : 'done', { files: [{ ...fake.video, id: String(position + 3), name: `ABC-${100 + position}.mp4`, path: `${fake.root.path}/ABC-${100 + position}.mp4` }], reason: position === 16 ? '合成海报来源返回 HTTP 503，已写入的 NFO 保留' : '', steps: [{ role: 'organize', state: position < 18 ? 'done' : 'pending' }, { role: 'nfo', state: position < 18 ? 'done' : 'pending' }, { role: 'poster', state: position < 17 ? 'done' : 'pending' }] }))
+  const items = Array.from({ length: 124 }, (_, position) => fake.makeItem(run, position, current ? position < 10 ? 'done' : position < 15 ? 'skipped' : position < 17 ? 'failed' : position === 17 ? 'processing' : 'pending' : 'done', { files: [{ ...fake.video, id: String(position + 3), name: `ABC-${100 + position}.mp4`, path: `${fake.root.path}/ABC-${100 + position}.mp4` }], reason: position === 16 ? '合成海报来源返回 HTTP 503，已写入的 NFO 保留' : '', variant: ['4K 中字', '第1段', '第2段'][position] ?? '', steps: [{ role: 'organize', state: position < 18 ? 'done' : 'pending' }, { role: 'nfo', state: position < 18 ? 'done' : 'pending' }, { role: 'poster', state: position < 17 ? 'done' : 'pending' }] }))
   fake.items.set(run.id, items)
   for (const item of items) fake.details.set(item.id, { item, steps: [{ id: `${item.id}-nfo`, role: 'nfo', state: 'done', name: '合成资料.nfo', message: '已经取得写入回执', file: null }], next_step: null, actors: Array.from({ length: 40 }, (_, index) => actor(index)), next_actor: null, attempts: Array.from({ length: 40 }, (_, index) => ({ sequence: index + 1, stage: 'detail', provider: `合成来源${index + 1}`, reason: '资料接口返回 HTTP 503；保留完整原因，未连接真实资料源。' })), next_attempt: null })
 }
@@ -157,6 +157,10 @@ try {
     const overflow = await frame.locator('body').evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
     assert.equal(overflow, false)
     await page.screenshot({ path: join(output, `${sample.id}-progress.png`) })
+    // 同番号的版本与分段标签显示在文件名下方；没有标签的行不留空行。
+    const variants = frame.locator('#results .file-variant')
+    assert.deepEqual(await variants.evaluateAll(rows => rows.slice(0, 4).map(row => [row.textContent, row.hidden])), [['ABC-123 · 4K 中字', false], ['ABC-123 · 第1段', false], ['ABC-123 · 第2段', false], ['', true]])
+    await variants.first().scrollIntoViewIfNeeded(); await page.screenshot({ path: join(output, `${sample.id}-results.png`) })
     await frame.locator('#results-next').scrollIntoViewIfNeeded(); await frame.locator('#results-next').click()
     await frame.locator('#results-page').filter({ hasText: '第 2 页' }).waitFor()
     assert.ok(await frame.locator('#results .result-row').count() <= 50)

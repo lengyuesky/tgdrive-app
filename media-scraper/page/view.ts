@@ -11,7 +11,7 @@ const input = (id: string) => $<HTMLInputElement>(id)
 const button = (id: string) => $<HTMLButtonElement>(id)
 const node = <K extends keyof HTMLElementTagNameMap>(tag: K, body = '', className = '') => { const element = document.createElement(tag); element.textContent = body; element.className = className; return element }
 const date = (value: number) => new Date(value).toLocaleString('zh-CN')
-interface ResultRow { row: HTMLElement; names: HTMLElement; path: HTMLElement; state: HTMLElement; steps: HTMLElement; reason: HTMLElement; actors: HTMLElement }
+interface ResultRow { row: HTMLElement; names: HTMLElement; variant: HTMLElement; path: HTMLElement; state: HTMLElement; steps: HTMLElement; reason: HTMLElement; actors: HTMLElement }
 interface HistoryRow { row: HTMLElement; status: HTMLElement; counts: HTMLElement; path: HTMLElement; time: HTMLElement }
 
 export class ScraperView {
@@ -85,12 +85,13 @@ export class ScraperView {
       let entry = this.resultRows.get(item.id)
       if (!entry) {
         const row = node('article', '', 'result-row'), copy = node('div'), actions = node('div', '', 'result-actions')
-        const names = node('p', '', 'file-name'), path = node('p', '', 'file-path'), steps = node('div', '', 'steps'), reason = node('p', '', 'result-reason'), actors = node('p', '', 'result-reason'), state = node('span', '', 'result-state'), open = node('button', '执行明细')
+        const names = node('p', '', 'file-name'), variant = node('p', '', 'file-variant'), path = node('p', '', 'file-path'), steps = node('div', '', 'steps'), reason = node('p', '', 'result-reason'), actors = node('p', '', 'result-reason'), state = node('span', '', 'result-state'), open = node('button', '执行明细')
         open.type = 'button'; open.onclick = () => { void this.page.openDetail(item.id).catch(error => this.page.fail(error)) }
-        copy.append(names, path, steps, reason, actors); actions.append(state, open); row.append(copy, actions)
-        entry = { row, names, path, state, steps, reason, actors }; this.resultRows.set(item.id, entry)
+        copy.append(names, variant, path, steps, reason, actors); actions.append(state, open); row.append(copy, actions)
+        entry = { row, names, variant, path, state, steps, reason, actors }; this.resultRows.set(item.id, entry)
       }
       text(entry.names, item.files.map(file => file.name).join('、')); text(entry.path, item.files[0]?.path ?? '')
+      text(entry.variant, item.variant ? `${item.number} · ${item.variant}` : ''); entry.variant.hidden = !item.variant
       text(entry.state, stateName(item.state)); entry.row.dataset.state = item.state
       text(entry.steps, item.steps.map(step => `${roleName(step.role)}：${stateName(step.state)}`).join(' · '))
       text(entry.reason, item.reason); text(entry.actors, item.actors_summary === item.reason ? '' : item.actors_summary)

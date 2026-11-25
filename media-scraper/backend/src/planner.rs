@@ -1,5 +1,5 @@
 //! 整理与配套归属在应用中计算；所有计划最终依靠节点/直属集合修订条件提交。
-use crate::{images, model::*, nfo};
+use crate::{images, model::*, nfo, variant};
 use futures_util::Future;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -311,6 +311,22 @@ pub fn private_related(name: &str, base: &str) -> bool {
         || ["jpg", "jpeg", "png", "webp"].contains(&ext.as_str())
             && (value == base || value == format!("{base}-poster"))
 }
+/// 同一处、同一番号的全部视频。文件名自带番号的按文件名判断；不带番号的只有位于番号目录里才算。
+fn same_work<'a>(
+    videos: impl Iterator<Item = &'a FileNode>,
+    number: &str,
+    in_number_directory: bool,
+) -> impl Iterator<Item = &'a FileNode> {
+    let expected = normalized_number(number);
+    videos.filter(move |v| {
+        let own = numbers(&v.name);
+        match own.as_slice() {
+            [] => in_number_directory,
+            [only] => normalized_number(only) == expected,
+            _ => false,
+        }
+    })
+}
 pub fn other_video_uses(name: &str, base: &str, videos: &[FileNode]) -> bool {
     videos.iter().any(|v| {
         !stem(&v.name).eq_ignore_ascii_case(base)
@@ -352,6 +368,9 @@ pub struct Plan {
     pub nfo: Artifact,
     pub poster: Artifact,
     pub needs_source: bool,
+    /// 本视频在同番号文件里的区分标签；整理前计算，移动后沿用，见 [`variant::labels`]。
+    #[serde(default)]
+    pub label: String,
 }
 impl Plan {
     pub fn organizing_request(&self, scope: &str) -> Result<Option<FileMutationRequest>> {
@@ -784,6 +803,28 @@ pub async fn build(
     }
     let needs_source =
         nfo.action != "keep" || poster.action != "keep" || !inside_number && !existing_number;
+    // 版本与分段要对照同片的全部视频才能确定。散放的同片视频逐个移入番号目录，
+    // 所以把原目录里还没移走的和目标目录里已有的合在一起看。
+    let mut peers: Vec<&FileNode> = same_work(all_videos.iter(), &number, inside_number).collect();
+    if !inside_number {
+        let known: HashSet<&str> = peers.iter().map(|v| v.id.as_str()).collect();
+        let arrived: Vec<&FileNode> = same_work(
+            target_files
+                .iter()
+                .filter(|f| f.kind == NodeKind::File && video_name(&f.name)),
+            &number,
+            true,
+        )
+        .filter(|v| !known.contains(v.id.as_str()))
+        .collect();
+        peers.extend(arrived);
+    }
+    let names: Vec<&str> = peers.iter().map(|v| v.name.as_str()).collect();
+    let label = peers
+        .iter()
+        .position(|v| v.id == first.id)
+        .map(|at| variant::labels(&names, &number).swap_remove(at))
+        .unwrap_or_default();
     let plan = Plan {
         source: source.directory,
         target,
@@ -795,6 +836,7 @@ pub async fn build(
         nfo,
         poster,
         needs_source,
+        label,
     };
     plan.organizing_request(scope)?;
     Ok(plan)

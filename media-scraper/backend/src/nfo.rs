@@ -76,7 +76,11 @@ impl Movie {
         )
     }
     pub fn nfo_with_actors(&self, actors: &[Actor]) -> Result<Vec<u8>> {
-        let title = display_title(&self.number, &self.title)?;
+        let mut title = display_title(&self.number, &self.title)?;
+        if !self.variant.is_empty() {
+            // 同番号的多个视频各有一条影片记录，标题末尾的标签让它们在列表里分得开。
+            write!(&mut title, " [{}]", self.variant).expect("字符串写入成功");
+        }
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<movie>\n");
         let mut tag = |key: &str, value: &str| -> Result<()> {
             if !value.is_empty() {

@@ -33,6 +33,8 @@ export interface Item {
   reason: string
   target_id: string | null
   actors_summary: string
+  /** 从文件名识别出的版本与分段，例如「4K 中字」「第2段」；单独一个普通视频为空。 */
+  variant: string
   steps: { role: string; state: string }[]
 }
 export interface Actor {

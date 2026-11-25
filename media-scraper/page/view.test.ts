@@ -118,6 +118,19 @@ describe('刮削页面界面行为', () => {
     expect(document.querySelectorAll('#detail-actors .detail-row')).toHaveLength(2)
     expect(document.getElementById('detail-actors')!.textContent).toContain('演员2'); expect(document.getElementById('detail-actors')!.textContent).not.toContain('演员0')
   })
+  it('结果行显示识别出的版本与分段，普通单个视频不多出一行', async () => {
+    const test = await setup(), run = test.fake.makeRun('completed')
+    test.fake.add(run, [
+      test.fake.makeItem(run, 0, 'done', { files: [{ ...test.fake.video, name: 'ABC-123-A.mp4' }], variant: '第1段' }),
+      test.fake.makeItem(run, 1, 'done', { files: [{ ...test.fake.video, name: 'ABC-123-4K-C.mp4' }], variant: '<b>4K 中字</b>' }),
+      test.fake.makeItem(run, 2, 'done'),
+    ]); await test.page.refresh(false)
+    await vi.waitFor(() => expect(document.querySelectorAll('#results .result-row')).toHaveLength(3))
+    const labels = [...document.querySelectorAll<HTMLElement>('#results .file-variant')]
+    expect(labels.map(label => label.textContent)).toEqual(['ABC-123 · 第1段', 'ABC-123 · <b>4K 中字</b>', ''])
+    expect(labels.map(label => label.hidden)).toEqual([false, false, true])
+    expect(document.querySelector('#results b')).toBeNull()
+  })
   it('文件名、演员姓名和错误原因仅作为文本，不生成 HTML、外站链接或图像请求', async () => {
     const test = await setup(), run = test.fake.makeRun('completed')
     test.fake.add(run, [test.fake.makeItem(run, 0, 'failed', { files: [{ ...test.fake.video, name: '<img src="https://external.invalid/">.mp4' }], reason: '<script>外站代码</script>' })]); await test.page.refresh(false)

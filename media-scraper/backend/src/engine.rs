@@ -15,6 +15,26 @@ use tgdrive_backend_sdk::{Error, HostClient, Result};
 use tgdrive_contract::{error_code, files::*};
 use tokio_util::sync::CancellationToken;
 
+/// 上一部影片从资料源取回的海报与演员资料。同番号的版本和分段紧挨着处理，
+/// 后面的视频直接沿用，不再向资料源重复查询；只留一部影片的量，换片即丢弃。
+#[derive(Default)]
+pub struct Shared {
+    work: String,
+    poster: Option<Vec<u8>>,
+    actors: Option<Vec<actors::Enriched>>,
+}
+impl Shared {
+    fn enter(&mut self, movie: &Movie) {
+        let work = format!("{}\0{}", movie.provider, movie.id);
+        if self.work != work {
+            *self = Self {
+                work,
+                ..Default::default()
+            };
+        }
+    }
+}
+
 pub fn fatal(error: &Error) -> bool {
     matches!(
         error.code(),
@@ -216,6 +236,7 @@ async fn prepare_actors(
     item: &Item,
     movie: &Movie,
     plan: &Plan,
+    shared: &mut Shared,
     cancel: &CancellationToken,
 ) -> Result<Vec<actors::Enriched>> {
     if let Some(old_run) = &run.retry_of
@@ -270,7 +291,24 @@ async fn prepare_actors(
         }
         return actors::complete_known_images(backend, rows, cancel).await;
     }
-    actors::enrich(backend, movie.actor_names(), cancel).await
+    let names = movie.actor_names();
+    if let Some(known) = shared.actors.as_ref().filter(|known| {
+        known
+            .iter()
+            .map(|row| &row.outcome.data.name)
+            .eq(names.iter())
+    }) {
+        return Ok(known.clone());
+    }
+    let enriched = actors::enrich(backend, names, cancel).await?;
+    // 查询失败或超时的结果不沿用，下一个视频还有机会补上。
+    if enriched
+        .iter()
+        .all(|row| !matches!(row.outcome.state.as_str(), "failed" | "timeout"))
+    {
+        shared.actors = Some(enriched.clone());
+    }
+    Ok(enriched)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -282,6 +320,7 @@ async fn process_item(
     run: &Run,
     item: &mut Item,
     cache: &mut DirectoryCache,
+    shared: &mut Shared,
     cancel: &CancellationToken,
 ) -> Result<()> {
     let options = db.run_options(&run.id)?;
@@ -295,7 +334,7 @@ async fn process_item(
         cancel,
     )
     .await?;
-    let movie = if plan.needs_source {
+    let mut movie = if plan.needs_source {
         let movie = select_movie(backend, db, item, plan.nfo.action != "keep", cancel).await?;
         plan = planner::build(
             host,
@@ -313,6 +352,13 @@ async fn process_item(
     };
     item.number = plan.number.clone();
     item.target_id = plan.target.as_ref().map(|n| n.id.clone());
+    // 标签在整理前确定：此时原目录里还看得到同片尚未移走的其他视频。
+    let label = plan.label.clone();
+    item.variant = label.clone();
+    if let Some(movie) = &mut movie {
+        movie.variant = label.clone();
+        shared.enter(movie);
+    }
     db.save_item(item)?;
     let writer = Writer {
         host,
@@ -353,6 +399,7 @@ async fn process_item(
             cancel,
         )
         .await?;
+        plan.label = label;
     }
     let nfo_step = if plan.nfo.action == "keep" {
         writer.keep(item, "nfo", &plan.nfo)?
@@ -361,7 +408,7 @@ async fn process_item(
             .as_ref()
             .ok_or(Error::Protocol("NFO 写入缺少影片资料"))?;
         let mut enriched =
-            prepare_actors(host, db, backend, run, item, movie, &plan, cancel).await?;
+            prepare_actors(host, db, backend, run, item, movie, &plan, shared, cancel).await?;
         for (i, row) in enriched.iter_mut().enumerate() {
             if row.image.is_some() {
                 row.outcome.data.thumb = nfo::actor_image_name(&plan.base, &item.id, i);
@@ -443,17 +490,25 @@ async fn process_item(
         let movie = movie
             .as_ref()
             .ok_or(Error::Protocol("海报写入缺少影片资料"))?;
-        let input = backend
-            .image(&movie.provider, &movie.id, cancel)
-            .await
-            .map_err(|e| e.app())?
-            .ok_or_else(|| Error::api(error_code::UPSTREAM_UNAVAILABLE, "海报来源返回 HTTP 404"))?;
-        let poster = images::prepare(input, false).await.map_err(|_| {
-            Error::api(
-                error_code::UPSTREAM_UNAVAILABLE,
-                "海报来源返回无法解码或超过像素预算的图片",
-            )
-        })?;
+        let poster = if let Some(poster) = &shared.poster {
+            poster.clone()
+        } else {
+            let input = backend
+                .image(&movie.provider, &movie.id, cancel)
+                .await
+                .map_err(|e| e.app())?
+                .ok_or_else(|| {
+                    Error::api(error_code::UPSTREAM_UNAVAILABLE, "海报来源返回 HTTP 404")
+                })?;
+            let poster = images::prepare(input, false).await.map_err(|_| {
+                Error::api(
+                    error_code::UPSTREAM_UNAVAILABLE,
+                    "海报来源返回无法解码或超过像素预算的图片",
+                )
+            })?;
+            shared.poster = Some(poster.clone());
+            poster
+        };
         let root = root_guard(host, run, cancel).await?;
         writer
             .upload(item, &root, &plan, cache, "poster", &plan.poster, poster)
@@ -478,6 +533,7 @@ pub async fn execute(
     let settings = db.settings()?;
     let backend = Backend::new(&settings.view.backend_url, settings.token)?;
     let mut cache = DirectoryCache::default();
+    let mut shared = Shared::default();
     let mut after = -1i64;
     loop {
         let items = db.items(&run.id, after, 100)?;
@@ -503,7 +559,15 @@ pub async fn execute(
                 ),
             )?;
             if let Err(error) = process_item(
-                host, db, process, &backend, run, &mut item, &mut cache, cancel,
+                host,
+                db,
+                process,
+                &backend,
+                run,
+                &mut item,
+                &mut cache,
+                &mut shared,
+                cancel,
             )
             .await
             {

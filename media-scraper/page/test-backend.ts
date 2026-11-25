@@ -33,7 +33,7 @@ export class FakeScraper {
     return { id, root: this.root, scope_revision: 'scope-1', state, message: `正在处理 ABC-123 · ${this.video.name}`, created_at: 1700000000000 + this.sequence, updated_at: 1700000000000 + this.sequence, scan_complete: true, counts: { total: 1, processed: 0, done: 0, skipped: 0, failed: 0 }, retry_of: null, ...values }
   }
   makeItem(run: Run, position = 0, state = 'processing', values: Partial<Item> = {}): Item {
-    return { id: `${run.id}-${position}`, run_id: run.id, position, files: [this.video], number: 'ABC-123', state, reason: '', target_id: null, actors_summary: '', steps: [], ...values }
+    return { id: `${run.id}-${position}`, run_id: run.id, position, files: [this.video], number: 'ABC-123', state, reason: '', target_id: null, actors_summary: '', variant: '', steps: [], ...values }
   }
   add(run: Run, items: Item[] = [this.makeItem(run)]): Run {
     this.runs.set(run.id, run); this.items.set(run.id, items); this.latestId = run.id; this.activeId = ['scanning', 'running', 'stopping'].includes(run.state) ? run.id : null

@@ -64,8 +64,30 @@ pub fn valid_number(value: &str) -> Result<String> {
     Ok(value)
 }
 
+/// 番号后面可以直接连写的版本或分段标记：ABC-123A、ABC-123C、ABC-123UC、ABC-123CD1。
+/// 其余紧跟的字母数字仍说明这不是一个完整的番号（例如 FHD-1080P）。
+fn attached_marker(rest: &str) -> bool {
+    static MARKER: OnceLock<Regex> = OnceLock::new();
+    MARKER
+        .get_or_init(|| {
+            Regex::new(r"^(?:CD[0-9]{1,2}|UC|CH|[A-HU])(?:[^A-Z0-9]|$)")
+                .expect("固定标记表达式有效")
+        })
+        .is_match(rest)
+}
+
 /// 与旧业务规则相同的五类编号；显式检查 ASCII 边界，不把画质和季集当成番号。
 pub fn numbers(name: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    number_matches(&stem(name).to_ascii_uppercase())
+        .into_iter()
+        .map(|found| found.0)
+        .filter(|number| seen.insert(number.clone()))
+        .collect()
+}
+
+/// 在已转成大写的基本名里找出全部番号及其起止位置；同一番号出现多次时逐次列出。
+pub fn number_matches(value: &str) -> Vec<(String, usize, usize)> {
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     let patterns = PATTERNS.get_or_init(|| {
         [
@@ -79,17 +101,16 @@ pub fn numbers(name: &str) -> Vec<String> {
         .map(|pattern| Regex::new(pattern).expect("固定番号表达式有效"))
         .collect()
     });
-    let value = stem(name).to_ascii_uppercase();
     let mut result = Vec::new();
-    let mut seen = HashSet::new();
     for (kind, pattern) in patterns.iter().enumerate() {
-        for matched in pattern.captures_iter(&value) {
+        for matched in pattern.captures_iter(value) {
             let whole = matched.get(0).expect("完整匹配存在");
             if whole.start() > 0 && value.as_bytes()[whole.start() - 1].is_ascii_alphanumeric()
                 || value
                     .as_bytes()
                     .get(whole.end())
                     .is_some_and(u8::is_ascii_alphanumeric)
+                    && !attached_marker(&value[whole.end()..])
             {
                 continue;
             }
@@ -108,11 +129,17 @@ pub fn numbers(name: &str) -> Vec<String> {
                 4 => format!("{first}_{}", &matched[2]),
                 _ => format!("{first}-{}", &matched[2]),
             };
-            if seen.insert(number.clone()) {
-                result.push(number);
-            }
+            result.push((number, whole.start(), whole.end()));
         }
     }
+    // 连写的标记可能被另一类表达式从中间读成编号（ABC-123CD12 里的 123CD-12）；
+    // 两处重叠时以靠前开始的为准。
+    let spans: Vec<(usize, usize)> = result.iter().map(|found| (found.1, found.2)).collect();
+    result.retain(|found| {
+        !spans
+            .iter()
+            .any(|(start, end)| *start < found.1 && found.1 < *end)
+    });
     result
 }
 pub fn infer_number(file: &FileNode) -> String {
@@ -176,6 +203,10 @@ pub struct Movie {
     pub genres: Option<Vec<String>>,
     pub score: Option<f64>,
     pub release_date: Option<String>,
+    /// 本次写入的视频在同番号文件里的区分标签（版本、分段），写在标题末尾。
+    /// 它描述文件而不是作品，不来自资料源，也不随采用的来源保存。
+    #[serde(skip)]
+    pub variant: String,
 }
 impl Movie {
     pub fn actor_names(&self) -> Vec<String> {
@@ -293,6 +324,9 @@ pub struct Item {
     pub target_id: Option<String>,
     pub actors: Vec<ActorOutcome>,
     pub actors_summary: String,
+    /// 从文件名识别出的版本与分段标签；旧记录没有这个字段。
+    #[serde(default)]
+    pub variant: String,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ActorOutcome {
@@ -358,6 +392,35 @@ mod tests {
             assert!(numbers(name).is_empty(), "{name}");
         }
         assert_eq!(numbers("ABC-123-DEF-456.mp4"), vec!["ABC-123", "DEF-456"]);
+    }
+    #[test]
+    fn markers_written_directly_after_the_number_do_not_hide_it() {
+        for name in [
+            "ABC-123A.mp4",
+            "abc-123b.mkv",
+            "ABC-123C.mp4",
+            "ABC123C.mp4",
+            "ABC-123UC.mp4",
+            "ABC-123ch.mp4",
+            "ABC-123CD1.mp4",
+            "ABC-123cd12 4K.mp4",
+        ] {
+            assert_eq!(numbers(name), vec!["ABC-123"], "{name}");
+        }
+        assert_eq!(numbers("FC2-PPV-1234567A.mp4"), vec!["FC2-PPV-1234567"]);
+        // 其余连写仍不是番号：清晰度、更长的单词、非标记字母。
+        for name in [
+            "FHD-1080P.mp4",
+            "UHD-2160P.mp4",
+            "ABC-123K.mp4",
+            "ABC-123AB.mp4",
+            "ABC-123CDX.mp4",
+            "ABC-123A1.mp4",
+        ] {
+            assert!(numbers(name).is_empty(), "{name}");
+        }
+        // 同一番号在文件名里出现两次仍是唯一番号。
+        assert_eq!(numbers("ABC-123 [ABC-123] 4K.mp4"), vec!["ABC-123"]);
     }
     #[test]
     fn exact_sources_keep_order_and_deduplicate() {

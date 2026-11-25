@@ -46,6 +46,7 @@ pub struct ItemSummary {
     pub reason: String,
     pub target_id: Option<String>,
     pub actors_summary: String,
+    pub variant: String,
     pub steps: Vec<StepBadge>,
 }
 #[derive(Serialize)]
@@ -142,6 +143,7 @@ impl Application {
             reason: item.reason,
             target_id: item.target_id,
             actors_summary: item.actors_summary,
+            variant: item.variant,
             steps: badges,
         })
     }

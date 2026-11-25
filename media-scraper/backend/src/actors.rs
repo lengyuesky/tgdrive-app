@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 pub const TOTAL_BUDGET: Duration = Duration::from_secs(40);
 const ALL_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+#[derive(Clone)]
 pub struct Enriched {
     pub outcome: ActorOutcome,
     pub image: Option<Vec<u8>>,

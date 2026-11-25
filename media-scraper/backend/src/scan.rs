@@ -126,6 +126,7 @@ impl Database {
                     target_id: None,
                     actors: Vec::new(),
                     actors_summary: String::new(),
+                    variant: String::new(),
                 };
                 self.save_item(&item)?;
                 position += 1;
